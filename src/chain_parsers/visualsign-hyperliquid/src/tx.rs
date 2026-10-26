@@ -15,6 +15,8 @@ pub enum HyperliquidTransaction {
     L1(Box<L1Request>),
     /// A user-signed action with a pinned domain and type.
     UserSigned(UserSignedRequest),
+    /// Complete native multisig action with a derived signing digest.
+    Multisig(Box<crate::multisig::MultisigRequest>),
 }
 
 impl Transaction for HyperliquidTransaction {
@@ -22,6 +24,7 @@ impl Transaction for HyperliquidTransaction {
         match input::parse(data).map_err(TransactionParseError::DecodeError)? {
             Request::L1(req) => Ok(Self::L1(req)),
             Request::UserSigned(req) => Ok(Self::UserSigned(req)),
+            Request::Multisig(req) => Ok(Self::Multisig(req)),
         }
     }
 
@@ -29,6 +32,7 @@ impl Transaction for HyperliquidTransaction {
         match self {
             Self::L1(_) => "Hyperliquid L1 Action".to_string(),
             Self::UserSigned(_) => "Hyperliquid User-Signed Action".to_string(),
+            Self::Multisig(_) => "Hyperliquid Native Multisig".to_string(),
         }
     }
 }
@@ -44,6 +48,9 @@ impl VisualSignConverter<HyperliquidTransaction> for HyperliquidVisualSignConver
         options: VisualSignOptions,
     ) -> Result<ConversionResult, VisualSignError> {
         let payload = match &transaction {
+            HyperliquidTransaction::Multisig(req) => {
+                render::multisig_payload(req, options.transaction_name)?
+            }
             HyperliquidTransaction::L1(req) => render::l1_payload(req, options.transaction_name)?,
             HyperliquidTransaction::UserSigned(req) => {
                 render::user_signed_payload(req, options.transaction_name)?

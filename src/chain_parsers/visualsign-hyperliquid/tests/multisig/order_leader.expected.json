@@ -1,0 +1,251 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Authorize Native Multisig Submission",
+      "Label": "Signing Role",
+      "TextV2": {
+        "Text": "Authorize Native Multisig Submission"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Requested Signing Identity",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Requested identity only; key ownership must be checked by the signing wallet",
+      "Label": "Identity Trust",
+      "TextV2": {
+        "Text": "Requested identity only; key ownership must be checked by the signing wallet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x0000000000000000000000000000000000000005"
+      },
+      "FallbackText": "0x0000000000000000000000000000000000000005",
+      "Label": "Multisig Account",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Caller-supplied membership; not proof of current network state. The signing wallet must authenticate its pinned configuration",
+      "Label": "Configuration Trust",
+      "TextV2": {
+        "Text": "Caller-supplied membership; not proof of current network state. The signing wallet must authenticate its pinned configuration"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2 of 2",
+      "Label": "Required Approvals",
+      "TextV2": {
+        "Text": "2 of 2"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      "FallbackText": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf",
+      "Label": "Configured Member 1",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Configured Member 2",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Direct Member Leader",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported",
+      "Label": "HyperEVM",
+      "TextV2": {
+        "Text": "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Place Order",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Place Order"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "na",
+      "Label": "Grouping",
+      "TextV2": {
+        "Text": "na"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Buy 0.2 of #4 at 1100, Limit (Gtc)",
+      "Label": "Order 1",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "#4",
+              "Label": "Asset",
+              "TextV2": {
+                "Text": "#4"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Buy",
+              "Label": "Side",
+              "TextV2": {
+                "Text": "Buy"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "1100",
+              "Label": "Limit Price",
+              "TextV2": {
+                "Text": "1100"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0.2",
+              "Label": "Size",
+              "TextV2": {
+                "Text": "0.2"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Limit (Gtc)",
+              "Label": "Order Type",
+              "TextV2": {
+                "Text": "Limit (Gtc)"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "No",
+              "Label": "Reduce Only",
+              "TextV2": {
+                "Text": "No"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "Buy 0.2 of #4 at 1100, Limit (Gtc)"
+        },
+        "Title": {
+          "Text": "Order 1"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "Multisig account",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "Multisig account"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2023-11-14 22:13:20 UTC (1700000000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2023-11-14 22:13:20 UTC (1700000000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x8e6b72ef37e8919b6d33378cc2b431df654dab1fc3a3551915a10d5ed8577ba1",
+      "Label": "Native Signing Digest",
+      "TextV2": {
+        "Text": "0x8e6b72ef37e8919b6d33378cc2b431df654dab1fc3a3551915a10d5ed8577ba1"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields",
+      "Label": "Authorization Scope",
+      "TextV2": {
+        "Text": "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2",
+      "Label": "Verified Member Approvals",
+      "TextV2": {
+        "Text": "2"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Recovered Member 1",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      "FallbackText": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf",
+      "Label": "Recovered Member 2",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "This authorizes submission; approval is not evidence of execution or a fill",
+      "Label": "Submission",
+      "TextV2": {
+        "Text": "This authorizes submission; approval is not evidence of execution or a fill"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidNativeMultisig",
+  "Title": "Hyperliquid: Authorize Native Multisig Submission",
+  "Version": "0"
+}

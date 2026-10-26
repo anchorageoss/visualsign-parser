@@ -1,0 +1,479 @@
+{
+  "sdkRevision": "2fdb18f9517675ea03695a0962bd19eece9c83f0",
+  "provenance": "Official hyperliquid-python-sdk signing functions; public test keys 1, 2, 3; no network calls.",
+  "vectors": [
+    {
+      "name": "order_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xc8200fc24e1517b13f0233c4655c01a35ac4206e4996144528c5711d154f7bae\"}",
+      "digest": "0xc8200fc24e1517b13f0233c4655c01a35ac4206e4996144528c5711d154f7bae",
+      "signature": {
+        "r": "0xc95672f0e63a5a350de902e45439c50eeed658ab4f027bcaba3baf069da1f829",
+        "s": "0x72467423d435337e423646ab49ed72416cc354f937da50280ae6b54e9fdb39a7",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "order_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xc95672f0e63a5a350de902e45439c50eeed658ab4f027bcaba3baf069da1f829\",\"s\":\"0x72467423d435337e423646ab49ed72416cc354f937da50280ae6b54e9fdb39a7\",\"v\":27},{\"r\":\"0xde3f6d3a4e57768d59402378276eeb86f7efa712fe2e086472f8a3f5a2739d5d\",\"s\":\"0x6e37d6803065e5ddfd454448074d01484f40c16a53e3070b9a5e4b89e95a833a\",\"v\":27}],\"signingDigest\":\"0x8e6b72ef37e8919b6d33378cc2b431df654dab1fc3a3551915a10d5ed8577ba1\"}",
+      "digest": "0x8e6b72ef37e8919b6d33378cc2b431df654dab1fc3a3551915a10d5ed8577ba1",
+      "signature": {
+        "r": "0x8fe43d84a85589c9cd1125b8f5e003813d15706359f26cec999da408566007aa",
+        "s": "0x106b6bb087dedac7325688a708d6d2c92dcfa460ba1a9792df5ab31cf6d8e674",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xc95672f0e63a5a350de902e45439c50eeed658ab4f027bcaba3baf069da1f829\",\"s\":\"0x72467423d435337e423646ab49ed72416cc354f937da50280ae6b54e9fdb39a7\",\"v\":27},{\"r\":\"0xde3f6d3a4e57768d59402378276eeb86f7efa712fe2e086472f8a3f5a2739d5d\",\"s\":\"0x6e37d6803065e5ddfd454448074d01484f40c16a53e3070b9a5e4b89e95a833a\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"}}}"
+    },
+    {
+      "name": "batchModify_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"batchModify\",\"modifies\":[{\"oid\":42,\"order\":{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}}]},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xf9be73130ee16f84b0897286922e17d6905c804330abd3c4eed469e34061a0bd\"}",
+      "digest": "0xf9be73130ee16f84b0897286922e17d6905c804330abd3c4eed469e34061a0bd",
+      "signature": {
+        "r": "0x6f0d44a5a4b23eee577fc320759f3c32ea31e4acd2a1b7c0b895e4fd122ceffc",
+        "s": "0x747114a7149ec4baba8793037e578f27144afd5e7cef1d27e924929442d967f6",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "batchModify_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"batchModify\",\"modifies\":[{\"oid\":42,\"order\":{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}}]},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x6f0d44a5a4b23eee577fc320759f3c32ea31e4acd2a1b7c0b895e4fd122ceffc\",\"s\":\"0x747114a7149ec4baba8793037e578f27144afd5e7cef1d27e924929442d967f6\",\"v\":28},{\"r\":\"0xf83a6d88a5a7ba4a86d11311e9d1173dadf5332c16e4da785cc8305e91c5fd38\",\"s\":\"0xc0e23380a382f9c2e9003a95e0fa9b96b68e9ca80d5d5c8c7ea3715db8ae2a2\",\"v\":28}],\"signingDigest\":\"0xa4a589feace516a1953aabd74a87f47231aa8f30e56fd0837e8d7b76028453a0\"}",
+      "digest": "0xa4a589feace516a1953aabd74a87f47231aa8f30e56fd0837e8d7b76028453a0",
+      "signature": {
+        "r": "0x9b36e97c6d10b0b8c4251f18f5202c4cd3cae7a158fe46e7c29b426732be69dd",
+        "s": "0xd3a3c86aa46a577d8f64e52e70fda9179625c38af0d35d51c46f01bff75f672",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x6f0d44a5a4b23eee577fc320759f3c32ea31e4acd2a1b7c0b895e4fd122ceffc\",\"s\":\"0x747114a7149ec4baba8793037e578f27144afd5e7cef1d27e924929442d967f6\",\"v\":28},{\"r\":\"0xf83a6d88a5a7ba4a86d11311e9d1173dadf5332c16e4da785cc8305e91c5fd38\",\"s\":\"0xc0e23380a382f9c2e9003a95e0fa9b96b68e9ca80d5d5c8c7ea3715db8ae2a2\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"batchModify\",\"modifies\":[{\"oid\":42,\"order\":{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}}]}}}"
+    },
+    {
+      "name": "cancel_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"cancel\",\"cancels\":[{\"a\":4,\"o\":42}]},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x785110846a217bdca5832c88ba12c7f2ce3ad861cc829fe9c144cd49e0362cf1\"}",
+      "digest": "0x785110846a217bdca5832c88ba12c7f2ce3ad861cc829fe9c144cd49e0362cf1",
+      "signature": {
+        "r": "0xddc4ec6f64dabd191e1352097cb4aef78372a4d26ebf5fc1ffc9b423992165e9",
+        "s": "0x3a9bd8f338c1f77e98e29afa7e07d668a29b321eecd6bdc44740ea8c30521cc3",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "cancel_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"cancel\",\"cancels\":[{\"a\":4,\"o\":42}]},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xddc4ec6f64dabd191e1352097cb4aef78372a4d26ebf5fc1ffc9b423992165e9\",\"s\":\"0x3a9bd8f338c1f77e98e29afa7e07d668a29b321eecd6bdc44740ea8c30521cc3\",\"v\":27},{\"r\":\"0xbec006a63123dd2a3c221c5147bde3a6529feb74e4432f2f7abb9c6a43d1533e\",\"s\":\"0x42c7bf86bc74ff03a4543c8d2a28abae57883cd7f7133618ba3fb90aafab5f39\",\"v\":28}],\"signingDigest\":\"0x396637881d1f845c01344510906751e65136c95399655939887983274ed65a12\"}",
+      "digest": "0x396637881d1f845c01344510906751e65136c95399655939887983274ed65a12",
+      "signature": {
+        "r": "0x43463a1adf7d26a01e064e5d36c76329deb655de34b8e9cc2b276b0371be70d3",
+        "s": "0x3746faa73a0c5c9a0e738988a17470079138b398ed2e9d45dfc2ca84f86b06d4",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xddc4ec6f64dabd191e1352097cb4aef78372a4d26ebf5fc1ffc9b423992165e9\",\"s\":\"0x3a9bd8f338c1f77e98e29afa7e07d668a29b321eecd6bdc44740ea8c30521cc3\",\"v\":27},{\"r\":\"0xbec006a63123dd2a3c221c5147bde3a6529feb74e4432f2f7abb9c6a43d1533e\",\"s\":\"0x42c7bf86bc74ff03a4543c8d2a28abae57883cd7f7133618ba3fb90aafab5f39\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"cancel\",\"cancels\":[{\"a\":4,\"o\":42}]}}}"
+    },
+    {
+      "name": "cancelByCloid_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[{\"asset\":4,\"cloid\":\"0x00000000000000000000000000000001\"}]},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x73319f9a860ab22cf8890318c83fd818897e80f7495800f77d5754f5b655e6c5\"}",
+      "digest": "0x73319f9a860ab22cf8890318c83fd818897e80f7495800f77d5754f5b655e6c5",
+      "signature": {
+        "r": "0xbded7b165cd77c789313f9380d7bbc05274de32a21a308400ecd4c63f30f378d",
+        "s": "0x6752553cc84e5969fbea5d6d15ad76fac0b8b614c45ddc5f04cc2616cabefedf",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "cancelByCloid_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[{\"asset\":4,\"cloid\":\"0x00000000000000000000000000000001\"}]},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xbded7b165cd77c789313f9380d7bbc05274de32a21a308400ecd4c63f30f378d\",\"s\":\"0x6752553cc84e5969fbea5d6d15ad76fac0b8b614c45ddc5f04cc2616cabefedf\",\"v\":27},{\"r\":\"0x9c5125388628874491466d6f25de9118d444f8a718bf467d54a394c80f0551cf\",\"s\":\"0x36d17b3fd11655327482354510b982f7e99fc29b2496d196e5342b0601f04501\",\"v\":28}],\"signingDigest\":\"0x93a43d516c8245d2226ce2f1a6b5f9faafb8ef14bb8b5e9e1441728b095f27ac\"}",
+      "digest": "0x93a43d516c8245d2226ce2f1a6b5f9faafb8ef14bb8b5e9e1441728b095f27ac",
+      "signature": {
+        "r": "0xd9e2bef4788b4d18670cd674b94fb69e67e9fd6d2e30670e9edc71d76cb13a16",
+        "s": "0x552c2f51ebe869559ab79b7cd9cf2733f4110bb37e3e64722ed947f1a1ed5666",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xbded7b165cd77c789313f9380d7bbc05274de32a21a308400ecd4c63f30f378d\",\"s\":\"0x6752553cc84e5969fbea5d6d15ad76fac0b8b614c45ddc5f04cc2616cabefedf\",\"v\":27},{\"r\":\"0x9c5125388628874491466d6f25de9118d444f8a718bf467d54a394c80f0551cf\",\"s\":\"0x36d17b3fd11655327482354510b982f7e99fc29b2496d196e5342b0601f04501\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[{\"asset\":4,\"cloid\":\"0x00000000000000000000000000000001\"}]}}}"
+    },
+    {
+      "name": "scheduleCancel_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"scheduleCancel\",\"time\":1700000010000},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xab3afc6ac7c5bb79c29bbc56c5b60b056e7d53d446dbefb3a091faa8578d0be2\"}",
+      "digest": "0xab3afc6ac7c5bb79c29bbc56c5b60b056e7d53d446dbefb3a091faa8578d0be2",
+      "signature": {
+        "r": "0x6a055e9a07cac80ea3e59f7861ad6f5dffcf5889d4c5ed78dc0e32b2380d4a98",
+        "s": "0x20ee729c0d54da714f56a3da9a5bab6847b0b35474bab3faca366f999ee3c7a6",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "scheduleCancel_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"scheduleCancel\",\"time\":1700000010000},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x6a055e9a07cac80ea3e59f7861ad6f5dffcf5889d4c5ed78dc0e32b2380d4a98\",\"s\":\"0x20ee729c0d54da714f56a3da9a5bab6847b0b35474bab3faca366f999ee3c7a6\",\"v\":27},{\"r\":\"0x32fc63abae1b972df8ff239abe53457bb0b99540c2f18a32b9e25d4b0081dc22\",\"s\":\"0x70af796710a4637681116e88e90dfb663c3ad81f9817489c161a661132e2aa90\",\"v\":27}],\"signingDigest\":\"0x52445bedbbcd53975536fe64c25bcbbe4c0febb97f3eba77035c803b3ac369e0\"}",
+      "digest": "0x52445bedbbcd53975536fe64c25bcbbe4c0febb97f3eba77035c803b3ac369e0",
+      "signature": {
+        "r": "0xaa6e78993fbdce709c2d42927bb889c73defa8cc3c31a3364136d7e77bb537c1",
+        "s": "0x2719ba9fb9a662488b432ff8edc2f539354a7de14c4c5f84048c209edad7ea77",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x6a055e9a07cac80ea3e59f7861ad6f5dffcf5889d4c5ed78dc0e32b2380d4a98\",\"s\":\"0x20ee729c0d54da714f56a3da9a5bab6847b0b35474bab3faca366f999ee3c7a6\",\"v\":27},{\"r\":\"0x32fc63abae1b972df8ff239abe53457bb0b99540c2f18a32b9e25d4b0081dc22\",\"s\":\"0x70af796710a4637681116e88e90dfb663c3ad81f9817489c161a661132e2aa90\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"scheduleCancel\",\"time\":1700000010000}}}"
+    },
+    {
+      "name": "updateLeverage_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"updateLeverage\",\"asset\":4,\"isCross\":false,\"leverage\":3},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x870ef2d46ed201bd48d7010ed6202448e951bd4ab23477a4889fa5436435860a\"}",
+      "digest": "0x870ef2d46ed201bd48d7010ed6202448e951bd4ab23477a4889fa5436435860a",
+      "signature": {
+        "r": "0x60653bbd4a6ea0d2a2df166b8834aa271840866a8de5b263d290e1a342956039",
+        "s": "0x720f88c042d034714a185041d5dbd94b83bfe4656edd0981ebb413585b643788",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "updateLeverage_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"updateLeverage\",\"asset\":4,\"isCross\":false,\"leverage\":3},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x60653bbd4a6ea0d2a2df166b8834aa271840866a8de5b263d290e1a342956039\",\"s\":\"0x720f88c042d034714a185041d5dbd94b83bfe4656edd0981ebb413585b643788\",\"v\":27},{\"r\":\"0x440fa2bdcee15f8ec2914f25f7c77b9584c7515ecfc20ad05988f682eeed0e4\",\"s\":\"0x3351ffe502b3c93c1063afe5dac71af042d86353eaab1991e1c88734d49f2f2a\",\"v\":27}],\"signingDigest\":\"0x97665d042ba4c1cbd1b6c9e637ecbfc75346c333eb2fe82cd778f532a1b8307d\"}",
+      "digest": "0x97665d042ba4c1cbd1b6c9e637ecbfc75346c333eb2fe82cd778f532a1b8307d",
+      "signature": {
+        "r": "0x363c74b0e2d1e3db3064ecf9858897aa7e631136655cadcc0799b8a2d0698d18",
+        "s": "0x6582e1f3c3bcf13378041128b6553a13561ea1cd971970e0b3832a529b02cd78",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x60653bbd4a6ea0d2a2df166b8834aa271840866a8de5b263d290e1a342956039\",\"s\":\"0x720f88c042d034714a185041d5dbd94b83bfe4656edd0981ebb413585b643788\",\"v\":27},{\"r\":\"0x440fa2bdcee15f8ec2914f25f7c77b9584c7515ecfc20ad05988f682eeed0e4\",\"s\":\"0x3351ffe502b3c93c1063afe5dac71af042d86353eaab1991e1c88734d49f2f2a\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"updateLeverage\",\"asset\":4,\"isCross\":false,\"leverage\":3}}}"
+    },
+    {
+      "name": "updateIsolatedMargin_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"updateIsolatedMargin\",\"asset\":4,\"isBuy\":true,\"ntli\":-123456},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xabec1b7838da706d3ac387e3d4c7e94ba78ab978db12737157210cd37e75157b\"}",
+      "digest": "0xabec1b7838da706d3ac387e3d4c7e94ba78ab978db12737157210cd37e75157b",
+      "signature": {
+        "r": "0x88f09251421c947e4151a677f2a732cee0d7637133181fea74c11e6c4a230ae6",
+        "s": "0x4e4720ab4f8c29acd48e28055d01b5fddc9f345aefad239103054732f248210a",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "updateIsolatedMargin_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"updateIsolatedMargin\",\"asset\":4,\"isBuy\":true,\"ntli\":-123456},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x88f09251421c947e4151a677f2a732cee0d7637133181fea74c11e6c4a230ae6\",\"s\":\"0x4e4720ab4f8c29acd48e28055d01b5fddc9f345aefad239103054732f248210a\",\"v\":28},{\"r\":\"0xd160ba05505486b5b109fff26422d4cfb69095be408c8119faaa123f0647ec37\",\"s\":\"0x7c334324b8def46ac924629952d7089b5e6a35c9425ce92f4ce6c8b2d3d58b7d\",\"v\":27}],\"signingDigest\":\"0xe1ae19c396f0910b6a20c259330e1514a9920a6ba023dc3e43fba3f63857a729\"}",
+      "digest": "0xe1ae19c396f0910b6a20c259330e1514a9920a6ba023dc3e43fba3f63857a729",
+      "signature": {
+        "r": "0x4876bbb744b820f7e8bf88e5756327349d15fb715fd83d3811afa986508cff66",
+        "s": "0x6c19d5292b9559a071d1aeca571d21a9549929d483060bb35ddd53c585a2ec67",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x88f09251421c947e4151a677f2a732cee0d7637133181fea74c11e6c4a230ae6\",\"s\":\"0x4e4720ab4f8c29acd48e28055d01b5fddc9f345aefad239103054732f248210a\",\"v\":28},{\"r\":\"0xd160ba05505486b5b109fff26422d4cfb69095be408c8119faaa123f0647ec37\",\"s\":\"0x7c334324b8def46ac924629952d7089b5e6a35c9425ce92f4ce6c8b2d3d58b7d\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"updateIsolatedMargin\",\"asset\":4,\"isBuy\":true,\"ntli\":-123456}}}"
+    },
+    {
+      "name": "usdSend_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x06a7a369f457d8c3fb91c202c636a41cf393a75f1fad6be3f55be6cb9a78f2e8\"}",
+      "digest": "0x06a7a369f457d8c3fb91c202c636a41cf393a75f1fad6be3f55be6cb9a78f2e8",
+      "signature": {
+        "r": "0x4a87fe799f8a2e0c1926a51674c3e5dec8593651269f9c4645e8de97b8d410ff",
+        "s": "0x5519062c9f65e676bc10922be07eef730d78f449067915d7ff53dc3871e36dd0",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "usdSend_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x4a87fe799f8a2e0c1926a51674c3e5dec8593651269f9c4645e8de97b8d410ff\",\"s\":\"0x5519062c9f65e676bc10922be07eef730d78f449067915d7ff53dc3871e36dd0\",\"v\":27},{\"r\":\"0xdf9500adeb6bf8b9716c089152f9f9a769dea66e23905aae95f1c591d5c1c2ce\",\"s\":\"0x59f175ec30e2df5c3a0550dafa07be8bd2a23f72b4f9caadc8cec2b7da4396a8\",\"v\":28}],\"signingDigest\":\"0x063f16c6477161e1532987972af6676d2b0373541b26a712d9c9752b911a1395\"}",
+      "digest": "0x063f16c6477161e1532987972af6676d2b0373541b26a712d9c9752b911a1395",
+      "signature": {
+        "r": "0xe82dbdf9fd693d03643b919a9d1b5d4b74100fcefcdce732c4aca5fd75a379bc",
+        "s": "0x1bd8be1e49e0b247944ce29c4376efb4d6cafce16ad00db1b64c239d8230b6e6",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x4a87fe799f8a2e0c1926a51674c3e5dec8593651269f9c4645e8de97b8d410ff\",\"s\":\"0x5519062c9f65e676bc10922be07eef730d78f449067915d7ff53dc3871e36dd0\",\"v\":27},{\"r\":\"0xdf9500adeb6bf8b9716c089152f9f9a769dea66e23905aae95f1c591d5c1c2ce\",\"s\":\"0x59f175ec30e2df5c3a0550dafa07be8bd2a23f72b4f9caadc8cec2b7da4396a8\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "spotSend_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"token\":\"USDC:0x6d1e7cde53ba9467b783cb7c530ce054\",\"time\":1700000000000,\"type\":\"spotSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x226ceef3d601d285d14d18607339d9dd6227ad44a86d1973c5ef076e38d05ea2\"}",
+      "digest": "0x226ceef3d601d285d14d18607339d9dd6227ad44a86d1973c5ef076e38d05ea2",
+      "signature": {
+        "r": "0x511869a6fe510326b5d26b64a5432a49d3af31d524bb91862a7fa0ef066d0407",
+        "s": "0x32e89c5f2cd04b5ef46c0c0511f4d6c1590742a01b56e17feb1f218b4007d0c3",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "spotSend_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"token\":\"USDC:0x6d1e7cde53ba9467b783cb7c530ce054\",\"time\":1700000000000,\"type\":\"spotSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x511869a6fe510326b5d26b64a5432a49d3af31d524bb91862a7fa0ef066d0407\",\"s\":\"0x32e89c5f2cd04b5ef46c0c0511f4d6c1590742a01b56e17feb1f218b4007d0c3\",\"v\":28},{\"r\":\"0xeb6b5fc7bef1f37ed7c0c232fe660d8b67aead039affa29a101c48b60000287f\",\"s\":\"0x5660f4d5c76066d9538c03770c2cc4d570590690856ef58522b84c64675ea043\",\"v\":28}],\"signingDigest\":\"0x58c351c8b496be1025e2f546e90ff99e05def5dc9de309e649654e181b5d0071\"}",
+      "digest": "0x58c351c8b496be1025e2f546e90ff99e05def5dc9de309e649654e181b5d0071",
+      "signature": {
+        "r": "0x9c6683876d5eb6d7a9c76338c02b8d67724ed82b02c79680ff06f3adbb078838",
+        "s": "0x480ba151f0e7ed351342875ab53eaf91d0640570e087d787571a87190dd81f55",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x511869a6fe510326b5d26b64a5432a49d3af31d524bb91862a7fa0ef066d0407\",\"s\":\"0x32e89c5f2cd04b5ef46c0c0511f4d6c1590742a01b56e17feb1f218b4007d0c3\",\"v\":28},{\"r\":\"0xeb6b5fc7bef1f37ed7c0c232fe660d8b67aead039affa29a101c48b60000287f\",\"s\":\"0x5660f4d5c76066d9538c03770c2cc4d570590690856ef58522b84c64675ea043\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"token\":\"USDC:0x6d1e7cde53ba9467b783cb7c530ce054\",\"time\":1700000000000,\"type\":\"spotSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "sendAsset_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"sendAsset\",\"destination\":\"0x0000000000000000000000000000000000000011\",\"sourceDex\":\"\",\"destinationDex\":\"spot\",\"token\":\"USDC\",\"amount\":\"12.5\",\"fromSubAccount\":\"\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xc2dbafd3c0e5ab766b106a0d783319759ebeb346c1884066e4330465c87529f7\"}",
+      "digest": "0xc2dbafd3c0e5ab766b106a0d783319759ebeb346c1884066e4330465c87529f7",
+      "signature": {
+        "r": "0x30ee4d7fc880ff037fe464df3ac1a2f23e71b70304bf4dc5cfeb34934e7947b6",
+        "s": "0x368a27bc2465f80d25e14c97badecd8082c039b560ded8b72e52cc84afff3ffa",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "sendAsset_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"sendAsset\",\"destination\":\"0x0000000000000000000000000000000000000011\",\"sourceDex\":\"\",\"destinationDex\":\"spot\",\"token\":\"USDC\",\"amount\":\"12.5\",\"fromSubAccount\":\"\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x30ee4d7fc880ff037fe464df3ac1a2f23e71b70304bf4dc5cfeb34934e7947b6\",\"s\":\"0x368a27bc2465f80d25e14c97badecd8082c039b560ded8b72e52cc84afff3ffa\",\"v\":28},{\"r\":\"0x55f7f6623d05893cad8e97feba5f0dbd139d9b6ba73c2318a5e6f1845b6a6928\",\"s\":\"0x3acc35e8226825d565442add39406fbe8cf8726dd417a8c0fdfa5f374d7b228\",\"v\":28}],\"signingDigest\":\"0xb1c053cb35a70b1e762e209ae57cd47b50137c8347ab5d8cefc87695d2f2e229\"}",
+      "digest": "0xb1c053cb35a70b1e762e209ae57cd47b50137c8347ab5d8cefc87695d2f2e229",
+      "signature": {
+        "r": "0xa92515757a58ccf3bbbd9d13bd177bed62debb899a84c60b8db16f150d12ec5a",
+        "s": "0x70833cf31f54c20fff85f04769bd9975b8b7c6c14be6c6f155a24ab05c06d882",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x30ee4d7fc880ff037fe464df3ac1a2f23e71b70304bf4dc5cfeb34934e7947b6\",\"s\":\"0x368a27bc2465f80d25e14c97badecd8082c039b560ded8b72e52cc84afff3ffa\",\"v\":28},{\"r\":\"0x55f7f6623d05893cad8e97feba5f0dbd139d9b6ba73c2318a5e6f1845b6a6928\",\"s\":\"0x3acc35e8226825d565442add39406fbe8cf8726dd417a8c0fdfa5f374d7b228\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"sendAsset\",\"destination\":\"0x0000000000000000000000000000000000000011\",\"sourceDex\":\"\",\"destinationDex\":\"spot\",\"token\":\"USDC\",\"amount\":\"12.5\",\"fromSubAccount\":\"\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "usdClassTransfer_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"usdClassTransfer\",\"amount\":\"12.5\",\"toPerp\":true,\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xd612e8ad5ffc440a2256a558fb1d73a91970e77d41a75162cd8e18c22276b97f\"}",
+      "digest": "0xd612e8ad5ffc440a2256a558fb1d73a91970e77d41a75162cd8e18c22276b97f",
+      "signature": {
+        "r": "0xa3eba98cf1bda3755d82dea32f98ee23234e7953f9c10d6caa95f2b4c8a0d2ea",
+        "s": "0x81997f8f40622da75a778cc31c54b6e15cb4bd8cc49e5c85e1735b33a2ef2fd",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "usdClassTransfer_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"usdClassTransfer\",\"amount\":\"12.5\",\"toPerp\":true,\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xa3eba98cf1bda3755d82dea32f98ee23234e7953f9c10d6caa95f2b4c8a0d2ea\",\"s\":\"0x81997f8f40622da75a778cc31c54b6e15cb4bd8cc49e5c85e1735b33a2ef2fd\",\"v\":28},{\"r\":\"0xe23839c1df65649f30a793aca34bfe62ea7fc6199446714df4e442b187436b7\",\"s\":\"0x3dbc6940cd59b91fce119e88cf505b644f5e144ce38501991024d9e9ea5ed42e\",\"v\":27}],\"signingDigest\":\"0x282b7d85d463251761c46ebc1f44030508c99edb4cb23fc29ff38593be085af2\"}",
+      "digest": "0x282b7d85d463251761c46ebc1f44030508c99edb4cb23fc29ff38593be085af2",
+      "signature": {
+        "r": "0xd0258e984181c29e13f5944d1eb0944bca2a5cd42750901d00024af58e6b9a0b",
+        "s": "0x6e92fdc0c4aabf759eacfe7b6c65556884919a67b80cf2fe0cf645ddc57fa601",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xa3eba98cf1bda3755d82dea32f98ee23234e7953f9c10d6caa95f2b4c8a0d2ea\",\"s\":\"0x81997f8f40622da75a778cc31c54b6e15cb4bd8cc49e5c85e1735b33a2ef2fd\",\"v\":28},{\"r\":\"0xe23839c1df65649f30a793aca34bfe62ea7fc6199446714df4e442b187436b7\",\"s\":\"0x3dbc6940cd59b91fce119e88cf505b644f5e144ce38501991024d9e9ea5ed42e\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"usdClassTransfer\",\"amount\":\"12.5\",\"toPerp\":true,\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "withdraw3_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"withdraw3\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xcf1accef4e4e71df5dbe5a01dc77018aaf9e5d5854b525d4918ab1ef61fbdcfb\"}",
+      "digest": "0xcf1accef4e4e71df5dbe5a01dc77018aaf9e5d5854b525d4918ab1ef61fbdcfb",
+      "signature": {
+        "r": "0x93696906eb91f91c7a25c8dbe182bb9baec1048d401099a03eb9b19d4eb61c11",
+        "s": "0x3580c2fe8f3c4d2b5b9614b8945bdcc1e3dc8e644e8538bf80426efc154a45a3",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "withdraw3_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"withdraw3\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x93696906eb91f91c7a25c8dbe182bb9baec1048d401099a03eb9b19d4eb61c11\",\"s\":\"0x3580c2fe8f3c4d2b5b9614b8945bdcc1e3dc8e644e8538bf80426efc154a45a3\",\"v\":28},{\"r\":\"0x71825faf57ca37370f206f50750e56ca1f48b48857f4b1ff3fc1dbc1ad19b7e\",\"s\":\"0x25807b92854ddd3f7e0f268af8bbfb3ac2c4f86e78a4fcba66373e17bbc2bbc0\",\"v\":28}],\"signingDigest\":\"0x4095935ad136001ae15aaa2e73ec89585702b3ede296d2b5792ad0efa52f1c3f\"}",
+      "digest": "0x4095935ad136001ae15aaa2e73ec89585702b3ede296d2b5792ad0efa52f1c3f",
+      "signature": {
+        "r": "0x5d73c0c98cf195851f5068d00419a55e4dc39d20bad251b7f1e7fccc55336069",
+        "s": "0x31fa8502b404af020413f9754d26a7a8396fd396c27b1e1b18bab1c2a41a109d",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x93696906eb91f91c7a25c8dbe182bb9baec1048d401099a03eb9b19d4eb61c11\",\"s\":\"0x3580c2fe8f3c4d2b5b9614b8945bdcc1e3dc8e644e8538bf80426efc154a45a3\",\"v\":28},{\"r\":\"0x71825faf57ca37370f206f50750e56ca1f48b48857f4b1ff3fc1dbc1ad19b7e\",\"s\":\"0x25807b92854ddd3f7e0f268af8bbfb3ac2c4f86e78a4fcba66373e17bbc2bbc0\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"withdraw3\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "tokenDelegate_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"validator\":\"0x0000000000000000000000000000000000000011\",\"wei\":100000000,\"isUndelegate\":false,\"nonce\":1700000000000,\"type\":\"tokenDelegate\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x0190b48530747e36d9ecaf5a7cec8b1c165767b0a7594cc649cd02699ee72808\"}",
+      "digest": "0x0190b48530747e36d9ecaf5a7cec8b1c165767b0a7594cc649cd02699ee72808",
+      "signature": {
+        "r": "0xa2f3993df0e639a1367683882aa81469f24dfda5ff444e3f40c859f3bcb6d228",
+        "s": "0xbca56d0f16556ee955897311fbc02e15c4daf67290a1649b9e567c98e4c666e",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "tokenDelegate_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"validator\":\"0x0000000000000000000000000000000000000011\",\"wei\":100000000,\"isUndelegate\":false,\"nonce\":1700000000000,\"type\":\"tokenDelegate\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xa2f3993df0e639a1367683882aa81469f24dfda5ff444e3f40c859f3bcb6d228\",\"s\":\"0xbca56d0f16556ee955897311fbc02e15c4daf67290a1649b9e567c98e4c666e\",\"v\":28},{\"r\":\"0xd89344888a6204bb5f93f2bced45778fce67c3d3d23329800d760c45ad4aa59b\",\"s\":\"0x446df240759090b074bdc9377b1f7603f8c492009e0b73519336c924963d3221\",\"v\":28}],\"signingDigest\":\"0x4cb7836a317b7d12da657f6eec3675719379c31d7ee2bac094b0fccd2bf9a9f2\"}",
+      "digest": "0x4cb7836a317b7d12da657f6eec3675719379c31d7ee2bac094b0fccd2bf9a9f2",
+      "signature": {
+        "r": "0xaec90d3c0da27ffc9a28280fcde14a127f6f73c2ed895ce7f04f00cca657d010",
+        "s": "0x1a64b27ad222bfcef346f08a99a929fa4be1f4763bac750bb1eed75314eee0fc",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xa2f3993df0e639a1367683882aa81469f24dfda5ff444e3f40c859f3bcb6d228\",\"s\":\"0xbca56d0f16556ee955897311fbc02e15c4daf67290a1649b9e567c98e4c666e\",\"v\":28},{\"r\":\"0xd89344888a6204bb5f93f2bced45778fce67c3d3d23329800d760c45ad4aa59b\",\"s\":\"0x446df240759090b074bdc9377b1f7603f8c492009e0b73519336c924963d3221\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"validator\":\"0x0000000000000000000000000000000000000011\",\"wei\":100000000,\"isUndelegate\":false,\"nonce\":1700000000000,\"type\":\"tokenDelegate\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "approveAgent_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"approveAgent\",\"agentAddress\":\"0x0000000000000000000000000000000000000011\",\"agentName\":\"disposable test agent\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x58f569f8e14bf7b8ef276dbb00c20c3ff078877c027c9dc7ceccd24cd70272cd\"}",
+      "digest": "0x58f569f8e14bf7b8ef276dbb00c20c3ff078877c027c9dc7ceccd24cd70272cd",
+      "signature": {
+        "r": "0x48f6f67fc551b4edf7c6a233f6b4f857cf3a4ec3069be3ce9dc520d9f4309a9f",
+        "s": "0x68e8bda14161dfe13e28bd9b0c783fe02bc1806362044cc2dd40c19d538b3cb",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "approveAgent_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"approveAgent\",\"agentAddress\":\"0x0000000000000000000000000000000000000011\",\"agentName\":\"disposable test agent\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x48f6f67fc551b4edf7c6a233f6b4f857cf3a4ec3069be3ce9dc520d9f4309a9f\",\"s\":\"0x68e8bda14161dfe13e28bd9b0c783fe02bc1806362044cc2dd40c19d538b3cb\",\"v\":28},{\"r\":\"0x57a9188bd86e2bc8c4761b7fb8f39beb3012473e9bfd012755a4e06e023d000a\",\"s\":\"0x3c7b5637c03c70752761e669cfa3abb0e51889d2ae1a1be554919d3f7b190d3\",\"v\":28}],\"signingDigest\":\"0x3ff067a09de8be10f4be44ba4a1d33060153456b82af30022a6e7abc789daa2c\"}",
+      "digest": "0x3ff067a09de8be10f4be44ba4a1d33060153456b82af30022a6e7abc789daa2c",
+      "signature": {
+        "r": "0x88b7ef2f728e729912ea73d99f9f6303bd950c2bb311638bd7b7c2951aeaac10",
+        "s": "0x8418ba88a8b77def4ef59cbec49938271b115da3077cc011117b68f8e809312",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x48f6f67fc551b4edf7c6a233f6b4f857cf3a4ec3069be3ce9dc520d9f4309a9f\",\"s\":\"0x68e8bda14161dfe13e28bd9b0c783fe02bc1806362044cc2dd40c19d538b3cb\",\"v\":28},{\"r\":\"0x57a9188bd86e2bc8c4761b7fb8f39beb3012473e9bfd012755a4e06e023d000a\",\"s\":\"0x3c7b5637c03c70752761e669cfa3abb0e51889d2ae1a1be554919d3f7b190d3\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"approveAgent\",\"agentAddress\":\"0x0000000000000000000000000000000000000011\",\"agentName\":\"disposable test agent\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "approveBuilderFee_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"maxFeeRate\":\"0.01%\",\"builder\":\"0x0000000000000000000000000000000000000011\",\"nonce\":1700000000000,\"type\":\"approveBuilderFee\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x4d91e79bf0f05c0317dba0d2e52a597bd28ba26a81c36e7f33058fdd8f94570d\"}",
+      "digest": "0x4d91e79bf0f05c0317dba0d2e52a597bd28ba26a81c36e7f33058fdd8f94570d",
+      "signature": {
+        "r": "0x235b4345fd82b50e08cefa3a445d7705de679461c47558be8c3735c2fffe72ca",
+        "s": "0x3d525680a89a5400842f1d7d9aaefe0a23cb0de68e336eed0746c2a051fd9303",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "approveBuilderFee_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"maxFeeRate\":\"0.01%\",\"builder\":\"0x0000000000000000000000000000000000000011\",\"nonce\":1700000000000,\"type\":\"approveBuilderFee\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x235b4345fd82b50e08cefa3a445d7705de679461c47558be8c3735c2fffe72ca\",\"s\":\"0x3d525680a89a5400842f1d7d9aaefe0a23cb0de68e336eed0746c2a051fd9303\",\"v\":27},{\"r\":\"0xe601d220943d2c694f6f8b2fdb3dc894b694e5cc6a11b9415538f52a4ab33819\",\"s\":\"0x341d6c575fe8577ceba408be96aa156641288894612c42fc0c30ecfbf85db816\",\"v\":28}],\"signingDigest\":\"0xd76886208c7158e2d5bdf55dfbb37d32a5c02c49135f8a3ccf68852f667647e7\"}",
+      "digest": "0xd76886208c7158e2d5bdf55dfbb37d32a5c02c49135f8a3ccf68852f667647e7",
+      "signature": {
+        "r": "0x8d1eb784d8d878e1273b220a54f92f334d57ed58273b3b48836754ef95b7246c",
+        "s": "0x4073e1f5f69a29bfca9ba6e5cd3d0d2cc0f948c49426180c28621854571a97a1",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x235b4345fd82b50e08cefa3a445d7705de679461c47558be8c3735c2fffe72ca\",\"s\":\"0x3d525680a89a5400842f1d7d9aaefe0a23cb0de68e336eed0746c2a051fd9303\",\"v\":27},{\"r\":\"0xe601d220943d2c694f6f8b2fdb3dc894b694e5cc6a11b9415538f52a4ab33819\",\"s\":\"0x341d6c575fe8577ceba408be96aa156641288894612c42fc0c30ecfbf85db816\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"maxFeeRate\":\"0.01%\",\"builder\":\"0x0000000000000000000000000000000000000011\",\"nonce\":1700000000000,\"type\":\"approveBuilderFee\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "convertToMultiSigUser_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"{\\\"authorizedUsers\\\": [\\\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\\\", \\\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\\\"], \\\"threshold\\\": 1}\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xcfe6b2e95dce5153925e4946194b07f302b5ed12c5fdc29f672dcdb303665777\"}",
+      "digest": "0xcfe6b2e95dce5153925e4946194b07f302b5ed12c5fdc29f672dcdb303665777",
+      "signature": {
+        "r": "0x44924b29ddd2ba71540255efcee7a69fa7d5cfaa6ad81e3de289b75f231d0259",
+        "s": "0x7ef590cac307547d75c462f1d1d785f4a526dad0eac01c34932105d575267da",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "convertToMultiSigUser_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"{\\\"authorizedUsers\\\": [\\\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\\\", \\\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\\\"], \\\"threshold\\\": 1}\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x44924b29ddd2ba71540255efcee7a69fa7d5cfaa6ad81e3de289b75f231d0259\",\"s\":\"0x7ef590cac307547d75c462f1d1d785f4a526dad0eac01c34932105d575267da\",\"v\":28},{\"r\":\"0x4b7bfc90385e3a25affed8a978378f7ee270e636b5ba67b34c220db8b67ef1f4\",\"s\":\"0x29de457f83e38ddee77c0a5fe4790f3b3bae9b6d1315da91b38223e8065f263b\",\"v\":28}],\"signingDigest\":\"0x4fc35afd0fe22a60fbb687f65d4a6c3b7bdcfefbdf228e51a527ff5d63d71e31\"}",
+      "digest": "0x4fc35afd0fe22a60fbb687f65d4a6c3b7bdcfefbdf228e51a527ff5d63d71e31",
+      "signature": {
+        "r": "0x3f4e1d0011e6a2b4cc1c346af62fcc96b09bd55893df8c001a7a7218fec31491",
+        "s": "0x7febbd27cedaa15b43e4d320ce55628309ea2d48fe55bae0e7a184bd228261ce",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x44924b29ddd2ba71540255efcee7a69fa7d5cfaa6ad81e3de289b75f231d0259\",\"s\":\"0x7ef590cac307547d75c462f1d1d785f4a526dad0eac01c34932105d575267da\",\"v\":28},{\"r\":\"0x4b7bfc90385e3a25affed8a978378f7ee270e636b5ba67b34c220db8b67ef1f4\",\"s\":\"0x29de457f83e38ddee77c0a5fe4790f3b3bae9b6d1315da91b38223e8065f263b\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"{\\\"authorizedUsers\\\": [\\\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\\\", \\\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\\\"], \\\"threshold\\\": 1}\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "removeMultisig_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"null\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x145b31338641057805963515d978e37264435a92cf69d92f80a87caad1b151c9\"}",
+      "digest": "0x145b31338641057805963515d978e37264435a92cf69d92f80a87caad1b151c9",
+      "signature": {
+        "r": "0xe6362caddb4b53cee7ff52e9ca86bc007acb33856483ee5cc619027d95eb8463",
+        "s": "0x23f7de0f6ba726f9c4aefac83c1d95b90937c47671aff2a07fa62580d6425fae",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "removeMultisig_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"null\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xe6362caddb4b53cee7ff52e9ca86bc007acb33856483ee5cc619027d95eb8463\",\"s\":\"0x23f7de0f6ba726f9c4aefac83c1d95b90937c47671aff2a07fa62580d6425fae\",\"v\":28},{\"r\":\"0x76d0db634ed9ed847d7ecca554135f758238719b65fe1eb7a00c2afd8bb5781a\",\"s\":\"0x19d64482907b21a441d6e4ee759c7bba444c819a06aba92c207f15840dad76a8\",\"v\":28}],\"signingDigest\":\"0x9673c655ba4206edd9ce784f2535441e8c4de4854daf65a5b1e11ce6dfe3365a\"}",
+      "digest": "0x9673c655ba4206edd9ce784f2535441e8c4de4854daf65a5b1e11ce6dfe3365a",
+      "signature": {
+        "r": "0x9abcccfea7baec573ed261bf034c529916762415462800d2da4fbff6dd37482e",
+        "s": "0x59574ad05845ee05522a0b1f0fb9d16d2d6ad07f6b8b187f07e92187dd8825bf",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xe6362caddb4b53cee7ff52e9ca86bc007acb33856483ee5cc619027d95eb8463\",\"s\":\"0x23f7de0f6ba726f9c4aefac83c1d95b90937c47671aff2a07fa62580d6425fae\",\"v\":28},{\"r\":\"0x76d0db634ed9ed847d7ecca554135f758238719b65fe1eb7a00c2afd8bb5781a\",\"s\":\"0x19d64482907b21a441d6e4ee759c7bba444c819a06aba92c207f15840dad76a8\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"null\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}"
+    },
+    {
+      "name": "leadingZeroSignature_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000014,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xf6b430b177206bc11d29532ca28a9c3d80f5fccbbce8fe7dea051cdf8f0887f8\"}",
+      "digest": "0xf6b430b177206bc11d29532ca28a9c3d80f5fccbbce8fe7dea051cdf8f0887f8",
+      "signature": {
+        "r": "0x661a476045c398a1766f05c57202d3a3e54ea4b11dae8090efbce241c9a3c06",
+        "s": "0x349076c3d05776017293d1b26dff547638a85897b40ca6592321c746fe103e3",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "leadingZeroSignature_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000014,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0x661a476045c398a1766f05c57202d3a3e54ea4b11dae8090efbce241c9a3c06\",\"s\":\"0x349076c3d05776017293d1b26dff547638a85897b40ca6592321c746fe103e3\",\"v\":28},{\"r\":\"0x5e1d8e55b4b48197e477ab95945dc939589433791b2f0e9d39753a49492bd7e9\",\"s\":\"0x63c8f43385f2e36b77293caf5454ee59c37b78945d248e633335b8fc6c9be036\",\"v\":27}],\"signingDigest\":\"0xd10acc95fa9029a109d085719fe2093d3f734f3342fcfeb4d112f2f6c4728183\"}",
+      "digest": "0xd10acc95fa9029a109d085719fe2093d3f734f3342fcfeb4d112f2f6c4728183",
+      "signature": {
+        "r": "0x2ce8486658d9340a1939117ca6dcb6a90a36a7cd31bfea672786ef0b6d876851",
+        "s": "0x7d10474b173c8dc444e3c700e80d15fa9e84b286b3b0f0d703fc3db571841df6",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x661a476045c398a1766f05c57202d3a3e54ea4b11dae8090efbce241c9a3c06\",\"s\":\"0x349076c3d05776017293d1b26dff547638a85897b40ca6592321c746fe103e3\",\"v\":28},{\"r\":\"0x5e1d8e55b4b48197e477ab95945dc939589433791b2f0e9d39753a49492bd7e9\",\"s\":\"0x63c8f43385f2e36b77293caf5454ee59c37b78945d248e633335b8fc6c9be036\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"}}}"
+    },
+    {
+      "name": "initialConversion_conversion",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"conversion\",\"signer\":\"0x6813eb9362372eef6200f3b1dbc3f819671cba69\",\"multisig\":null,\"leader\":null,\"action\":{\"type\":\"convertToMultiSigUser\",\"signers\":\"{\\\"authorizedUsers\\\": [\\\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\\\", \\\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\\\"], \\\"threshold\\\": 2}\",\"nonce\":1700000000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xf9714fc9f6162b214386fa1cb45385379ddd3b2cd95a257ed2201ed31469a781\"}",
+      "digest": "0xf9714fc9f6162b214386fa1cb45385379ddd3b2cd95a257ed2201ed31469a781",
+      "signature": {
+        "r": "0xb1ebd04e40a04b7161d4d5bf661935aff891859cf5eadfc6bf78f8aa24495b5b",
+        "s": "0x568e76d2d2a527ece8f18b175485865f1f0c43d596b5b788bcffec8b8fa95bb2",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "mainnetOrder_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"mainnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0xf11a27fdf06387450d0963e6a747b386adaccee694d466f6803e095254f1447b\"}",
+      "digest": "0xf11a27fdf06387450d0963e6a747b386adaccee694d466f6803e095254f1447b",
+      "signature": {
+        "r": "0xd21192ba33bfc9e05d9d63c63473e7363a7a100ac857869cef5cf797ce33ed9c",
+        "s": "0x6055bf7c362c991620f30552da3859441336cbd6df03f6266604b619014ee7ae",
+        "v": 27
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "mainnetOrder_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"mainnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xd21192ba33bfc9e05d9d63c63473e7363a7a100ac857869cef5cf797ce33ed9c\",\"s\":\"0x6055bf7c362c991620f30552da3859441336cbd6df03f6266604b619014ee7ae\",\"v\":27},{\"r\":\"0xbd903f0942095766bc450d681ce4df6179b43d49be6b39e016f5a91bb89af839\",\"s\":\"0xf051a99f762ea074a4f56c8caec45be70fc690df1e7271c93bfe6be4ce8a85\",\"v\":28}],\"signingDigest\":\"0x862a18fefb5a39146bc45d4d0374177ee7000e23492d190ef70e74e607e851b4\"}",
+      "digest": "0x862a18fefb5a39146bc45d4d0374177ee7000e23492d190ef70e74e607e851b4",
+      "signature": {
+        "r": "0xc18f0bfb7a8bd75ec1c7983d0c4c46dfb55c0a8d03f5478577cfd45a3ab33f95",
+        "s": "0x73d136fc273ae3426997a1fc7ba728bc3b54c4236be1e944585164284a4c9f21",
+        "v": 27
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xd21192ba33bfc9e05d9d63c63473e7363a7a100ac857869cef5cf797ce33ed9c\",\"s\":\"0x6055bf7c362c991620f30552da3859441336cbd6df03f6266604b619014ee7ae\",\"v\":27},{\"r\":\"0xbd903f0942095766bc450d681ce4df6179b43d49be6b39e016f5a91bb89af839\",\"s\":\"0xf051a99f762ea074a4f56c8caec45be70fc690df1e7271c93bfe6be4ce8a85\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"}}}"
+    },
+    {
+      "name": "mainnetUsdSend_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"mainnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[],\"signingDigest\":\"0x0fe5fdf7aba3bd9010e77e8670a6895a5c6410efdbfad56dc2f3d445d5aad780\"}",
+      "digest": "0x0fe5fdf7aba3bd9010e77e8670a6895a5c6410efdbfad56dc2f3d445d5aad780",
+      "signature": {
+        "r": "0xbffeea562bd643a16430be63b728ebe0cb483f86104158d74f4b68c73e3c7790",
+        "s": "0x60ffa40aa42456f7690df83f3702704e659a8b2031c23b8c4a04dfeee3196a45",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "mainnetUsdSend_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"mainnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"},\"nonce\":1700000000000,\"vaultAddress\":null,\"expiresAfter\":null,\"signatures\":[{\"r\":\"0xbffeea562bd643a16430be63b728ebe0cb483f86104158d74f4b68c73e3c7790\",\"s\":\"0x60ffa40aa42456f7690df83f3702704e659a8b2031c23b8c4a04dfeee3196a45\",\"v\":28},{\"r\":\"0x59e71a04f980a33464bbca93857ea0d3509a4bf5f844450e7af3fdc8cebfc512\",\"s\":\"0x549f8fd51761c9590c27ad19775a44daa8bf3fb0a7e456dd5dd2d2155229cce3\",\"v\":27}],\"signingDigest\":\"0x1aa77d4e59f71561711857ff2fb394fd086b7a1fd1450069608e41bbbfc5ad4b\"}",
+      "digest": "0x1aa77d4e59f71561711857ff2fb394fd086b7a1fd1450069608e41bbbfc5ad4b",
+      "signature": {
+        "r": "0xab8294a8900fcce0c5ef7c3e0e1a01dc1462b3e7bc7cf628f06cee390d9fd920",
+        "s": "0x366801934e408bd7b9f043e9890898389da357bd64daba8edf21c3623cf79d1c",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0xbffeea562bd643a16430be63b728ebe0cb483f86104158d74f4b68c73e3c7790\",\"s\":\"0x60ffa40aa42456f7690df83f3702704e659a8b2031c23b8c4a04dfeee3196a45\",\"v\":28},{\"r\":\"0x59e71a04f980a33464bbca93857ea0d3509a4bf5f844450e7af3fdc8cebfc512\",\"s\":\"0x549f8fd51761c9590c27ad19775a44daa8bf3fb0a7e456dd5dd2d2155229cce3\",\"v\":27}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"destination\":\"0x0000000000000000000000000000000000000011\",\"amount\":\"12.5\",\"time\":1700000000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}"
+    },
+    {
+      "name": "vaultAndExpiryOrder_member",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"member\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000000,\"vaultAddress\":\"0x0000000000000000000000000000000000000011\",\"expiresAfter\":1700000060000,\"signatures\":[],\"signingDigest\":\"0xc10cc01b179e61006854b7e362f54a80089039beb9bd8db5bb38dd513b5d9337\"}",
+      "digest": "0xc10cc01b179e61006854b7e362f54a80089039beb9bd8db5bb38dd513b5d9337",
+      "signature": {
+        "r": "0x553e89c56d6b2a3e89abced4569a59c2c7d17b48d65a9de616eb2ffb3c82d3ed",
+        "s": "0x65e4234e219c63aa758ae784e3f5c2bbade5145a0bbdfdbcf1435db98a7ee862",
+        "v": 28
+      },
+      "leaderActionJson": null
+    },
+    {
+      "name": "vaultAndExpiryOrder_leader",
+      "unsignedPayload": "{\"kind\":\"multisig\",\"network\":\"testnet\",\"role\":\"leader\",\"signer\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"multisig\":{\"address\":\"0x0000000000000000000000000000000000000005\",\"authorizedUsers\":[\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\",\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"],\"threshold\":2},\"leader\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1700000000000,\"vaultAddress\":\"0x0000000000000000000000000000000000000011\",\"expiresAfter\":1700000060000,\"signatures\":[{\"r\":\"0x553e89c56d6b2a3e89abced4569a59c2c7d17b48d65a9de616eb2ffb3c82d3ed\",\"s\":\"0x65e4234e219c63aa758ae784e3f5c2bbade5145a0bbdfdbcf1435db98a7ee862\",\"v\":28},{\"r\":\"0x5e65634db1d2ce5620eec09ef97d0aba0e54e468bfbb125bae61533c0ab84c42\",\"s\":\"0x10504f92d8aef605c5c418cf478e16c51bd035f36a2d6c2f2eb8c24be0651606\",\"v\":28}],\"signingDigest\":\"0x4b2068dcb558e3c14a1215f965f3836a09e1293284adf57162c114fea5d3ff96\"}",
+      "digest": "0x4b2068dcb558e3c14a1215f965f3836a09e1293284adf57162c114fea5d3ff96",
+      "signature": {
+        "r": "0xb171c14f12a673acef9dbda7c7902e0ad1de89703ec45596f7b2774315ef0757",
+        "s": "0x3389b375abdb54ac48b93f6e8038a555a18fdb6c0a30e1d04bd9afc504445855",
+        "v": 28
+      },
+      "leaderActionJson": "{\"type\":\"multiSig\",\"signatureChainId\":\"0x66eee\",\"signatures\":[{\"r\":\"0x553e89c56d6b2a3e89abced4569a59c2c7d17b48d65a9de616eb2ffb3c82d3ed\",\"s\":\"0x65e4234e219c63aa758ae784e3f5c2bbade5145a0bbdfdbcf1435db98a7ee862\",\"v\":28},{\"r\":\"0x5e65634db1d2ce5620eec09ef97d0aba0e54e468bfbb125bae61533c0ab84c42\",\"s\":\"0x10504f92d8aef605c5c418cf478e16c51bd035f36a2d6c2f2eb8c24be0651606\",\"v\":28}],\"payload\":{\"multiSigUser\":\"0x0000000000000000000000000000000000000005\",\"outerSigner\":\"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\",\"action\":{\"type\":\"order\",\"orders\":[{\"a\":4,\"b\":true,\"p\":\"1100\",\"s\":\"0.2\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"}}}"
+    }
+  ]
+}

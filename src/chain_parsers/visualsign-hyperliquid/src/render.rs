@@ -594,6 +594,7 @@ fn outcome_deploy_fields(o: &OutcomeDeployAction, f: &mut Fields) -> R<()> {
 
 fn user_label(name: &str) -> &'static str {
     match name {
+        "ConvertToMultiSigUser" => "Change Native Multisig Configuration",
         "ApproveAgent" => "Approve API Wallet (Agent)",
         "TokenDelegate" => "Stake Delegation",
         "Withdraw" => "Withdraw to Arbitrum",
@@ -608,6 +609,7 @@ fn user_label(name: &str) -> &'static str {
 
 fn field_label(name: &str) -> &'static str {
     match name {
+        "signers" => "New Signer Configuration (exact signed JSON)",
         "agentAddress" => "Agent Address",
         "agentName" => "Agent Name",
         "validator" => "Validator",
@@ -638,6 +640,27 @@ pub fn user_signed_payload(req: &UserSignedRequest, title: Option<String>) -> R<
             }
             fields.push(text("Action", label)?);
             continue;
+        }
+        if *name == "signers"
+            && let FieldValue::Str(s) = value
+        {
+            match crate::multisig::conversion_signers(s)
+                .map_err(VisualSignError::ConversionError)?
+            {
+                Some((users, threshold)) => {
+                    fields.push(text(
+                        "New Threshold",
+                        &format!("{threshold} of {}", users.len()),
+                    )?);
+                    for (i, user) in users.iter().enumerate() {
+                        fields.push(address(&format!("New Member {}", i + 1), user)?);
+                    }
+                }
+                None => fields.push(text(
+                    "Remove Multisig",
+                    "WARNING: sole HyperCore control returns to the original account key",
+                )?),
+            }
         }
         let shown = field_label(name);
         match value {
@@ -681,4 +704,121 @@ pub fn user_signed_payload(req: &UserSignedRequest, title: Option<String>) -> R<
     fields.push(text("Signature Chain ID", &req.chain_id.to_string())?);
     let title = title.unwrap_or_else(|| format!("Hyperliquid: {label}"));
     Ok(finish(title, fields, "HyperliquidUserSignedAction"))
+}
+
+/// Render the exact inner action alongside the native authorization context.
+pub fn multisig_payload(
+    req: &crate::multisig::MultisigRequest,
+    title: Option<String>,
+) -> R<SignablePayload> {
+    use crate::multisig::{InnerAction, Role};
+    let role = match req.role {
+        Role::Conversion => "Convert Account to Native Multisig",
+        Role::Member => "Approve Native Multisig Action",
+        Role::Leader => "Authorize Native Multisig Submission",
+    };
+    let mut fields = vec![
+        text("Network", req.network.chain())?,
+        text("Signing Role", role)?,
+        address("Requested Signing Identity", &req.signer)?,
+        text(
+            "Identity Trust",
+            "Requested identity only; key ownership must be checked by the signing wallet",
+        )?,
+    ];
+    if let Some(config) = &req.multisig {
+        fields.push(address("Multisig Account", &config.address)?);
+        fields.push(text("Configuration Trust", "Caller-supplied membership; not proof of current network state. The signing wallet must authenticate its pinned configuration")?);
+        fields.push(text(
+            "Required Approvals",
+            &format!("{} of {}", config.threshold, config.authorized_users.len()),
+        )?);
+        for (i, user) in config.authorized_users.iter().enumerate() {
+            fields.push(address(&format!("Configured Member {}", i + 1), user)?);
+        }
+    }
+    if let Some(leader) = &req.leader {
+        fields.push(address("Direct Member Leader", leader)?);
+    }
+    fields.push(text(
+        "HyperEVM",
+        "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported",
+    )?);
+    match &req.action {
+        InnerAction::L1(inner) => {
+            fields.push(text("Action", action_label(&inner.action))?);
+            fields.extend(action_fields(&inner.action)?);
+            fields.push(match &inner.vault_address {
+                Some(vault) => address(
+                    "Acting For (Vault / Subaccount)",
+                    &format!("0x{}", hex_lower(vault)),
+                )?,
+                None => text("Acting For (Vault / Subaccount)", "Multisig account")?,
+            });
+        }
+        InnerAction::UserSigned(inner) => {
+            let payload = user_signed_payload(inner, None)?;
+            let mut out = finish(
+                title.unwrap_or_else(|| format!("Hyperliquid: {role}")),
+                fields,
+                "HyperliquidNativeMultisig",
+            );
+            out.fields.extend(payload.fields);
+            append_multisig_authorization(req, &mut out)?;
+            return Ok(out);
+        }
+    }
+    let mut out = finish(
+        title.unwrap_or_else(|| format!("Hyperliquid: {role}")),
+        fields,
+        "HyperliquidNativeMultisig",
+    );
+    append_multisig_authorization(req, &mut out)?;
+    Ok(out)
+}
+
+fn append_multisig_authorization(
+    req: &crate::multisig::MultisigRequest,
+    out: &mut SignablePayload,
+) -> R<()> {
+    let mut fields = vec![
+        text("Nonce", &timestamp(req.nonce))?,
+        text(
+            "Expires After",
+            &req.expires_after
+                .map(timestamp)
+                .unwrap_or_else(|| "Not set".into()),
+        )?,
+        text(
+            "Native Signing Digest",
+            &format!("0x{}", hex_lower(&req.signing_digest)),
+        )?,
+        text(
+            "Authorization Scope",
+            "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields",
+        )?,
+    ];
+    if req.role == crate::multisig::Role::Leader {
+        fields.push(text(
+            "Verified Member Approvals",
+            &req.verified_signers.len().to_string(),
+        )?);
+        for (i, signer) in req.verified_signers.iter().enumerate() {
+            fields.push(address(&format!("Recovered Member {}", i + 1), signer)?);
+        }
+        fields.push(text(
+            "Submission",
+            "This authorizes submission; approval is not evidence of execution or a fill",
+        )?);
+    }
+    if matches!(&req.action,crate::multisig::InnerAction::UserSigned(a) if a.spec_name == "ApproveAgent")
+    {
+        fields.push(text(
+            "Delegated Authority",
+            "WARNING: API-agent trading can authorize later activity outside this multisig quorum",
+        )?);
+    }
+    out.fields
+        .extend(fields.into_iter().map(|f| f.signable_payload_field));
+    Ok(())
 }

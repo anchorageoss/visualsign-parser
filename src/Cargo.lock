@@ -15095,9 +15095,11 @@ dependencies = [
 name = "visualsign-hyperliquid"
 version = "0.1.0"
 dependencies = [
+ "alloy-dyn-abi",
  "alloy-primitives",
  "clap",
  "hex",
+ "k256",
  "parser_cli_core",
  "rmp-serde",
  "serde",

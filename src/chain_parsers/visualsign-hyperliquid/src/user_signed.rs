@@ -24,6 +24,15 @@ pub const PRIMARY_TYPE_PREFIX: &str = "HyperliquidTransaction:";
 
 pub const SPECS: &[UserSignedSpec] = &[
     UserSignedSpec {
+        name: "ConvertToMultiSigUser",
+        action_type: "convertToMultiSigUser",
+        fields: &[
+            ("hyperliquidChain", "string"),
+            ("signers", "string"),
+            ("nonce", "uint64"),
+        ],
+    },
+    UserSignedSpec {
         name: "ApproveAgent",
         action_type: "approveAgent",
         fields: &[
