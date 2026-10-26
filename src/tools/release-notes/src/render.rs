@@ -45,6 +45,20 @@ impl Release {
         self.repo.rsplit('/').next().unwrap_or(&self.repo)
     }
 
+    /// The release as `audience` sees it: entries it doesn't show are dropped, with
+    /// their authors, co-authors and integrator notes.
+    pub fn visible_to(&self, audience: Audience) -> Release {
+        Release {
+            entries: self
+                .entries
+                .iter()
+                .filter(|e| audience.shows(e))
+                .cloned()
+                .collect(),
+            ..self.clone()
+        }
+    }
+
     /// People to thank, in order of first appearance, bots already removed. Tooling-only
     /// contributors are included for an internal audience only.
     pub fn contributors(&self, audience: Audience) -> Vec<String> {
@@ -332,5 +346,18 @@ Thanks to everyone who contributed to this release: alice, bob, carol.
         assert!(
             got.contains("- Pin workflows ([#3](https://github.com/o/r/pull/3), co-author erin)\n")
         );
+    }
+
+    #[test]
+    fn public_view_drops_tooling_entries() {
+        let mut r = release();
+        r.entries[2].integrator_note = Some("Bump the runner image.".into());
+        let public = r.visible_to(Audience::Public);
+        let numbers: Vec<u64> = public.entries.iter().map(|e| e.number).collect();
+        assert_eq!(numbers, [1, 2]);
+        let json = serde_json::to_string(&public).unwrap();
+        assert!(!json.contains("dave"));
+        assert!(!json.contains("Bump the runner image."));
+        assert_eq!(r.visible_to(Audience::Internal).entries.len(), 3);
     }
 }

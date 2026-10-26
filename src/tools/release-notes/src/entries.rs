@@ -19,8 +19,11 @@ pub enum Section {
 /// A PR touching more chains than this is a cross-cutting change, listed under Core.
 const MAX_CHAINS_PER_ENTRY: usize = 3;
 
-/// Conventional-commit types that never change what a signer sees.
-const TOOLING_TYPES: &[&str] = &["ci", "build", "chore", "test", "docs", "style"];
+/// Conventional-commit types that never change what a signer sees, whatever they touch.
+const TOOLING_TYPES: &[&str] = &["ci", "build", "test", "docs", "style"];
+/// Types that are tooling unless they touch a chain crate (`chore(near)` can change
+/// decoding).
+const CHORE_TYPES: &[&str] = &["chore"];
 /// Scopes that mark a PR as tooling whatever its type.
 const TOOLING_SCOPES: &[&str] = &["ci", "cla", "deps", "make", "release"];
 
@@ -87,9 +90,10 @@ pub fn sections_for(
     known_chains: &BTreeSet<String>,
 ) -> Vec<Section> {
     let conventional = parse_conventional(title);
-    if let Some(c) = &conventional
-        && c.scope.is_some_and(|s| TOOLING_SCOPES.contains(&s))
-    {
+    let explicit_tooling = conventional.as_ref().is_some_and(|c| {
+        TOOLING_TYPES.contains(&c.kind) || c.scope.is_some_and(|s| TOOLING_SCOPES.contains(&s))
+    });
+    if explicit_tooling {
         return vec![Section::Tooling];
     }
     let touched: BTreeSet<String> = chains_touched(files)
@@ -99,11 +103,15 @@ pub fn sections_for(
     if !touched.is_empty() && touched.len() <= MAX_CHAINS_PER_ENTRY {
         return touched.into_iter().map(Section::Chain).collect();
     }
-    if let Some(c) = &conventional {
+    // Past here `touched` is empty or too wide for one entry; a wide sweep is Core even
+    // when its title names a chain.
+    if let Some(c) = &conventional
+        && touched.is_empty()
+    {
         if let Some(scope) = c.scope.filter(|s| known_chains.contains(*s)) {
             return vec![Section::Chain(scope.to_string())];
         }
-        if touched.is_empty() && TOOLING_TYPES.contains(&c.kind) {
+        if CHORE_TYPES.contains(&c.kind) {
             return vec![Section::Tooling];
         }
     }
@@ -215,7 +223,8 @@ pub fn co_author_trailers(message: &str) -> Vec<CoAuthor> {
             Some((n, e)) => (n.trim(), e.trim_end_matches('>').trim()),
             None => (rest, ""),
         };
-        if is_bot(name, email) || name.is_empty() {
+        let login_is_bot = github_login(email).is_some_and(|l| is_bot(&l, ""));
+        if is_bot(name, email) || login_is_bot || name.is_empty() {
             continue;
         }
         if !out
@@ -348,6 +357,30 @@ mod tests {
     }
 
     #[test]
+    fn tooling_type_wins_over_chain_files() {
+        let s = sections_for(
+            "test(sui): add fixtures",
+            &files(&["src/chain_parsers/visualsign-sui/tests/fixtures.rs"]),
+            &chains(),
+        );
+        assert_eq!(s, vec![Section::Tooling]);
+    }
+
+    #[test]
+    fn scoped_wide_sweeps_go_to_core() {
+        let f = files(&[
+            "src/chain_parsers/visualsign-bitcoin/a.rs",
+            "src/chain_parsers/visualsign-near/a.rs",
+            "src/chain_parsers/visualsign-sui/a.rs",
+            "src/chain_parsers/visualsign-tron/a.rs",
+        ]);
+        assert_eq!(
+            sections_for("refactor(near): lint sweep", &f, &chains()),
+            vec![Section::Core]
+        );
+    }
+
+    #[test]
     fn unknown_chain_dirs_are_ignored() {
         let s = sections_for(
             "fix: fallback",
@@ -394,6 +427,16 @@ mod tests {
             Some("prasanna-anchorage")
         );
         assert_eq!(got[1].noreply_login(), None);
+    }
+
+    #[test]
+    fn co_author_trailers_skip_bots_by_noreply_login() {
+        let msg = "subject\n\nCo-authored-by: GitHub Copilot <175728472+Copilot@users.noreply.github.com>\nCo-authored-by: Some Bot <1+helper[bot]@users.noreply.github.com>\nCo-authored-by: Jane Doe <jane@example.com>\n";
+        let names: Vec<_> = co_author_trailers(msg)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, ["Jane Doe"]);
     }
 
     #[test]

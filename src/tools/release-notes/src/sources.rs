@@ -183,7 +183,7 @@ pub fn collect(git: &Git<'_>, repo: &str, from: &str, to: &str) -> Result<Releas
                 let mut people: Vec<String> = Vec::new();
                 for c in co_author_trailers(&git.message(&sha)?) {
                     let who = logins.resolve(repo, &c);
-                    if who != author && !people.contains(&who) {
+                    if !is_bot(&who, "") && who != author && !people.contains(&who) {
                         people.push(who);
                     }
                 }
