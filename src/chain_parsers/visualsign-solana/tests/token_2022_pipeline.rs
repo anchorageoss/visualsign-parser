@@ -233,7 +233,11 @@ fn non_signer_extra_account_is_not_labelled_a_signer() {
     let layouts = instruction_fields(&payload);
     let transfer = layouts
         .iter()
-        .find(|l| l.title.as_ref().is_some_and(|t| t.text.starts_with("Transfer:")))
+        .find(|l| {
+            l.title
+                .as_ref()
+                .is_some_and(|t| t.text.starts_with("Transfer:"))
+        })
         .unwrap_or_else(|| panic!("{:?}", titles(&payload)));
     let expanded = &transfer.expanded.as_ref().unwrap().fields;
     assert_ne!(

@@ -290,7 +290,10 @@ fn test_transfer_checked_real_transaction() {
 
 #[test]
 fn test_transfer_checked_mainnet_legacy() {
-    test_real_transaction("transfer_checked_mainnet_legacy", "TransferChecked (legacy)");
+    test_real_transaction(
+        "transfer_checked_mainnet_legacy",
+        "TransferChecked (legacy)",
+    );
 }
 
 #[test]
@@ -300,7 +303,10 @@ fn test_transfer_checked_mainnet_v0() {
 
 #[test]
 fn test_transfer_checked_mainnet_memo() {
-    test_real_transaction("transfer_checked_mainnet_memo", "TransferChecked (with memo)");
+    test_real_transaction(
+        "transfer_checked_mainnet_memo",
+        "TransferChecked (with memo)",
+    );
 }
 
 #[test]

@@ -87,11 +87,7 @@ fn distinct_keys(n: usize) -> Vec<Pubkey> {
 
 /// Run `data` through the visualizer as one compiled instruction whose
 /// account indices are `indices` into `keys` (program id at index 0).
-fn render_indices(
-    data: &[u8],
-    keys: &[Pubkey],
-    indices: &[u8],
-) -> Result<Render, VisualSignError> {
+fn render_indices(data: &[u8], keys: &[Pubkey], indices: &[u8]) -> Result<Render, VisualSignError> {
     let compiled = CompiledInstruction {
         program_id_index: 0,
         accounts: indices.to_vec(),
@@ -173,12 +169,25 @@ fn exact_len(tag: u8) -> usize {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Want {
-    Transfer { amount: u64 },
-    Checked { amount: u64, decimals: u8, fee: Option<u64> },
-    Approve { amount: u64, decimals: Option<u8> },
+    Transfer {
+        amount: u64,
+    },
+    Checked {
+        amount: u64,
+        decimals: u8,
+        fee: Option<u64>,
+    },
+    Approve {
+        amount: u64,
+        decimals: Option<u8>,
+    },
     Revoke,
-    MintTo { amount: u64 },
-    Burn { amount: u64 },
+    MintTo {
+        amount: u64,
+    },
+    Burn {
+        amount: u64,
+    },
 }
 
 impl Want {
@@ -186,7 +195,10 @@ impl Want {
     fn fixed_accounts(&self) -> usize {
         match self {
             Want::Revoke => 2,
-            Want::Checked { .. } | Want::Approve { decimals: Some(_), .. } => 4,
+            Want::Checked { .. }
+            | Want::Approve {
+                decimals: Some(_), ..
+            } => 4,
             _ => 3,
         }
     }
@@ -277,9 +289,7 @@ fn role_positions(want: &Want) -> BTreeMap<&'static str, usize> {
             ("Destination", 2),
             ("Owner/Delegate", 3),
         ],
-        Want::Approve { decimals: None, .. } => {
-            &[("Source", 0), ("Delegate", 1), ("Owner", 2)]
-        }
+        Want::Approve { decimals: None, .. } => &[("Source", 0), ("Delegate", 1), ("Owner", 2)],
         Want::Approve { .. } => &[("Source", 0), ("Mint", 1), ("Delegate", 2), ("Owner", 3)],
         Want::Revoke => &[("Source", 0), ("Owner", 1)],
         Want::MintTo { .. } => &[
@@ -334,7 +344,10 @@ fn assert_fields(r: &Render, want: &Want, data: &[u8]) {
             decimals: None,
         } => {
             assert_eq!(r.title, format!("Approve: {amount} base units"));
-            assert_eq!(r.row("Amount"), Some(format!("{amount} base units").as_str()));
+            assert_eq!(
+                r.row("Amount"),
+                Some(format!("{amount} base units").as_str())
+            );
             assert_eq!(r.row("Raw Amount"), Some(amount.to_string().as_str()));
         }
         Want::Approve {
@@ -433,7 +446,11 @@ fn adversarial_data() -> impl Strategy<Value = Vec<u8>> {
             d
         })
     });
-    let truncated_valid = (valid_new_instruction(), any::<prop::sample::Index>(), any::<bool>())
+    let truncated_valid = (
+        valid_new_instruction(),
+        any::<prop::sample::Index>(),
+        any::<bool>(),
+    )
         .prop_map(|(mut d, cut, extend)| {
             if extend {
                 d.push(cut.index(256) as u8);
@@ -444,7 +461,9 @@ fn adversarial_data() -> impl Strategy<Value = Vec<u8>> {
             d
         });
     let random_tag = (any::<u8>(), prop::collection::vec(any::<u8>(), 0..255))
-        .prop_filter("pre-existing decoder", |(t, _)| !PREEXISTING_TAGS.contains(t))
+        .prop_filter("pre-existing decoder", |(t, _)| {
+            !PREEXISTING_TAGS.contains(t)
+        })
         .prop_map(|(t, body)| {
             let mut d = vec![t];
             d.extend(body);
@@ -737,7 +756,10 @@ fn one_trailing_byte_is_not_decoded() {
             decoded.push(format!("{} -> {}", hex(&data), r.title));
         }
     }
-    assert!(decoded.is_empty(), "decoded but rejected on chain: {decoded:#?}");
+    assert!(
+        decoded.is_empty(),
+        "decoded but rejected on chain: {decoded:#?}"
+    );
 }
 
 #[test]
