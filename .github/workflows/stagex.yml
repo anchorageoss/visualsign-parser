@@ -66,7 +66,29 @@ jobs:
         # same commit's action.
         uses: ./.github/actions/docker-setup # zizmor: ignore[self-repository] see comment above
         with:
+          # Optional: only used to log in to Docker Hub for pull rate limits.
+          # The action skips the login when this is empty (forks, fork PRs).
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
+
+      - name: Resolve image name
+        id: image
+        shell: bash
+        env:
+          OWNER: ${{ github.repository_owner }}
+          TARGET_NAME: ${{ matrix.target.name }}
+          # A fork PR's run executes here with a read-only token and no
+          # secrets, so it can't publish anywhere. Build it, skip login/push.
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          # Publish under the owner of the repo running the workflow, so a fork
+          # running stagex in its own repo pushes to its own namespace.
+          # ghcr.io only accepts lowercase paths; owner logins can have capitals.
+          echo "repo=ghcr.io/${OWNER,,}/${TARGET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ "$IS_FORK_PR" == "true" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build ${{ matrix.target.name }}
         id: build
@@ -113,13 +135,36 @@ jobs:
           # publish on every build (PR, branch, release) without risking
           # cross-branch overwrites.
           echo "sha_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # VERSION is compiled into the binary, so anyone rebuilding this
+          # commit to compare digests needs the exact string.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
         run: |
           env -C out/${{ matrix.target.name }} tar -cf - . | docker load
 
+      - name: Record build inputs and digest
+        shell: bash
+        env:
+          TARGET_NAME: ${{ matrix.target.name }}
+          VERSION: ${{ steps.build.outputs.version }}
+          SHA_TAG: ${{ steps.build.outputs.sha_tag }}
+        run: |
+          # Lets a maintainer reproduce this build (`make VERSION=...` at the
+          # same commit) and compare digests without trusting the pushed image.
+          manifest_digest=$(jq -r '.manifests[0].digest' "out/${TARGET_NAME}/index.json")
+          {
+            echo "## Build: ${TARGET_NAME}"
+            echo ""
+            echo "- **Commit**: \`${SHA_TAG}\`"
+            echo "- **VERSION**: \`${VERSION}\`"
+            echo "- **OCI manifest digest** (\`out/${TARGET_NAME}/index.json\`): \`${manifest_digest}\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Login to GHCR
+        if: steps.image.outputs.publish == 'true'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # GITHUB_ACTOR is the runner's default env var for github.actor.
@@ -127,7 +172,9 @@ jobs:
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Upload to GHCR
+        if: steps.image.outputs.publish == 'true'
         env:
+          IMAGE_REPO: ${{ steps.image.outputs.repo }}
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
           SHA_TAG: ${{ steps.build.outputs.sha_tag }}
         run: |
@@ -141,14 +188,20 @@ jobs:
           [ -n "$SEMVER_TAG" ] && all_tags+=( "$SEMVER_TAG" )
           [ -n "$SHA_TAG" ]    && all_tags+=( "$SHA_TAG" )
           for tag in "${all_tags[@]}"; do
-              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
+              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "${IMAGE_REPO}:${tag}"
           done
-          docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
+          docker image push --all-tags "${IMAGE_REPO}"
 
       - name: TVC deployment details
-        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_http_server'
+        # Needs the pushed image's registry digest, so only after a push. Uses
+        # nothing but this repo's own GITHUB_TOKEN, so it also runs in forks
+        # and points at the fork's image.
+        if: >-
+          steps.image.outputs.publish == 'true' &&
+          (matrix.target.name == 'parser_app' || matrix.target.name == 'parser_http_server')
         shell: bash
         env:
+          IMAGE_REPO: ${{ steps.image.outputs.repo }}
           TARGET_NAME: ${{ matrix.target.name }}
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
           SHA_TAG: ${{ steps.build.outputs.sha_tag }}
@@ -158,7 +211,7 @@ jobs:
           # the always-unique commit SHA on PR/branch builds where SEMVER
           # isn't reproducible. Both reference the same digest below.
           tvc_tag="${SEMVER_TAG:-$SHA_TAG}"
-          container_url="ghcr.io/anchorageoss/${TARGET_NAME}:${tvc_tag}"
+          container_url="${IMAGE_REPO}:${tvc_tag}"
           container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
           docker create --name tmp-extract "${container_url}" /bin/true
           docker cp "tmp-extract:/${TARGET_NAME}" /tmp/binary
