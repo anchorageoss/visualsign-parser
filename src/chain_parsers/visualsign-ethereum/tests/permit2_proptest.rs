@@ -31,10 +31,10 @@ use visualsign_ethereum::token_metadata::{ErcStandard, TokenMetadata};
 use visualsign_ethereum::transaction_string_to_visual_sign;
 
 use common::{
-    AllowanceTransferDetails, BUILTIN_MAINNET_TOKENS, CMD_PERMIT2_PERMIT, IPermit2Ref,
-    IUniversalRouterRef, PERMIT2, PermitBatch, PermitDetails, PermitSingle, UR_V2_0, WETH,
-    builtin_token, collect_strings, expected_amount, expected_timestamp, is_far_future_rendering,
-    parse_rendered_amount,
+    AllowanceTransferDetails, BUILTIN_MAINNET_TOKENS, CMD_PERMIT2_PERMIT, CMD_PERMIT2_PERMIT_BATCH,
+    CMD_PERMIT2_TRANSFER_FROM_BATCH, IPermit2Ref, IUniversalRouterRef, MAINNET_UNIVERSAL_ROUTERS,
+    PERMIT2, PermitBatch, PermitDetails, PermitSingle, WETH, builtin_token, collect_strings,
+    expected_amount, expected_timestamp, parse_rendered_amount,
 };
 
 const CHAIN_ID: u64 = 1;
@@ -105,13 +105,26 @@ fn arb_amount() -> impl Strategy<Value = U160> {
     ]
 }
 
+fn timestamp_edges() -> Vec<u64> {
+    vec![
+        common::MAX_FOUR_DIGIT_YEAR_TS,
+        common::MAX_FOUR_DIGIT_YEAR_TS + 1,
+        common::CHRONO_MAX_TS,
+        common::CHRONO_MAX_TS + 1,
+    ]
+}
+
 fn arb_u48() -> impl Strategy<Value = U48> {
     let max = (1u64 << 48) - 1;
     prop_oneof![
         1 => Just(U48::ZERO),
         1 => Just(U48::from(max)),
+        // Edges of the parser's timestamp rendering: four-digit years, signed
+        // years up to chrono's maximum, and `unix:` beyond it.
+        1 => prop::sample::select(timestamp_edges()).prop_map(U48::from),
         3 => (0..=max).prop_map(U48::from),
         3 => (0..=common::MAX_FOUR_DIGIT_YEAR_TS).prop_map(U48::from),
+        1 => (common::MAX_FOUR_DIGIT_YEAR_TS..=common::CHRONO_MAX_TS).prop_map(U48::from),
     ]
 }
 
@@ -150,6 +163,8 @@ fn arb_sig_deadline() -> impl Strategy<Value = U256> {
         1 => Just(U256::from(u64::MAX)),
         6 => any::<u64>().prop_map(U256::from),
         6 => (0..=common::MAX_FOUR_DIGIT_YEAR_TS).prop_map(U256::from),
+        1 => prop::sample::select(timestamp_edges()).prop_map(U256::from),
+        1 => (common::MAX_FOUR_DIGIT_YEAR_TS..=common::CHRONO_MAX_TS).prop_map(U256::from),
         2 => any::<[u8; 32]>().prop_map(|b| U256::from_be_bytes(b) | (U256::from(1u8) << 64)),
     ]
 }
@@ -270,16 +285,10 @@ fn assert_permit_field(
     Ok(())
 }
 
-/// A rendered timestamp matches the independent formatter (loosely after
-/// year 9999).
+/// A rendered timestamp matches the independent formatter.
 fn assert_timestamp(rendered: &str, secs: u64) -> Result<(), TestCaseError> {
-    match expected_timestamp(secs) {
-        Some(want) => prop_assert_eq!(rendered, want.as_str()),
-        None => prop_assert!(
-            is_far_future_rendering(rendered, secs),
-            "timestamp {secs} rendered as {rendered:?}"
-        ),
-    }
+    let want = expected_timestamp(secs);
+    prop_assert_eq!(rendered, want.as_str());
     Ok(())
 }
 
@@ -504,13 +513,14 @@ proptest! {
     }
 
     /// Full pipeline, dispatched by `to`: Permit2 `permit` and `approve`, and a
-    /// Universal Router PERMIT2_PERMIT, through `transaction_string_to_visual_sign`
-    /// with the built-in registry.
+    /// PERMIT2_PERMIT sent to any of the registered mainnet Universal Routers,
+    /// through `transaction_string_to_visual_sign` with the built-in registry.
     #[test]
     fn pipeline_renders_permit2_amounts(
         permit in arb_permit_single(),
         weth in any::<bool>(),
         signature in arb_signature(),
+        router in prop::sample::select(MAINNET_UNIVERSAL_ROUTERS.to_vec()),
     ) {
         let mut permit = permit;
         if weth {
@@ -532,8 +542,8 @@ proptest! {
 
         let ur_input = (permit.clone(), signature).abi_encode_params();
         let ur = ur_execute(vec![CMD_PERMIT2_PERMIT], vec![ur_input.into()], Some(1_900_000_000));
-        let strings = pipeline_strings(UR_V2_0, &ur);
-        prop_assert!(strings.contains(&subtitle), "UR permit: want {subtitle:?}");
+        let strings = pipeline_strings(router, &ur);
+        prop_assert!(strings.contains(&subtitle), "UR {router} permit: want {subtitle:?}");
 
         let d = &permit.details;
         let approve = IPermit2Ref::approveCall {
@@ -547,6 +557,62 @@ proptest! {
         let prefix = format!("Approve {} {shown} {symbol} to spend", permit.spender);
         let strings = pipeline_strings(PERMIT2, &approve);
         prop_assert!(strings.iter().any(|s| s.starts_with(&prefix)), "approve: want {prefix:?}");
+    }
+
+    /// Universal Router PERMIT2_PERMIT_BATCH (0x03) and
+    /// PERMIT2_TRANSFER_FROM_BATCH (0x0d) are not decoded yet: each shows its
+    /// command name and the raw input hex. Pin that, and that neither is passed
+    /// off as a PermitSingle, so a decoder for them has to update this test.
+    // TODO: decode 0x03 and 0x0d, then assert their amounts here.
+    #[test]
+    fn universal_router_batch_commands_render_raw_input(
+        details in prop::collection::vec(arb_details(), 1..=5),
+        spender in arb_address(),
+        signature in arb_signature(),
+        transfers in prop::collection::vec(
+            (arb_address(), arb_address(), arb_amount(), arb_token()),
+            1..=5,
+        ),
+        batch_first in any::<bool>(),
+    ) {
+        let registry = test_registry();
+        let permit_batch = PermitBatch {
+            details,
+            spender,
+            sigDeadline: U256::from(1_900_000_000u64),
+        };
+        let permit_input = (permit_batch, signature).abi_encode_params();
+        let transfer_input = transfers
+            .into_iter()
+            .map(|(from, to, amount, token)| AllowanceTransferDetails { from, to, amount, token })
+            .collect::<Vec<_>>()
+            .abi_encode();
+        let mut commands = [
+            (CMD_PERMIT2_PERMIT_BATCH, "Permit2PermitBatch", permit_input),
+            (CMD_PERMIT2_TRANSFER_FROM_BATCH, "Permit2TransferFromBatch", transfer_input),
+        ];
+        if !batch_first {
+            commands.reverse();
+        }
+        let calldata = ur_execute(
+            commands.iter().map(|(c, _, _)| *c).collect(),
+            commands.iter().map(|(_, _, i)| i.clone().into()).collect(),
+            Some(1_900_000_000),
+        );
+        let field = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&calldata, CHAIN_ID, Some(&registry))
+            .expect("execute decodes");
+        let (_, layout) = preview(&field).expect("execute is a PreviewLayout");
+        let rendered = &layout.expanded.as_ref().expect("commands").fields;
+        prop_assert_eq!(rendered.len(), commands.len() + 1, "commands plus the deadline");
+        for (i, (_, name, input)) in commands.iter().enumerate() {
+            let (label, cmd) = preview(&rendered[i].signable_payload_field)
+                .expect("command is a PreviewLayout");
+            prop_assert_eq!(label, format!("Command {}", i + 1));
+            prop_assert_eq!(cmd.title.as_ref().map(|t| t.text.as_str()), Some(*name));
+            let want = format!("Input: 0x{}", hex::encode(input));
+            prop_assert_eq!(cmd.subtitle.as_ref().map(|t| t.text.as_str()), Some(want.as_str()));
+        }
     }
 
     /// Batch Permit2 calls the parser does not decode must still render without
@@ -609,7 +675,7 @@ proptest! {
     /// A `permit(owner, PermitBatch, sig)` must not render as a PermitSingle
     /// the call does not carry.
     #[test]
-    #[ignore = "known bug: Permit2Visualizer's inline-PermitSingle fallback misreads PermitBatch calldata"]
+    #[ignore = "known bug #610: Permit2Visualizer's inline-PermitSingle fallback misreads PermitBatch calldata"]
     fn permit_batch_is_not_rendered_as_fabricated_permit(
         details in prop::collection::vec(arb_details(), 1..=5),
         spender in arb_address(),
@@ -630,7 +696,7 @@ proptest! {
     /// A batch `transferFrom(AllowanceTransferDetails[])` must not render as a
     /// PermitSingle.
     #[test]
-    #[ignore = "known bug: Permit2Visualizer's inline-PermitSingle fallback misreads batch transferFrom calldata"]
+    #[ignore = "known bug #610: Permit2Visualizer's inline-PermitSingle fallback misreads batch transferFrom calldata"]
     fn transfer_from_batch_is_not_rendered_as_fabricated_permit(
         transfers in prop::collection::vec(
             (arb_address(), arb_address(), arb_amount(), arb_token()),
@@ -652,7 +718,7 @@ proptest! {
     /// PERMIT2_PERMIT with FLAG_ALLOW_REVERT (0x8a) still executes on chain
     /// (the dispatcher masks the command with 0x3f), so it must be shown.
     #[test]
-    #[ignore = "known bug: Universal Router commands with FLAG_ALLOW_REVERT are dropped from the display"]
+    #[ignore = "known bug #611: Universal Router commands with FLAG_ALLOW_REVERT are dropped from the display"]
     fn universal_router_allow_revert_permit_is_shown(
         permit in arb_permit_single(),
         signature in arb_signature(),

@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Real mainnet Permit2 calls, checked against an independent ABI decode.
+//! Real mainnet Permit2 calldata, checked against an independent ABI decode.
 //!
 //! Each `json-permit2-*` fixture in `tests/fixtures` carries the `to` and
 //! calldata of a real Ethereum mainnet transaction (hash and block in
@@ -82,41 +82,63 @@ const PERMIT2_FIXTURES: &[(&str, &str, u64, Outcome)] = &[
     ),
 ];
 
-/// Real mainnet calls the parser renders wrongly today, `(fixture name, tx
-/// hash, block, what goes wrong)`. `known_misrenders_render_correctly` is
-/// ignored until they are fixed; the inputs have no `.expected` snapshot on
-/// purpose, so the wrong output is not blessed.
-const KNOWN_MISRENDERS: &[(&str, &str, u64, &str)] = &[
-    (
-        "json-permit2-permit-batch",
-        "0xc346205520a2b15ec1388301df5f4810fb624e133fd2a325d4c7d1710a8a0216",
-        26_205_925,
-        "permit(PermitBatch) renders as a PermitSingle read from the calldata head",
-    ),
-    (
-        "json-permit2-transfer-from-batch",
-        "0xfb60c23358afb59cdc49595851f4d06185ce696f3daa09cbb9c737ed5364994f",
-        26_270_629,
-        "batch transferFrom renders as a PermitSingle",
-    ),
-    (
-        "json-permit2-lockdown-2",
-        "0x1b69d2285d610343af62f574cf58aa36cb96385d826d5fac935fdb4e71abe711",
-        26_219_155,
-        "lockdown with two pairs renders as a PermitSingle",
-    ),
-    (
-        "json-permit2-permit-transfer-from",
-        "0x4d6889e8697372de79386e974f2cbba12325d23715b979f4d96cb853d8033a32",
-        26_242_480,
-        "SignatureTransfer permitTransferFrom renders as an Unlimited PermitSingle",
-    ),
-    (
-        "json-permit2-ur-permit-allow-revert",
-        "0x56df5056cd7e804e992861328fa032cab7b0d85cd7dd246910000625f23c4a78",
-        26_270_407,
-        "PERMIT2_PERMIT with FLAG_ALLOW_REVERT (0x8a) is dropped from the command list",
-    ),
+/// Real mainnet calldata the parser renders wrongly today.
+struct KnownMisrender {
+    fixture: &'static str,
+    tx: &'static str,
+    block: u64,
+    /// The GitHub issue tracking the bug.
+    issue: u32,
+    what: &'static str,
+    /// The wrong line the parser shows today, pinned by
+    /// `known_misrenders_still_render_as_today` so a fix or behaviour change
+    /// is noticed.
+    current: &'static str,
+}
+
+/// Real mainnet calldata the parser renders wrongly. The inputs have no
+/// `.expected` snapshot on purpose, so the wrong output is not blessed.
+const KNOWN_MISRENDERS: &[KnownMisrender] = &[
+    KnownMisrender {
+        fixture: "json-permit2-permit-batch",
+        tx: "0xc346205520a2b15ec1388301df5f4810fb624e133fd2a325d4c7d1710a8a0216",
+        block: 26_205_925,
+        issue: 610,
+        what: "permit(PermitBatch) renders as a PermitSingle read from the calldata head",
+        current: "Permit 0x00000000F80762A6FAc58536D5715BEa6233dd97 to spend 0 of 0x000000003ed3404098a6b6d7ed7d976971cce40b",
+    },
+    KnownMisrender {
+        fixture: "json-permit2-transfer-from-batch",
+        tx: "0xfb60c23358afb59cdc49595851f4d06185ce696f3daa09cbb9c737ed5364994f",
+        block: 26_270_629,
+        issue: 610,
+        what: "batch transferFrom renders as a PermitSingle",
+        current: "Permit 0x0000000000000000000000000000000000000000 to spend 0 of 0x0000000000000000000000000000000000000000",
+    },
+    KnownMisrender {
+        fixture: "json-permit2-lockdown-2",
+        tx: "0x1b69d2285d610343af62f574cf58aa36cb96385d826d5fac935fdb4e71abe711",
+        block: 26_219_155,
+        issue: 610,
+        what: "lockdown with two pairs renders as a PermitSingle",
+        current: "Permit 0x00000000A0B86991C6218b36C1d19D4A2E9Eb0ce to spend 0 of 0x0000000000000000000000000000000000000000",
+    },
+    KnownMisrender {
+        fixture: "json-permit2-permit-transfer-from",
+        tx: "0x4d6889e8697372de79386e974f2cbba12325d23715b979f4d96cb853d8033a32",
+        block: 26_242_480,
+        issue: 610,
+        what: "SignatureTransfer permitTransferFrom renders as an Unlimited PermitSingle",
+        current: "Permit 0x0000000040C27eB70216fE6e353D6cC618d7b74c to spend Unlimited Amount of 0x00000000dac17f958d2ee523a2206206994597c1",
+    },
+    KnownMisrender {
+        fixture: "json-permit2-ur-permit-allow-revert",
+        tx: "0x56df5056cd7e804e992861328fa032cab7b0d85cd7dd246910000625f23c4a78",
+        block: 26_270_407,
+        issue: 611,
+        what: "PERMIT2_PERMIT with FLAG_ALLOW_REVERT (0x8a) is dropped from the command list",
+        current: "Uniswap Universal Router Execute: 1 commands ([V4Swap]), deadline 2026-10-25 15:21:44 UTC",
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,17 +206,35 @@ fn check(registry: &ContractRegistry, to: Address, data: &[u8]) -> Report {
     for a in &amounts {
         let decimals = registry_decimals(registry, a.token);
         let shown = expected_amount(a.amount, decimals);
-        let needle = match a.path {
-            "permit" | "UR PERMIT2_PERMIT" => {
-                if a.amount == U160::MAX {
+        // Symbol as the parser shows it: the registry's, or the token's Debug
+        // form for unknown tokens.
+        let symbol = builtin_token(a.token)
+            .map(|(sym, _)| sym.to_string())
+            .unwrap_or_else(|| format!("{:?}", a.token));
+        // The whole rendered line, so spender, token and parties are checked
+        // along with the amount. `prefix` lines continue with the expiry.
+        let (needle, prefix_only) = match (a.path, a.spender, a.from_to) {
+            ("permit" | "UR PERMIT2_PERMIT", Some(spender), _) => {
+                let shown = if a.amount == U160::MAX {
                     any_permit_max = true;
-                    "to spend Unlimited Amount of".to_string()
+                    "Unlimited Amount".to_string()
                 } else {
-                    format!("to spend {shown} of")
-                }
+                    shown
+                };
+                let token = a.token.to_string().to_lowercase();
+                (
+                    format!("Permit {spender} to spend {shown} of {token}"),
+                    false,
+                )
             }
-            "approve" => format!(" {shown} "),
-            "transferFrom" => format!("Transfer {shown} "),
+            ("approve", Some(spender), _) => (
+                format!("Approve {spender} {shown} {symbol} to spend {symbol} (expires: "),
+                true,
+            ),
+            ("transferFrom", _, Some((from, to))) => (
+                format!("Transfer {shown} {symbol} from {from} to {to}"),
+                false,
+            ),
             _ => {
                 unsupported = true;
                 expected.push(format!("{}: {shown} (not decoded by the parser)", a.path));
@@ -202,15 +242,14 @@ fn check(registry: &ContractRegistry, to: Address, data: &[u8]) -> Report {
             }
         };
         expected.push(format!("{}: {needle}", a.path));
-        let prefix = match a.path {
-            "approve" => "Approve ",
-            "transferFrom" => "Transfer ",
-            _ => "Permit ",
-        };
-        if !strings
-            .iter()
-            .any(|s| s.starts_with(prefix) && s.contains(&needle))
-        {
+        let found = strings.iter().any(|s| {
+            if prefix_only {
+                s.starts_with(&needle)
+            } else {
+                *s == needle
+            }
+        });
+        if !found {
             problems.push(format!("{}: expected {needle:?}", a.path));
         }
     }
@@ -306,22 +345,65 @@ fn permit2_mainnet_fixtures_render_decoded_amounts() {
     }
 }
 
-#[test]
-#[ignore = "known bugs: see KNOWN_MISRENDERS"]
-fn known_misrenders_render_correctly() {
+/// The calls for `issue` render what the reference decode says.
+fn assert_known_misrenders_fixed(issue: u32) {
     let (registry, _) = ContractRegistry::with_default_protocols();
     let mut failures = vec![];
-    for (name, tx, block, what) in KNOWN_MISRENDERS {
-        let (to, data) = read_fixture(name);
+    for m in KNOWN_MISRENDERS.iter().filter(|m| m.issue == issue) {
+        let (to, data) = read_fixture(m.fixture);
         let report = check(&registry, to, &data);
         if !report.problems.is_empty() {
             failures.push(format!(
-                "{name} ({tx} @ {block}): {what}\n  {:?}\n  preview: {:?}",
-                report.problems, report.preview
+                "{} ({} @ {}): {}\n  {:?}\n  preview: {:?}",
+                m.fixture, m.tx, m.block, m.what, report.problems, report.preview
             ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+#[ignore = "known bug #610: the inline-PermitSingle fallback misrenders PermitBatch, lockdown, SignatureTransfer and batch transferFrom"]
+fn known_misrenders_610_render_correctly() {
+    assert_known_misrenders_fixed(610);
+}
+
+#[test]
+#[ignore = "known bug #611: Universal Router commands with FLAG_ALLOW_REVERT are dropped from the display"]
+fn known_misrenders_611_render_correctly() {
+    assert_known_misrenders_fixed(611);
+}
+
+/// Pins today's wrong output for the known misrenders, so CI notices when a
+/// fix or any other behaviour change lands. When this fails because a bug
+/// was fixed, delete the entry's `current` line here and un-ignore the
+/// matching `known_misrenders_*_render_correctly` test.
+// TODO(#610): remove the #610 entries once the inline-permit fallback is fixed.
+// TODO(#611): remove the #611 entry once allow-revert commands are shown.
+#[test]
+fn known_misrenders_still_render_as_today() {
+    let (registry, _) = ContractRegistry::with_default_protocols();
+    for m in KNOWN_MISRENDERS {
+        let (to, data) = read_fixture(m.fixture);
+        let report = check(&registry, to, &data);
+        assert!(
+            !report.problems.is_empty(),
+            "{} ({}): #{} looks fixed; un-ignore known_misrenders_{}_render_correctly",
+            m.fixture,
+            m.tx,
+            m.issue,
+            m.issue
+        );
+        assert!(
+            report.preview.iter().any(|line| line == m.current),
+            "{} ({}): #{} output changed\n  want: {}\n  preview: {:?}",
+            m.fixture,
+            m.tx,
+            m.issue,
+            m.current,
+            report.preview
+        );
+    }
 }
 
 /// Survey mode: `P2_REAL_TXS=txs.jsonl P2_OUT=report.tsv cargo test -p

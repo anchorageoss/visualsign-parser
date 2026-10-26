@@ -94,8 +94,15 @@ alloy_sol_types::sol! {
 
 /// Permit2, at the same address on every chain.
 pub const PERMIT2: Address = address!("0x000000000022D473030F116dDEE9F6B43aC78BA3");
-/// Universal Router V2.0 on Ethereum mainnet (registered in the parser's config).
-pub const UR_V2_0: Address = address!("0x66a9893cc07d91d95644aedd05d03f95e1dba8af");
+/// Every Universal Router the parser registers on Ethereum mainnet (V1.2,
+/// V2.0, V2.1.1, V2.2.0; `UniswapConfig`).
+pub const MAINNET_UNIVERSAL_ROUTERS: [Address; 4] = [
+    address!("0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"),
+    address!("0x66a9893cc07d91d95644aedd05d03f95e1dba8af"),
+    address!("0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca"),
+    address!("0xcb640a86855f1a828c27241ba364348de28abe66"),
+];
+
 /// WETH on Ethereum mainnet.
 pub const WETH: Address = address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
 
@@ -175,23 +182,29 @@ pub fn parse_rendered_amount(rendered: &str, decimals: Option<u8>) -> Option<U25
     }
 }
 
-/// Last second of 9999-12-31 UTC: the largest timestamp `%Y` prints without a
-/// sign.
+/// Last second of 9999-12-31 UTC: the largest timestamp `%Y` prints with four
+/// digits and no sign.
 pub const MAX_FOUR_DIGIT_YEAR_TS: u64 = 253_402_300_799;
 
+/// Last second of chrono's `NaiveDate::MAX` (262142-12-31 23:59:59 UTC).
+/// Anything later has no chrono date, and the parser prints `unix:<value>`.
+pub const CHRONO_MAX_TS: u64 = 8_210_266_876_799;
+
 /// How the parser should render a Unix timestamp in seconds, computed
-/// independently of chrono (days-to-civil from Howard Hinnant's
-/// `chrono`-compatible algorithms). `None` for timestamps after year 9999,
-/// where the parser either prints a `+`-signed year or falls back to
-/// `unix:<value>` depending on chrono's range; callers check those loosely.
-pub fn expected_timestamp(secs: u64) -> Option<String> {
+/// independently of chrono (Howard Hinnant's days-to-civil algorithm):
+/// - `u64::MAX` is the "never" sentinel;
+/// - up to year 9999: `YYYY-MM-DD HH:MM UTC`;
+/// - years 10000 to 262142: `+YYYYYY-MM-DD HH:MM UTC` (chrono signs years
+///   past 9999);
+/// - later (including uint48 max, about year 8.9 million): `unix:<value>`.
+pub fn expected_timestamp(secs: u64) -> String {
     if secs == u64::MAX {
-        return Some("never".into());
+        return "never".into();
     }
-    if secs > MAX_FOUR_DIGIT_YEAR_TS {
-        return None;
+    if secs > CHRONO_MAX_TS {
+        return format!("unix:{secs}");
     }
-    let days = (secs / 86_400) as i64;
+    let days = i64::try_from(secs / 86_400).expect("below CHRONO_MAX_TS");
     let rem = secs % 86_400;
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -203,14 +216,12 @@ pub fn expected_timestamp(secs: u64) -> Option<String> {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
     let (hour, minute) = (rem / 3_600, rem % 3_600 / 60);
-    Some(format!(
-        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC"
-    ))
-}
-
-/// Loose check for timestamps `expected_timestamp` leaves open.
-pub fn is_far_future_rendering(rendered: &str, secs: u64) -> bool {
-    rendered.starts_with('+') || rendered == format!("unix:{secs}")
+    let year = if year > 9_999 {
+        format!("+{year}")
+    } else {
+        format!("{year:04}")
+    };
+    format!("{year}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
 }
 
 /// Every display string in a serialized payload or field: labels, titles,
@@ -232,6 +243,10 @@ pub struct DecodedAmount {
     pub path: &'static str,
     pub token: Address,
     pub amount: U160,
+    /// The spender an allowance is granted to (approve and permits).
+    pub spender: Option<Address>,
+    /// `(from, to)` of a transfer.
+    pub from_to: Option<(Address, Address)>,
 }
 
 /// Decode Permit2 amounts from calldata sent to Permit2 or to a Universal
@@ -250,6 +265,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                     path: "approve",
                     token: c.token,
                     amount: c.amount,
+                    spender: Some(c.spender),
+                    from_to: None,
                 }],
             ),
             P::permit_0(c) => (
@@ -258,6 +275,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                     path: "permit",
                     token: c.permitSingle.details.token,
                     amount: c.permitSingle.details.amount,
+                    spender: Some(c.permitSingle.spender),
+                    from_to: None,
                 }],
             ),
             P::permit_1(c) => (
@@ -269,6 +288,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                         path: "permitBatch",
                         token: d.token,
                         amount: d.amount,
+                        spender: Some(c.permitBatch.spender),
+                        from_to: None,
                     })
                     .collect(),
             ),
@@ -278,6 +299,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                     path: "transferFrom",
                     token: c.token,
                     amount: c.amount,
+                    spender: None,
+                    from_to: Some((c.from, c.to)),
                 }],
             ),
             P::transferFrom_1(c) => (
@@ -288,6 +311,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                         path: "transferFromBatch",
                         token: d.token,
                         amount: d.amount,
+                        spender: None,
+                        from_to: Some((d.from, d.to)),
                     })
                     .collect(),
             ),
@@ -314,6 +339,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                         path: "UR PERMIT2_PERMIT",
                         token: p.details.token,
                         amount: p.details.amount,
+                        spender: Some(p.spender),
+                        from_to: None,
                     });
                 }
             }
@@ -323,6 +350,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                         path: "UR PERMIT2_PERMIT_BATCH",
                         token: d.token,
                         amount: d.amount,
+                        spender: Some(p.spender),
+                        from_to: None,
                     }));
                 }
             }
@@ -334,6 +363,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                         path: "UR PERMIT2_TRANSFER_FROM",
                         token,
                         amount,
+                        spender: None,
+                        from_to: None,
                     });
                 }
             }
@@ -343,6 +374,8 @@ pub fn decode_reference(to: Address, calldata: &[u8]) -> (String, Vec<DecodedAmo
                         path: "UR PERMIT2_TRANSFER_FROM_BATCH",
                         token: d.token,
                         amount: d.amount,
+                        spender: None,
+                        from_to: Some((d.from, d.to)),
                     }));
                 }
             }

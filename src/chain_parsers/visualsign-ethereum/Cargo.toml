@@ -48,7 +48,7 @@ visualsign = { workspace = true }
 
 [dev-dependencies]
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
-proptest = "=1.9.0"
+proptest = "1"
 
 [lints]
 workspace = true

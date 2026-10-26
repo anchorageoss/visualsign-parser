@@ -120,7 +120,7 @@ static FIXTURES: [&str; 15] = [
     "json-legacy",
     // Real mainnet Universal Router V2.1.1 swap (Permit2 permit + V3 USDC->USDT).
     "json-uniswap-ur-v2_1_1",
-    // Real mainnet Permit2 calls (#346). Tx hashes and blocks are pinned in
+    // Real mainnet Permit2 calldata (#346). Tx hashes and blocks are pinned in
     // permit2_mainnet.rs, which also checks each against an independent decode.
     "json-permit2-approve-u160-max",
     "json-permit2-approve-2pow159-usdt",
