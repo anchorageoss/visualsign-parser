@@ -32,6 +32,8 @@ docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}'
 IMAGE_URL="ghcr.io/anchorageoss/parser_http_server:<tag>@sha256:<image-digest>"
 ```
 
+To deploy a parser you built yourself, publish it from your fork first and use your own image here. See [Deploying from a fork](#deploying-from-a-fork).
+
 Hash the pivot binary yourself. This is the value QOS measures, and the value a verifier will later find in the attested manifest:
 
 ```bash
@@ -164,6 +166,71 @@ For how each check works and how to implement them in your own verifier, see [At
 ## Updating
 
 Every `deploy-pivot` creates a new deployment with a new manifest, so the manifest hash changes. The binary hash and PCRs change only if you change the image or TVC changes the QOS runtime. Re-run step 4 after each deploy and update the values you pin.
+
+## Deploying from a fork
+
+The images under `ghcr.io/anchorageoss` are built and pushed by this repo's `stagex` workflow. To deploy a parser you changed, run the same workflow in your fork. It pushes to your own namespace, `ghcr.io/<owner>/<target>`, and you deploy that image with steps 1 to 4 above.
+
+### Why a pull request can't publish your image
+
+Workflows for a pull request from a fork run in this repository, with a read-only `GITHUB_TOKEN` and none of its secrets. That stops code in a pull request from writing to this repository's packages or reading its credentials. Those runs still build every image, but they skip the registry login and push. To get a published image, run the workflow in your fork, where it uses your fork's own token.
+
+### Publish from your fork
+
+1. In your fork, open the **Actions** tab and enable workflows. GitHub disables them on new forks.
+2. Start a `stagex` run in one of these ways:
+   - Run it manually: **Actions → stagex → Run workflow**, or `gh workflow run stagex.yml --repo <owner>/visualsign-parser --ref <branch-or-tag>`.
+   - Push a `v*.*.*` tag.
+   - Push to `main` with changes under `src/`, `images/`, `scripts/`, `.github/` or the `Makefile`.
+3. Find the images at `ghcr.io/<owner>/parser_app`, `parser_cli`, `parser_gateway` and `parser_http_server`. `<owner>` is your user or organization name in lowercase, since ghcr.io only accepts lowercase paths. Every build is tagged with its full commit SHA. Manual runs and tag pushes are also tagged with the branch or tag name, and pushes to `main` with `latest`, `main` and `v<semver>`.
+4. New packages on ghcr.io are private. TVC has to pull the image, so make each package you deploy public: on the package's page, open **Package settings** and change its visibility.
+
+You don't need to add secrets or change settings. The job requests `packages: write` itself and pushes with your fork's `GITHUB_TOKEN`.
+
+The `DOCKERHUB_API_KEY` secret is optional. It only logs in to Docker Hub to avoid pull rate limits on the stagex base images, and the login is skipped when the secret isn't set. Leave it unset in your fork: the login uses this repo's Docker Hub username, so another account's key fails.
+
+Pushing to `main` in your fork also runs the `release` workflow. It tags a version, creates a GitHub release in your fork and starts `stagex` for that tag. Disable the `release` workflow in your fork if you don't want that.
+
+### Deploying your image to TVC
+
+The `TVC Deploy` workflow only runs in `anchorageoss/visualsign-parser`, because it needs that repository's Turnkey credentials. Deploy your image from your own machine with `tvc-deploy`, against your own Turnkey organization, as in steps 1 to 4: set `IMAGE` to your `ghcr.io/<owner>/parser_http_server:<tag>`. `tvc-deploy` authenticates with your `tvc login` configuration, or with `TVC_ORG_ID`, `TVC_API_KEY_PUBLIC` and `TVC_API_KEY_PRIVATE` set in the environment.
+
+For `parser_app` and `parser_http_server`, each `stagex` run's summary lists the pinned image URL and the expected pivot digest for your image. On a tagged build with a matching release in your fork, the run also adds them to that release's notes.
+
+### Verifying an image someone else built
+
+Before you deploy an image you didn't build, such as one from a contributor's fork, rebuild it rather than trusting it. The images are built with [StageX](https://stagex.tools), so the same commit and build inputs produce the same binary.
+
+Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and is derived from the branch name and commit history, so pass the same value when you rebuild. The build needs Docker with the containerd image store enabled and a `docker-container` buildx builder, as in CI:
+
+```bash
+git fetch https://github.com/<owner>/visualsign-parser <commit>
+git checkout <commit>
+docker buildx create --driver docker-container --name build --use   # once
+make VERSION='<version>' out/parser_http_server/index.json
+jq -r '.manifests[0].digest' out/parser_http_server/index.json      # compare with the run summary
+```
+
+Then compare the pivot binary from your build with the one in the published image. This is the hash TVC measures, so it's the check that matters:
+
+```bash
+# Your build
+env -C out/parser_http_server tar -cf - . | docker load
+c=$(docker create anchorageoss-visualsign-parser/parser_http_server:latest /parser_http_server)
+docker cp "$c:/parser_http_server" ./local_parser_http_server && docker rm "$c"
+PIVOT_DIGEST=$(sha256sum local_parser_http_server | awk '{print $1}')
+
+# The published image
+IMAGE=ghcr.io/<owner>/parser_http_server:<commit>
+docker pull "$IMAGE"
+docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}'
+IMAGE_URL="ghcr.io/<owner>/parser_http_server:<commit>@sha256:<image-digest>"
+c=$(docker create "$IMAGE_URL" /parser_http_server)
+docker cp "$c:/parser_http_server" ./published_parser_http_server && docker rm "$c"
+sha256sum published_parser_http_server   # must equal $PIVOT_DIGEST
+```
+
+If the hashes match, deploy with the image pinned by digest (`IMAGE_URL`) and the `PIVOT_DIGEST` from your own build, as in [step 3](#3-deploy). `deploy-pivot` re-derives the digest from the image it pulls and refuses a mismatch, and the attested manifest records the hash you approved.
 
 ## Next steps
 
