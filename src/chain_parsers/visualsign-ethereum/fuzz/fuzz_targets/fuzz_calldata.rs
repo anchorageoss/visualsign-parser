@@ -14,8 +14,20 @@
 //!
 //! Each input is run through the Permit2 and Universal Router visualizers
 //! directly and through the full transaction pipeline. The invariant is no
-//! panic; libFuzzer's -rss_limit_mb / -malloc_limit_mb catch unbounded
-//! allocation.
+//! panic and no unbounded memory growth (-rss_limit_mb).
+//!
+//! alloy-sol-types reserves Vec capacity from ABI length words with
+//! `try_with_capacity`, so calldata with a huge array length makes it request
+//! tens of GB, which fails cleanly (or is never touched) in a normal build.
+//! Under the default AddressSanitizer build, libFuzzer's -malloc_limit_mb and
+//! ASan's maximum-allocation check report those requests as out-of-memory
+//! crashes, and with `ASAN_OPTIONS=allocator_may_return_null=1` ASan spends
+//! most of its time poisoning shadow memory for them. Run this target with
+//! `-s none` (or expect those reports):
+//!
+//! ```text
+//! cargo +nightly fuzz run -s none fuzz_calldata corpus/fuzz_calldata seeds/fuzz_calldata -- -rss_limit_mb=2048
+//! ```
 
 use libfuzzer_sys::fuzz_target;
 use visualsign::vsptrait::VisualSignOptions;

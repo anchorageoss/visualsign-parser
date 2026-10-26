@@ -6,7 +6,8 @@ use visualsign_ethereum::transaction_string_to_visual_sign;
 
 // Feed arbitrary bytes as a transaction string into the full visualsign-ethereum
 // stack. Exercises hex/RLP and JSON transaction parsing, dispatch by `to`
-// address, calldata decoding and SignablePayload construction.
+// address, calldata decoding and SignablePayload construction. See
+// fuzz_calldata.rs for why ABI length words trip ASan's allocation checks.
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {
         let _ = transaction_string_to_visual_sign(s, VisualSignOptions::default());
