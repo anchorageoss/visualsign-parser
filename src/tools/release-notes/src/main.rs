@@ -74,7 +74,7 @@ fn main() -> Result<()> {
 
     let release = collect(&git, &repo, &from, &to)?;
     let out = match args.format {
-        Format::Json => serde_json::to_string_pretty(&release)? + "\n",
+        Format::Json => serde_json::to_string_pretty(&release.visible_to(args.audience))? + "\n",
         Format::Slack => render(&release, Style::Slack, args.audience, footer.as_deref()),
         Format::Markdown => render(&release, Style::Markdown, args.audience, footer.as_deref()),
     };
