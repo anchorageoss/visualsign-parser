@@ -14,6 +14,8 @@ cli-plugin = ["dep:clap", "dep:parser_cli_core"]
 alloy-primitives = { version = "1.3.0", default-features = false, features = ["std"] }
 clap = { version = "4.0", features = ["derive"], optional = true }
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
+alloy-dyn-abi = { version = "1.4.1", default-features = false, features = ["eip712"] }
+k256 = { version = "0.13", features = ["ecdsa"], default-features = false }
 rmp-serde = "1.3"
 serde = { workspace = true }
 # `raw_value` keeps the action's exact bytes; `preserve_order` is deliberately

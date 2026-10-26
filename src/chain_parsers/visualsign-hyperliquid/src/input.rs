@@ -144,6 +144,7 @@ struct AgentMessage {
 pub enum Request {
     L1(Box<L1Request>),
     UserSigned(UserSignedRequest),
+    Multisig(Box<crate::multisig::MultisigRequest>),
 }
 
 pub fn parse(input: &str) -> Result<Request, String> {
@@ -154,6 +155,12 @@ pub fn parse(input: &str) -> Result<Request, String> {
         ));
     }
     check_depth(input)?;
+    let header: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| format!("invalid envelope: {e}"))?;
+    if header.get("kind").and_then(Value::as_str) == Some("multisig") {
+        crate::multisig_strict::parse(input)?;
+        return crate::multisig::parse(input).map(|r| Request::Multisig(Box::new(r)));
+    }
     let envelope: Envelope<'_> =
         serde_json::from_str(input.trim()).map_err(|e| format!("invalid envelope: {e}"))?;
     match envelope.kind.as_str() {
@@ -178,7 +185,7 @@ pub fn parse(input: &str) -> Result<Request, String> {
 }
 
 /// Refuse JSON nested deeper than [`MAX_DEPTH`], scanning bytes outside strings.
-fn check_depth(input: &str) -> Result<(), String> {
+pub(crate) fn check_depth(input: &str) -> Result<(), String> {
     let mut depth = 0usize;
     let mut in_string = false;
     let mut escaped = false;
@@ -348,7 +355,7 @@ fn refuse_non_integers(value: &Value) -> Result<(), String> {
     }
 }
 
-fn parse_user_signed(typed_data: &str) -> Result<UserSignedRequest, String> {
+pub(crate) fn parse_user_signed(typed_data: &str) -> Result<UserSignedRequest, String> {
     let typed: TypedData<StrictMap<Value>> = serde_json::from_str(typed_data)
         .map_err(|e| format!("typedData is not a Hyperliquid user-signed payload: {e}"))?;
     let spec: &UserSignedSpec = user_signed::spec_for(&typed.primary_type).ok_or_else(|| {
@@ -369,6 +376,15 @@ fn parse_user_signed(typed_data: &str) -> Result<UserSignedRequest, String> {
         );
     }
     let fields = user_signed::check_message(spec, d.chain_id, &typed.message.0)?;
+    if spec.name == "ConvertToMultiSigUser" {
+        let signers = typed
+            .message
+            .0
+            .get("signers")
+            .and_then(Value::as_str)
+            .ok_or("missing signers")?;
+        crate::multisig::conversion_signers(signers)?;
+    }
     match fields.iter().find(|(n, _)| *n == "hyperliquidChain") {
         Some((_, FieldValue::Str(chain))) if chain == "Mainnet" || chain == "Testnet" => {}
         Some((_, other)) => {

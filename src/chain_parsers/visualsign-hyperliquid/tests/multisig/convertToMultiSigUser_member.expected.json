@@ -1,0 +1,191 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Approve Native Multisig Action",
+      "Label": "Signing Role",
+      "TextV2": {
+        "Text": "Approve Native Multisig Action"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Requested Signing Identity",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Requested identity only; key ownership must be checked by the signing wallet",
+      "Label": "Identity Trust",
+      "TextV2": {
+        "Text": "Requested identity only; key ownership must be checked by the signing wallet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x0000000000000000000000000000000000000005"
+      },
+      "FallbackText": "0x0000000000000000000000000000000000000005",
+      "Label": "Multisig Account",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Caller-supplied membership; not proof of current network state. The signing wallet must authenticate its pinned configuration",
+      "Label": "Configuration Trust",
+      "TextV2": {
+        "Text": "Caller-supplied membership; not proof of current network state. The signing wallet must authenticate its pinned configuration"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2 of 2",
+      "Label": "Required Approvals",
+      "TextV2": {
+        "Text": "2 of 2"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      "FallbackText": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf",
+      "Label": "Configured Member 1",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Configured Member 2",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "Direct Member Leader",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported",
+      "Label": "HyperEVM",
+      "TextV2": {
+        "Text": "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Change Native Multisig Configuration",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Change Native Multisig Configuration"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1 of 2",
+      "Label": "New Threshold",
+      "TextV2": {
+        "Text": "1 of 2"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      "FallbackText": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf",
+      "Label": "New Member 1",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "New Member 2",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "{\"authorizedUsers\": [\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\", \"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"], \"threshold\": 1}",
+      "Label": "New Signer Configuration (exact signed JSON)",
+      "TextV2": {
+        "Text": "{\"authorizedUsers\": [\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\", \"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"], \"threshold\": 1}"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2023-11-14 22:13:20 UTC (1700000000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2023-11-14 22:13:20 UTC (1700000000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "421614",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "421614"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2023-11-14 22:13:20 UTC (1700000000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2023-11-14 22:13:20 UTC (1700000000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xcfe6b2e95dce5153925e4946194b07f302b5ed12c5fdc29f672dcdb303665777",
+      "Label": "Native Signing Digest",
+      "TextV2": {
+        "Text": "0xcfe6b2e95dce5153925e4946194b07f302b5ed12c5fdc29f672dcdb303665777"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields",
+      "Label": "Authorization Scope",
+      "TextV2": {
+        "Text": "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidNativeMultisig",
+  "Title": "Hyperliquid: Approve Native Multisig Action",
+  "Version": "0"
+}

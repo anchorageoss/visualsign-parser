@@ -222,6 +222,30 @@ mod hyperliquid_tests {
     }
 
     #[test]
+    fn create_registry_hyperliquid_verifies_multisig_leader() {
+        let input = include_str!(
+            "../../../chain_parsers/visualsign-hyperliquid/tests/multisig/order-leader.json"
+        );
+        let rendered = registry()
+            .convert_transaction(&Chain::Hyperliquid, input, VisualSignOptions::default())
+            .unwrap()
+            .payload
+            .to_json()
+            .unwrap();
+        assert!(rendered.contains("Verified Member Approvals"), "{rendered}");
+        assert!(
+            rendered.contains("Caller-supplied membership"),
+            "{rendered}"
+        );
+        let tampered = input.replace("1100", "1101");
+        assert!(
+            registry()
+                .convert_transaction(&Chain::Hyperliquid, &tampered, VisualSignOptions::default())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn create_registry_hyperliquid_refuses_a_tampered_nonce() {
         let tampered = NOOP.replace("1761480000000", "1761480000001");
         assert!(

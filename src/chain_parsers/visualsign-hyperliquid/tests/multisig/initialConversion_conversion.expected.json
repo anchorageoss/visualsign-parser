@@ -1,0 +1,143 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Convert Account to Native Multisig",
+      "Label": "Signing Role",
+      "TextV2": {
+        "Text": "Convert Account to Native Multisig"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x6813eb9362372eef6200f3b1dbc3f819671cba69"
+      },
+      "FallbackText": "0x6813eb9362372eef6200f3b1dbc3f819671cba69",
+      "Label": "Requested Signing Identity",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "Requested identity only; key ownership must be checked by the signing wallet",
+      "Label": "Identity Trust",
+      "TextV2": {
+        "Text": "Requested identity only; key ownership must be checked by the signing wallet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported",
+      "Label": "HyperEVM",
+      "TextV2": {
+        "Text": "Native multisig does not protect this address on HyperEVM; CoreWriter is unsupported"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Change Native Multisig Configuration",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Change Native Multisig Configuration"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2 of 2",
+      "Label": "New Threshold",
+      "TextV2": {
+        "Text": "2 of 2"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      "FallbackText": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf",
+      "Label": "New Member 1",
+      "Type": "address_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+      },
+      "FallbackText": "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "Label": "New Member 2",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "{\"authorizedUsers\": [\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\", \"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"], \"threshold\": 2}",
+      "Label": "New Signer Configuration (exact signed JSON)",
+      "TextV2": {
+        "Text": "{\"authorizedUsers\": [\"0x2b5ad5c4795c026514f8317c7a215e218dccd6cf\", \"0x7e5f4552091a69125d5dfcb7b8c2659029395bdf\"], \"threshold\": 2}"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2023-11-14 22:13:20 UTC (1700000000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2023-11-14 22:13:20 UTC (1700000000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "421614",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "421614"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2023-11-14 22:13:20 UTC (1700000000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2023-11-14 22:13:20 UTC (1700000000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xf9714fc9f6162b214386fa1cb45385379ddd3b2cd95a257ed2201ed31469a781",
+      "Label": "Native Signing Digest",
+      "TextV2": {
+        "Text": "0xf9714fc9f6162b214386fa1cb45385379ddd3b2cd95a257ed2201ed31469a781"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields",
+      "Label": "Authorization Scope",
+      "TextV2": {
+        "Text": "Native signatures bind the action, network, nonce and multisig/leader context where applicable; local request IDs and supplied membership are not additional signed fields"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidNativeMultisig",
+  "Title": "Hyperliquid: Convert Account to Native Multisig",
+  "Version": "0"
+}

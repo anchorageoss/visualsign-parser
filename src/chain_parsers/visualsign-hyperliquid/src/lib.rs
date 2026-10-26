@@ -18,6 +18,8 @@ pub mod cli_plugin;
 pub mod hash;
 pub mod input;
 pub mod l1;
+pub mod multisig;
+mod multisig_strict;
 mod render;
 pub mod tx;
 pub mod user_signed;
