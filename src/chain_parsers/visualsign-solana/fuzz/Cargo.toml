@@ -31,3 +31,10 @@ path = "fuzz_targets/fuzz_versioned_transaction.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_token_2022_instruction"
+path = "fuzz_targets/fuzz_token_2022_instruction.rs"
+test = false
+doc = false
+bench = false

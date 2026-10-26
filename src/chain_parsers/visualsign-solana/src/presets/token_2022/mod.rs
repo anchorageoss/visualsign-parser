@@ -1006,6 +1006,7 @@ fn preview_field(
 mod tests {
     use super::*;
     use solana_pubkey::Pubkey;
+    mod adversarial_test;
     mod fixture_test;
 
     fn dummy_account_strings(n: usize) -> Vec<String> {
