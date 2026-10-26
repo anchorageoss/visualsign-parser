@@ -2,3 +2,6 @@ target
 corpus
 artifacts
 coverage
+# The parent .gitignore ignores Cargo.lock; this crate is its own workspace
+# and its lock is committed, as for visualsign-solana/fuzz.
+!Cargo.lock
