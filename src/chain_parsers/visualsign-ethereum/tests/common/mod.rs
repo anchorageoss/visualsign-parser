@@ -175,6 +175,44 @@ pub fn parse_rendered_amount(rendered: &str, decimals: Option<u8>) -> Option<U25
     }
 }
 
+/// Last second of 9999-12-31 UTC: the largest timestamp `%Y` prints without a
+/// sign.
+pub const MAX_FOUR_DIGIT_YEAR_TS: u64 = 253_402_300_799;
+
+/// How the parser should render a Unix timestamp in seconds, computed
+/// independently of chrono (days-to-civil from Howard Hinnant's
+/// `chrono`-compatible algorithms). `None` for timestamps after year 9999,
+/// where the parser either prints a `+`-signed year or falls back to
+/// `unix:<value>` depending on chrono's range; callers check those loosely.
+pub fn expected_timestamp(secs: u64) -> Option<String> {
+    if secs == u64::MAX {
+        return Some("never".into());
+    }
+    if secs > MAX_FOUR_DIGIT_YEAR_TS {
+        return None;
+    }
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let (hour, minute) = (rem / 3_600, rem % 3_600 / 60);
+    Some(format!(
+        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC"
+    ))
+}
+
+/// Loose check for timestamps `expected_timestamp` leaves open.
+pub fn is_far_future_rendering(rendered: &str, secs: u64) -> bool {
+    rendered.starts_with('+') || rendered == format!("unix:{secs}")
+}
+
 /// Every display string in a serialized payload or field: labels, titles,
 /// subtitles, texts and fallback texts.
 pub fn collect_strings(value: &Value, out: &mut Vec<String>) {

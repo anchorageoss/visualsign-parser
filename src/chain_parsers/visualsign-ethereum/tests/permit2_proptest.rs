@@ -33,7 +33,8 @@ use visualsign_ethereum::transaction_string_to_visual_sign;
 use common::{
     AllowanceTransferDetails, BUILTIN_MAINNET_TOKENS, CMD_PERMIT2_PERMIT, IPermit2Ref,
     IUniversalRouterRef, PERMIT2, PermitBatch, PermitDetails, PermitSingle, UR_V2_0, WETH,
-    builtin_token, collect_strings, expected_amount, parse_rendered_amount,
+    builtin_token, collect_strings, expected_amount, expected_timestamp, is_far_future_rendering,
+    parse_rendered_amount,
 };
 
 const CHAIN_ID: u64 = 1;
@@ -78,7 +79,7 @@ fn known(token: Address) -> Option<(String, u8)> {
         .map(|(_, s, d)| ((*s).to_string(), *d))
 }
 
-// ── Strategies ───────────────────────────────────────────────────────────────
+// --- Strategies ---
 
 fn u160_edges() -> Vec<U160> {
     let u128_max = U160::from(u128::MAX);
@@ -109,7 +110,8 @@ fn arb_u48() -> impl Strategy<Value = U48> {
     prop_oneof![
         1 => Just(U48::ZERO),
         1 => Just(U48::from(max)),
-        6 => (0..=max).prop_map(U48::from),
+        3 => (0..=max).prop_map(U48::from),
+        3 => (0..=common::MAX_FOUR_DIGIT_YEAR_TS).prop_map(U48::from),
     ]
 }
 
@@ -141,13 +143,24 @@ prop_compose! {
     }
 }
 
+/// `sigDeadline` is a uint256: mostly u64 values (including the u64::MAX
+/// "never" sentinel), sometimes wider than u64.
+fn arb_sig_deadline() -> impl Strategy<Value = U256> {
+    prop_oneof![
+        1 => Just(U256::from(u64::MAX)),
+        6 => any::<u64>().prop_map(U256::from),
+        6 => (0..=common::MAX_FOUR_DIGIT_YEAR_TS).prop_map(U256::from),
+        2 => any::<[u8; 32]>().prop_map(|b| U256::from_be_bytes(b) | (U256::from(1u8) << 64)),
+    ]
+}
+
 prop_compose! {
     fn arb_permit_single()(
         details in arb_details(),
         spender in arb_address(),
-        sig_deadline in any::<u64>(),
+        sig_deadline in arb_sig_deadline(),
     ) -> PermitSingle {
-        PermitSingle { details, spender, sigDeadline: U256::from(sig_deadline) }
+        PermitSingle { details, spender, sigDeadline: sig_deadline }
     }
 }
 
@@ -155,7 +168,7 @@ fn arb_signature() -> impl Strategy<Value = Bytes> {
     prop::collection::vec(any::<u8>(), 0..=65).prop_map(Bytes::from)
 }
 
-// ── Expectations ─────────────────────────────────────────────────────────────
+// --- Expectations ---
 
 /// Amount string the parser should show, and the symbol it should use.
 fn expected_for(token: Address, amount: U160) -> (String, String) {
@@ -218,8 +231,12 @@ fn assert_permit_field(
         ))
     })?;
     prop_assert_eq!(label, "Permit2 Permit");
-    let subtitle = layout.subtitle.as_ref().map(|s| s.text.clone());
-    prop_assert_eq!(subtitle, Some(expected_permit_subtitle(p)));
+    let subtitle = layout
+        .subtitle
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
+    prop_assert_eq!(&subtitle, &expected_permit_subtitle(p));
 
     let fields = expanded_texts(layout);
     let get = |name: &str| {
@@ -233,14 +250,35 @@ fn assert_permit_field(
     prop_assert_eq!(get("Amount").parse::<U160>().ok(), Some(p.details.amount));
     prop_assert_eq!(get("Token").parse::<Address>().ok(), Some(p.details.token));
     prop_assert_eq!(get("Spender").parse::<Address>().ok(), Some(p.spender));
-    // The subtitle's scaled amount parses back to the raw amount.
+    assert_timestamp(&get("Expires"), p.details.expiration.to::<u64>())?;
+    match u64::try_from(p.sigDeadline) {
+        Ok(secs) => assert_timestamp(&get("Sig Deadline"), secs)?,
+        Err(_) => prop_assert_eq!(get("Sig Deadline"), format!("unix:{}", p.sigDeadline)),
+    }
+    // The scaled amount in the rendered subtitle parses back to the raw amount.
     if p.details.amount != U160::MAX {
         let decimals = known(p.details.token).map(|(_, d)| d);
-        let (shown, _) = expected_for(p.details.token, p.details.amount);
+        let rendered = subtitle
+            .split_once(" to spend ")
+            .and_then(|(_, rest)| rest.rsplit_once(" of "))
+            .map(|(amount, _)| amount);
         prop_assert_eq!(
-            parse_rendered_amount(&shown, decimals),
+            rendered.and_then(|a| parse_rendered_amount(a, decimals)),
             Some(U256::from(p.details.amount))
         );
+    }
+    Ok(())
+}
+
+/// A rendered timestamp matches the independent formatter (loosely after
+/// year 9999).
+fn assert_timestamp(rendered: &str, secs: u64) -> Result<(), TestCaseError> {
+    match expected_timestamp(secs) {
+        Some(want) => prop_assert_eq!(rendered, want.as_str()),
+        None => prop_assert!(
+            is_far_future_rendering(rendered, secs),
+            "timestamp {secs} rendered as {rendered:?}"
+        ),
     }
     Ok(())
 }
@@ -316,7 +354,52 @@ fn assert_no_fabricated_permit(
     Ok(())
 }
 
-// ── Properties ───────────────────────────────────────────────────────────────
+/// Hand-pinned amount strings, so the `format_units` oracle the properties
+/// share with the parser is itself checked against literals.
+#[test]
+fn expected_amount_literals() {
+    let two_pow_159 = U160::from(1u8) << 159;
+    let cases = [
+        (
+            two_pow_159,
+            18,
+            "730750818665451459101842416358.141509827966271488",
+        ),
+        (
+            two_pow_159,
+            6,
+            "730750818665451459101842416358141509827966.271488",
+        ),
+        (
+            U160::MAX,
+            18,
+            "1461501637330902918203684832716.283019655932542975",
+        ),
+        (
+            U160::from(u128::MAX) + U160::from(1u8),
+            6,
+            "340282366920938463463374607431768.211456",
+        ),
+        (
+            U160::MAX - U160::from(1u8),
+            77,
+            "0.00000000000000000000000000001461501637330902918203684832716283019655932542974",
+        ),
+    ];
+    for (amount, decimals, want) in cases {
+        assert_eq!(expected_amount(amount, Some(decimals)), want);
+        assert_eq!(
+            parse_rendered_amount(want, Some(decimals)),
+            Some(U256::from(amount))
+        );
+    }
+    assert_eq!(
+        expected_amount(two_pow_159, None),
+        "730750818665451459101842416358141509827966271488"
+    );
+}
+
+// --- Properties ---
 
 proptest! {
     // Default 256 cases; override with PROPTEST_CASES=N.
@@ -343,6 +426,11 @@ proptest! {
         let prefix = format!("Approve {spender} {shown} {symbol} to spend {symbol} (expires: ");
         prop_assert!(text.starts_with(&prefix), "got {text:?}, want prefix {prefix:?}");
         prop_assert!(!text.contains("Unlimited"));
+        let expires = text
+            .strip_prefix(prefix.as_str())
+            .and_then(|rest| rest.strip_suffix(')'))
+            .unwrap_or_default();
+        assert_timestamp(expires, expiration.to::<u64>())?;
         // Round trips: the spender and the amount parse back out of the text.
         let words: Vec<&str> = text.split(' ').collect();
         prop_assert_eq!(words[1].parse::<Address>().ok(), Some(spender));

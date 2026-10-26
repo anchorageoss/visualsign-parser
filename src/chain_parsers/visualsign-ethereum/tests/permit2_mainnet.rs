@@ -1,8 +1,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Real mainnet Permit2 calls, checked against an independent ABI decode.
 //!
-//! Each `json-permit2-*` fixture in `tests/fixtures` is a real Ethereum mainnet
-//! transaction (hash and block in [`PERMIT2_FIXTURES`]). The snapshot test in
+//! Each `json-permit2-*` fixture in `tests/fixtures` carries the `to` and
+//! calldata of a real Ethereum mainnet transaction (hash and block in
+//! [`PERMIT2_FIXTURES`]). The JSON form has no gas, fee or nonce, so the
+//! snapshots show the parser's defaults for those. The snapshot test in
 //! `lib_test.rs` pins the whole rendering; this test checks the property that
 //! matters for #346 regardless of layout: every amount the calldata carries is
 //! shown in full (scaled by the built-in registry's decimals), and a `permit` shows
