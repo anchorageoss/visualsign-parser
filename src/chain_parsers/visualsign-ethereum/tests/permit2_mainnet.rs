@@ -233,7 +233,9 @@ fn check(registry: &ContractRegistry, to: Address, data: &[u8]) -> Report {
     {
         problems.push("rendered a Permit2 Permit the calldata does not contain".into());
     }
-    if function.starts_with("unknown") || function.starts_with("lockdown") {
+    // Nothing the parser decodes to check (lockdown, nonce invalidation,
+    // SignatureTransfer, or no Permit2 amounts at all).
+    if amounts.is_empty() {
         unsupported = true;
     }
 
