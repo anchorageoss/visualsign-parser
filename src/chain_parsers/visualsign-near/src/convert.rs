@@ -14,9 +14,9 @@ use visualsign::{SignablePayload, SignablePayloadField};
 use defuse_core::intents::DefuseIntents;
 use defuse_core::payload::{DefusePayload, ExtractDefusePayload};
 use defuse_nep413::Nep413Payload;
+use visualsign::encodings::escape_display_text;
 
 use crate::actions::render_action;
-use crate::fmt::charset_safe;
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
     NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
@@ -439,7 +439,7 @@ fn render_nep413_envelope(
         // second field on the signer's screen.
         create_address_field(
             "NEP-413 Recipient",
-            &charset_safe(&payload.recipient),
+            &escape_display_text(&payload.recipient),
             None,
             None,
             None,
@@ -455,7 +455,7 @@ fn render_nep413_envelope(
 
     if let Some(callback_url) = payload.callback_url.as_deref() {
         fields.push(
-            create_text_field("NEP-413 Callback URL", &charset_safe(callback_url))?
+            create_text_field("NEP-413 Callback URL", &escape_display_text(callback_url))?
                 .signable_payload_field,
         );
     }
@@ -470,7 +470,7 @@ fn render_nep413_envelope(
 
     let Some(intents_json) = intents_json else {
         fields.push(
-            create_text_field("NEP-413 Message", &charset_safe(&payload.message))?
+            create_text_field("NEP-413 Message", &escape_display_text(&payload.message))?
                 .signable_payload_field,
         );
         return Ok(ConversionResult::new(SignablePayload::new(
@@ -1695,9 +1695,9 @@ mod tests {
 
     /// Message, recipient and callback URL are caller-supplied and reach a
     /// signer's screen, so a character that could forge a line break or
-    /// reorder the rendering is marked rather than passed through.
+    /// reorder the rendering is escaped rather than passed through.
     #[test]
-    fn nep413_envelope_text_is_charset_safe() {
+    fn nep413_envelope_text_is_escaped() {
         let payload = render_nep413(
             nep413_envelope(
                 "innocent\nTo: attacker.near",
@@ -1720,16 +1720,42 @@ mod tests {
             .expect("no recipient field");
         assert_eq!(
             recipient,
-            "app.example.com?NEP-413 Recipient: attacker.near"
+            "app.example.com%0ANEP-413 Recipient: attacker.near"
         );
         payload.validate_charset().expect("charset");
         assert_eq!(
             labeled_text(&payload, "NEP-413 Message"),
-            "innocent?To: attacker.near"
+            "innocent%0ATo: attacker.near"
         );
         assert_eq!(
             labeled_text(&payload, "NEP-413 Callback URL"),
-            "https://app.example.com/?bc"
+            "https://app.example.com/%E2%80%AEbc"
         );
+    }
+
+    /// The signed message determines what is displayed: messages a marker or
+    /// filter would collapse together render distinctly.
+    #[test]
+    fn nep413_messages_that_a_marker_would_collapse_stay_distinct() {
+        let shown = |message: &str| {
+            labeled_text(
+                &render_nep413(
+                    nep413_envelope(message, "app.example.com", None),
+                    VisualSignOptions::default(),
+                ),
+                "NEP-413 Message",
+            )
+        };
+        let messages = [
+            "hello\nworld",
+            "hello?world",
+            "hello\u{e9}world",
+            "helloworld",
+            "hello%0Aworld",
+        ];
+        let shown_all: std::collections::BTreeSet<String> =
+            messages.iter().map(|m| shown(m)).collect();
+        assert_eq!(shown_all.len(), messages.len(), "{shown_all:?}");
+        assert_eq!(shown("hello\u{e9}world"), "hello%C3%A9world");
     }
 }
