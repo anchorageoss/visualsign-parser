@@ -7,7 +7,7 @@ use config::{
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{SuiCoin, get_object_value, get_tx_type_arg, truncate_address};
 
-use sui_json_rpc_types::{SuiCommand, SuiProgrammableMoveCall};
+use crate::types::{SuiCommand, SuiProgrammableMoveCall};
 
 use crate::presets::momentum::config::{
     AddLiquidityIndexes, FlashSwapIndexes, RemoveLiquidityIndexes,
@@ -698,8 +698,8 @@ mod tests {
 
     use crate::utils::{payload_from_b64, run_aggregated_fixture};
 
-    use sui_json_rpc_types::SuiArgument;
-    use sui_types::base_types::{ObjectID, SuiAddress};
+    use crate::types::SuiArgument;
+    use crate::types::{ObjectID, SuiAddress};
     use visualsign::test_utils::assert_has_field;
 
     /// The momentum mainnet package id, mirrored from `momentum/config.rs`.
@@ -711,7 +711,7 @@ mod tests {
     fn make_move_call_context<'a>(
         sender: &'a SuiAddress,
         commands: &'a [SuiCommand],
-        inputs: &'a [sui_json_rpc_types::SuiCallArg],
+        inputs: &'a [crate::types::SuiCallArg],
     ) -> VisualizerContext<'a> {
         VisualizerContext::new(sender, 0, commands, inputs)
     }
@@ -736,7 +736,7 @@ mod tests {
     fn test_momentum_flash_loan_does_not_panic() {
         let sender = SuiAddress::ZERO;
         let commands = vec![momentum_trade_move_call("flash_loan")];
-        let inputs: Vec<sui_json_rpc_types::SuiCallArg> = vec![];
+        let inputs: Vec<crate::types::SuiCallArg> = vec![];
 
         let context = make_move_call_context(&sender, &commands, &inputs);
         let visualizer = MomentumVisualizer;
@@ -759,7 +759,7 @@ mod tests {
     fn test_momentum_repay_flash_loan_does_not_panic() {
         let sender = SuiAddress::ZERO;
         let commands = vec![momentum_trade_move_call("repay_flash_loan")];
-        let inputs: Vec<sui_json_rpc_types::SuiCallArg> = vec![];
+        let inputs: Vec<crate::types::SuiCallArg> = vec![];
 
         let context = make_move_call_context(&sender, &commands, &inputs);
         let visualizer = MomentumVisualizer;

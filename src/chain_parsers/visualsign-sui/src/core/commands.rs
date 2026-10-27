@@ -14,9 +14,7 @@
 
 use crate::core::{CommandVisualizer, TransactionSummary, VisualizerContext, visualize_with_any};
 
-use sui_json_rpc_types::{
-    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
-};
+use crate::types::{SuiTransactionBlockData, SuiTransactionBlockKind};
 
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::VisualSignError;
@@ -109,21 +107,13 @@ pub fn decode_transfers(
 mod tests {
     use super::*;
     use crate::SuiTransactionWrapper;
-    use crate::core::helper::SuiModuleResolver;
     use crate::core::{VisualizerContext, VisualizerKind, visualize_with_any};
 
-    use move_bytecode_utils::module_cache::SyncModuleCache;
     use visualsign::vsptrait::Transaction;
 
     fn block_data_from_b64(data: &str) -> SuiTransactionBlockData {
         let wrapper = <SuiTransactionWrapper as Transaction>::from_string(data).expect("parse tx");
-        let tx = wrapper.inner().clone();
-
-        SuiTransactionBlockData::try_from_with_module_cache(
-            tx,
-            &SyncModuleCache::new(SuiModuleResolver),
-        )
-        .expect("block data")
+        SuiTransactionBlockData::try_from(wrapper.inner()).expect("block data")
     }
 
     #[test]

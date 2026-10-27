@@ -50,16 +50,12 @@
 //!
 //! As shown in the `cetus` and other presets, create a JSON file that matches this format and run the `run_aggregated_fixture` test.
 
-use crate::core::{CommandVisualizer, SuiModuleResolver, VisualizerContext};
+use crate::core::{CommandVisualizer, VisualizerContext};
 use crate::{SuiTransactionWrapper, transaction_string_to_visual_sign};
 
 use std::collections::BTreeMap;
 
-use move_bytecode_utils::module_cache::SyncModuleCache;
-
-use sui_json_rpc_types::{
-    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
-};
+use crate::types::{SuiTransactionBlockData, SuiTransactionBlockKind};
 
 use visualsign::SignablePayload;
 use visualsign::test_utils::check_signable_payload_field;
@@ -143,15 +139,12 @@ pub fn run_aggregated_fixture(json_str: &str, protocol: Box<dyn CommandVisualize
                     data.explorer_tx_prefix
                 );
 
-                let block_data: SuiTransactionBlockData =
-                    SuiTransactionBlockData::try_from_with_module_cache(
-                        SuiTransactionWrapper::from_string(&op.data)
-                            .expect("Failed to parse transaction. {test_context}")
-                            .inner()
-                            .clone(),
-                        &SyncModuleCache::new(SuiModuleResolver),
-                    )
-                    .expect("Failed to convert transaction to block data. {test_context}");
+                let block_data = SuiTransactionBlockData::try_from(
+                    SuiTransactionWrapper::from_string(&op.data)
+                        .expect("Failed to parse transaction. {test_context}")
+                        .inner(),
+                )
+                .expect("Failed to convert transaction to block data. {test_context}");
 
                 let (tx_commands, tx_inputs) = match block_data.transaction() {
                     SuiTransactionBlockKind::ProgrammableTransaction(tx) => {

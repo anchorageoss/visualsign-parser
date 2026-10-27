@@ -35,9 +35,10 @@ fn decode_operation(
         .and_then(|r| r.get_token_symbol(chain_id, params.token))
         .unwrap_or_else(|| format!("{:?}", params.token));
 
-    let amount_u128 = params.amount.to_string().parse().unwrap_or(0);
+    // Pass the full-width value. Never narrow through `u128`: a larger amount
+    // would parse-fail and display as "0".
     let (amount_str, _) = registry
-        .and_then(|r| r.format_token_amount(chain_id, params.token, amount_u128))
+        .and_then(|r| r.format_token_amount_u256(chain_id, params.token, U256::from(params.amount)))
         .unwrap_or_else(|| (params.amount.to_string(), token_symbol.clone()));
 
     // 3. Create human-readable text summary
@@ -111,8 +112,7 @@ fn decode_swap(
     // Format amounts using registry decimals
     let (amount_in_str, _) = registry
         .and_then(|r| {
-            let amount: u128 = params.amountIn.to_string().parse().ok()?;
-            r.format_token_amount(chain_id, params.tokenIn, amount)
+            r.format_token_amount_u256(chain_id, params.tokenIn, U256::from(params.amountIn))
         })
         .unwrap_or_else(|| (params.amountIn.to_string(), token_in.clone()));
 
@@ -144,13 +144,15 @@ The `ContractRegistry` is your key to clean code. Use these methods:
 // Get token symbol
 let symbol = registry.get_token_symbol(chain_id, address);
 
-// Format amount with decimals
-let (formatted, symbol) = registry.format_token_amount(
+// Format amount with decimals: use this for any uint160 or uint256 field
+let (formatted, symbol) = registry.format_token_amount_u256(
     chain_id,
     token_address,
-    raw_amount  // u128
-);
+    U256::from(raw_amount)
+)?;
 ```
+
+`format_token_amount` takes a `u128` and is still fine for a field that is at most 128 bits wide.
 
 ## Real-World Examples from Uniswap Router
 
@@ -226,15 +228,13 @@ fn decode_v3_swap_exact_in(
     // Format amounts
     let (amount_in_str, _) = registry
         .and_then(|r| {
-            let amount: u128 = params.amountIn.to_string().parse().ok()?;
-            r.format_token_amount(chain_id, token_in, amount)
+            r.format_token_amount_u256(chain_id, token_in, U256::from(params.amountIn))
         })
         .unwrap_or_else(|| (params.amountIn.to_string(), token_in_symbol.clone()));
 
     let (amount_out_str, _) = registry
         .and_then(|r| {
-            let amount: u128 = params.amountOutMinimum.to_string().parse().ok()?;
-            r.format_token_amount(chain_id, token_out, amount)
+            r.format_token_amount_u256(chain_id, token_out, U256::from(params.amountOutMinimum))
         })
         .unwrap_or_else(|| (params.amountOutMinimum.to_string(), token_out_symbol.clone()));
 

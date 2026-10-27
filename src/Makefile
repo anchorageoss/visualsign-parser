@@ -24,7 +24,7 @@ PARSER_APP_CHAINS := $(sort $(patsubst visualsign-%,%,$(notdir $(wildcard chain_
 # derived from chain_parsers/* -- parser_cli only wires up chains that have a
 # ChainPlugin registered (see parser/cli/src/), which sui and unspecified
 # don't yet, so a subset is the actual rule and a literal list says so.
-PARSER_CLI_CHAINS := ethereum near solana tron
+PARSER_CLI_CHAINS := bitcoin ethereum near solana tron
 
 .PHONY: all
 all: generated
@@ -47,14 +47,14 @@ test: build
 	@# we build all the workspace targets.
 	make build
 	@# diagnostics OFF: production payload shape (parser_app, integration, others).
-	cargo test --workspace --exclude parser_cli --all-targets
-	cargo test -p visualsign-solana --no-default-features --lib
+	cargo test --no-fail-fast --workspace --exclude parser_cli --all-targets
+	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
-	cargo test -p parser_cli --all-targets
-	cargo test -p visualsign --features diagnostics --lib
-	cargo test -p parser_cli_core --features diagnostics --lib
-	cargo test -p visualsign-near --features diagnostics --lib
-	cargo test -p visualsign-solana --features diagnostics --lib
+	cargo test --no-fail-fast -p parser_cli --all-targets
+	cargo test --no-fail-fast -p visualsign --features diagnostics --lib
+	cargo test --no-fail-fast -p parser_cli_core --features diagnostics --lib
+	cargo test --no-fail-fast -p visualsign-near --features diagnostics --lib
+	cargo test --no-fail-fast -p visualsign-solana --features diagnostics --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
 # declares its submodules through `include!(concat!(env!("OUT_DIR"), ...))`, a
@@ -69,12 +69,23 @@ test: build
 # `include!`-of-OUT_DIR blind spot, so it's covered by the same find.
 SOLANA_PRESET_SOURCES := $(shell find chain_parsers/visualsign-solana/src/presets chain_parsers/visualsign-solana/src/integrations -name '*.rs' 2>/dev/null | sort)
 
-.PHONY: fmt
-fmt:
-	cargo fmt
+.PHONY: check-preset-sources
+check-preset-sources:
 	@test -n "$(SOLANA_PRESET_SOURCES)" || { echo "no preset/integration sources found under chain_parsers/visualsign-solana/src"; exit 1; }
+
+.PHONY: fmt
+fmt: check-preset-sources
+	cargo fmt
 	@echo "rustfmt $(words $(SOLANA_PRESET_SOURCES)) Solana preset/integration sources"
 	@rustfmt $(SOLANA_PRESET_SOURCES)
+
+# Checks the same file set `fmt` formats, so `cargo fmt --check` passing alone
+# is never mistaken for a clean tree (it misses the preset/integration sources above).
+.PHONY: fmt-check
+fmt-check: check-preset-sources
+	cargo fmt --check
+	@echo "rustfmt --check $(words $(SOLANA_PRESET_SOURCES)) Solana preset/integration sources"
+	@rustfmt --check $(SOLANA_PRESET_SOURCES) || { echo "formatting drift: run 'make -C src fmt'"; exit 1; }
 
 .PHONY: unused-deps
 # Fails on declared-but-unused dependencies. Needs `cargo install cargo-machete`;
@@ -85,7 +96,7 @@ unused-deps:
 	cargo machete . ../tools/tvc-deploy
 
 .PHONY: lint
-lint:
+lint: fmt-check
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings

@@ -19,6 +19,7 @@ health_check = { path = "../../health_check" }
 host_primitives = { path = "../../host_primitives" }
 metrics = { path = "../../metrics" }
 visualsign = {workspace = true}
+visualsign-bitcoin = { path = "../../chain_parsers/visualsign-bitcoin", optional = true }
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
 visualsign-near = { path = "../../chain_parsers/visualsign-near", optional = true }
 visualsign-solana = { path = "../../chain_parsers/visualsign-solana", optional = true }
@@ -37,7 +38,8 @@ thiserror = "2.0.12"
 # binary, and `cargo build --workspace --exclude parser_cli` (see Makefile)
 # relies on diagnostics being OFF for parser_app/integration to keep the
 # production payload shape. Opt in explicitly with `--features diagnostics`.
-default = ["ethereum", "near", "solana", "sui", "tron", "unspecified"]
+default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified"]
+bitcoin = ["dep:visualsign-bitcoin"]
 ethereum = ["dep:visualsign-ethereum"]
 near = ["dep:visualsign-near"]
 solana = ["dep:visualsign-solana"]

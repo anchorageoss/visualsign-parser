@@ -5,7 +5,7 @@
 //! unambiguously: a successful borsh decode is a transaction, otherwise the
 //! input is validated as an envelope. Input that is neither is rejected.
 
-use near_primitives::transaction::{SignedTransaction, Transaction};
+use crate::primitives::{SignedTransaction, Transaction};
 use visualsign::encodings::SupportedEncodings;
 use visualsign::vsptrait::{DeveloperConfig, TransactionParseError};
 
@@ -32,7 +32,10 @@ impl NearTransaction {
         let mut borsh_failure: Option<String> = None;
         if let Ok(bytes) = decode_input(trimmed) {
             let unsigned_err = match borsh::from_slice::<Transaction>(&bytes) {
-                Ok(unsigned) => return Ok(Self::OnChain(unsigned)),
+                Ok(unsigned) => {
+                    require_canonical(&unsigned, &bytes)?;
+                    return Ok(Self::OnChain(unsigned));
+                }
                 Err(e) => e,
             };
             let allow_signed = developer_config
@@ -41,6 +44,7 @@ impl NearTransaction {
             if allow_signed {
                 match borsh::from_slice::<SignedTransaction>(&bytes) {
                     Ok(signed) => {
+                        require_canonical(&signed, &bytes)?;
                         // Developer-only posture: production callers pass `None`, so
                         // reaching here in production means a misconfiguration and
                         // must leave a trail.
@@ -93,6 +97,39 @@ impl visualsign::vsptrait::Transaction for NearTransaction {
     }
 }
 
+/// Refuses input whose bytes are not the canonical borsh encoding of what was
+/// decoded. Borsh accepts map entries in any order and with duplicate keys,
+/// then re-encodes them sorted and deduplicated. NEAR nodes hash the
+/// re-encoded form, so a signature over the input bytes would not verify.
+fn require_canonical<T: borsh::BorshSerialize>(
+    decoded: &T,
+    input: &[u8],
+) -> Result<(), TransactionParseError> {
+    let encoded = borsh::to_vec(decoded)
+        .map_err(|e| TransactionParseError::DecodeError(format!("borsh re-encode: {e}")))?;
+    if encoded != input {
+        let offset = encoded
+            .iter()
+            .zip(input)
+            .position(|(a, b)| a != b)
+            .unwrap_or_else(|| encoded.len().min(input.len()));
+        let lengths = if encoded.len() == input.len() {
+            format!("both are {} bytes", input.len())
+        } else {
+            format!(
+                "input is {} bytes, canonical encoding is {} bytes",
+                input.len(),
+                encoded.len()
+            )
+        };
+        return Err(TransactionParseError::DecodeError(format!(
+            "non-canonical NEAR transaction: input differs from its canonical encoding \
+             at byte offset {offset} ({lengths}; unsorted or duplicate map keys re-encode differently)"
+        )));
+    }
+    Ok(())
+}
+
 fn decode_input(s: &str) -> Result<Vec<u8>, TransactionParseError> {
     match SupportedEncodings::detect(s) {
         SupportedEncodings::Hex => visualsign::encodings::decode_hex(s)
@@ -110,7 +147,7 @@ fn decode_input(s: &str) -> Result<Vec<u8>, TransactionParseError> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use near_crypto::{KeyType, Signature};
+    use crate::primitives::{KeyType, Signature};
     use visualsign::vsptrait::Transaction as _;
 
     /// Borsh-encoded unsigned NEAR Transfer: alice.near -> bob.near, 1 NEAR.
@@ -138,7 +175,7 @@ mod tests {
         assert_eq!(inner.signer_id().as_str(), "alice.near");
         assert_eq!(inner.receiver_id().as_str(), "bob.near");
         assert_eq!(inner.actions().len(), 1);
-        let near_primitives::action::Action::Transfer(transfer) = &inner.actions()[0] else {
+        let crate::primitives::Action::Transfer(transfer) = &inner.actions()[0] else {
             panic!("expected Transfer");
         };
         assert_eq!(
@@ -202,6 +239,85 @@ mod tests {
         let tx = NearTransaction::from_string_with_options(&hex, Some(&developer_config))
             .expect("decode signed");
         assert_eq!(onchain(&tx).signer_id().as_str(), "alice.near");
+    }
+
+    /// V0 transaction alice.near -> bob.near with one `DeterministicStateInit`
+    /// whose data map holds the given entries, encoded in the given order.
+    fn state_init_hex(entries: &[(&str, &str)]) -> String {
+        let mut s = String::from(
+            "0a000000616c6963652e6e656172002222222222222222222222222222222222222222222222222222222222222222\
+             010000000000000008000000626f622e6e6561723333333333333333333333333333333333333333333333333333333333333333\
+             010000000b00001111111111111111111111111111111111111111111111111111111111111111",
+        );
+        s.push_str(&hex::encode((entries.len() as u32).to_le_bytes()));
+        for (k, v) in entries {
+            s.push_str(&format!(
+                "01000000{}01000000{}",
+                hex::encode(k),
+                hex::encode(v)
+            ));
+        }
+        s.push_str("00000000000000000000000000000000");
+        s
+    }
+
+    #[test]
+    fn state_init_canonical_map_is_accepted() {
+        let hex = state_init_hex(&[("a", "1"), ("b", "2")]);
+        NearTransaction::from_string(&hex).expect("canonical map decodes");
+    }
+
+    #[test]
+    fn state_init_unsorted_map_is_rejected() {
+        let hex = state_init_hex(&[("b", "2"), ("a", "1")]);
+        let Err(TransactionParseError::DecodeError(message)) = NearTransaction::from_string(&hex)
+        else {
+            panic!("expected a DecodeError for an unsorted map");
+        };
+        assert!(message.contains("non-canonical"), "message: {message}");
+        let input = hex::decode(&hex).expect("hex");
+        let canonical = hex::decode(state_init_hex(&[("a", "1"), ("b", "2")])).expect("hex");
+        let offset = input
+            .iter()
+            .zip(&canonical)
+            .position(|(a, b)| a != b)
+            .expect("payloads differ");
+        assert!(
+            message.contains(&format!(
+                "byte offset {offset} (both are {} bytes",
+                input.len()
+            )),
+            "message: {message}"
+        );
+    }
+
+    #[test]
+    fn state_init_duplicate_key_is_rejected() {
+        let hex = state_init_hex(&[("a", "1"), ("a", "9")]);
+        let Err(TransactionParseError::DecodeError(message)) = NearTransaction::from_string(&hex)
+        else {
+            panic!("expected a DecodeError for a duplicate key");
+        };
+        assert!(message.contains("non-canonical"), "message: {message}");
+        // Borsh keeps the last value of a repeated key, so the canonical form has
+        // one entry and the first difference is the entry count.
+        let input = hex::decode(&hex).expect("hex");
+        let canonical = hex::decode(state_init_hex(&[("a", "9")])).expect("hex");
+        let offset = input
+            .iter()
+            .zip(&canonical)
+            .position(|(a, b)| a != b)
+            .expect("payloads differ");
+        assert_eq!(offset, 138);
+        assert_eq!((input.len(), canonical.len()), (178, 168));
+        assert!(
+            message.contains(&format!(
+                "byte offset {offset} (input is {} bytes, canonical encoding is {} bytes",
+                input.len(),
+                canonical.len()
+            )),
+            "message: {message}"
+        );
     }
 
     #[test]

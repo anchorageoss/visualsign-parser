@@ -5,9 +5,6 @@
 //! converter; an action renderer contributes only what is intrinsic to the
 //! action (e.g. a Transfer's amount).
 
-use near_primitives::account::{AccessKeyPermission, FunctionCallPermission, GasKeyInfo};
-use near_primitives::action::Action;
-use near_primitives::types::AccountId;
 use serde::Deserialize;
 use visualsign::SignablePayloadField;
 use visualsign::errors::VisualSignError;
@@ -17,6 +14,9 @@ use visualsign::field_builders::{
 };
 
 use crate::fmt::{charset_safe, format_near, format_tgas};
+use crate::primitives::{
+    AccessKeyPermission, AccountId, Action, FunctionCallPermission, GasKeyInfo,
+};
 
 /// NEAR's native token symbol, used for `AmountV2` abbreviations.
 const NEAR_SYMBOL: &str = "NEAR";
@@ -453,8 +453,8 @@ fn push_gas_key_info_fields(
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use near_primitives::action::{CreateAccountAction, TransferAction};
-    use near_primitives::types::Balance;
+    use crate::primitives::Balance;
+    use crate::primitives::{CreateAccountAction, TransferAction};
     use visualsign::SignablePayloadField;
 
     #[test]
@@ -477,8 +477,8 @@ mod tests {
 
     #[test]
     fn ft_transfer_call_args_render_recipient_and_amount() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "ft_transfer_call".to_string(),
             args: br#"{"receiver_id":"intents.near","amount":"1000000","msg":""}"#.to_vec(),
@@ -494,8 +494,8 @@ mod tests {
 
     #[test]
     fn ft_withdraw_args_render_token_recipient_amount_and_msg() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "ft_withdraw".to_string(),
             args: br#"{"token":"wrap.near","receiver_id":"bob.near","amount":"7","msg":"0xdead"}"#
@@ -521,8 +521,8 @@ mod tests {
 
     #[test]
     fn undecodable_or_unknown_args_fall_back_to_raw_data() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         for (method, args) in [
             ("ft_transfer_call", &b"not json"[..]),
             // Unknown extra field: partially understood args must not render
@@ -548,8 +548,8 @@ mod tests {
 
     #[test]
     fn empty_args_render_no_raw_data_field() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "do_something".to_string(),
             args: Vec::new(),
@@ -563,8 +563,8 @@ mod tests {
 
     #[test]
     fn method_name_with_embedded_newline_is_sanitized() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "deposit\nAmount: 0.000001 NEAR".to_string(),
             args: Vec::new(),
@@ -581,8 +581,8 @@ mod tests {
 
     #[test]
     fn msg_with_embedded_newline_is_sanitized() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "ft_transfer_call".to_string(),
             args: br#"{"receiver_id":"attacker.near","amount":"1000000000","msg":"deposit\nAmount: 0.000001 NEAR\nRecipient: alice.near"}"#.to_vec(),
@@ -606,8 +606,8 @@ mod tests {
     /// chain would reject.
     #[test]
     fn receiver_id_and_token_with_embedded_newline_fall_back_to_raw_data() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "ft_withdraw".to_string(),
             args: br#"{"token":"wrap.near\nAmount: 999 NEAR","receiver_id":"bob.near\nAmount: 999 NEAR","amount":"7"}"#.to_vec(),
@@ -623,8 +623,8 @@ mod tests {
     /// core validator permits `\"` precisely so that structure renders.
     #[test]
     fn msg_keeps_embedded_json_quotes() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "ft_transfer_call".to_string(),
             args: br#"{"receiver_id":"intents.near","amount":"1","msg":"{\"deposit\":{\"account\":\"alice.near\"}}"}"#.to_vec(),
@@ -644,8 +644,8 @@ mod tests {
     /// and would reject the entire payload.
     #[test]
     fn backslash_in_msg_is_stripped_so_the_payload_still_validates() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "ft_transfer_call".to_string(),
             args: br#"{"receiver_id":"intents.near","amount":"1","msg":"pay \\u0041 now"}"#
@@ -712,8 +712,8 @@ mod tests {
 
     #[test]
     fn multi_action_function_call_gets_action_boundary_label() {
-        use near_primitives::action::FunctionCallAction;
-        use near_primitives::types::Gas;
+        use crate::primitives::FunctionCallAction;
+        use crate::primitives::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
             method_name: "do_something".to_string(),
             args: Vec::new(),
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn delete_account_renders_beneficiary() {
-        use near_primitives::action::DeleteAccountAction;
+        use crate::primitives::DeleteAccountAction;
         let action = Action::DeleteAccount(DeleteAccountAction {
             beneficiary_id: "bob.near".parse().expect("valid account id"),
         });
@@ -760,9 +760,9 @@ mod tests {
 
     #[test]
     fn add_key_full_access_renders_public_key_and_permission() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::account::{AccessKey, AccessKeyPermission};
-        use near_primitives::action::AddKeyAction;
+        use crate::primitives::AddKeyAction;
+        use crate::primitives::{AccessKey, AccessKeyPermission};
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::AddKey(Box::new(AddKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             access_key: AccessKey {
@@ -786,9 +786,9 @@ mod tests {
     /// rather than assert a restriction.
     #[test]
     fn add_key_unbounded_function_call_permission_renders_any_method_and_unlimited() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::account::{AccessKey, AccessKeyPermission, FunctionCallPermission};
-        use near_primitives::action::AddKeyAction;
+        use crate::primitives::AddKeyAction;
+        use crate::primitives::{AccessKey, AccessKeyPermission, FunctionCallPermission};
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::AddKey(Box::new(AddKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             access_key: AccessKey {
@@ -821,9 +821,9 @@ mod tests {
     /// above -- the two grants are the same variant and differ only in fields.
     #[test]
     fn add_key_bounded_function_call_permission_renders_methods_and_allowance() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::account::{AccessKey, AccessKeyPermission, FunctionCallPermission};
-        use near_primitives::action::AddKeyAction;
+        use crate::primitives::AddKeyAction;
+        use crate::primitives::{AccessKey, AccessKeyPermission, FunctionCallPermission};
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::AddKey(Box::new(AddKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             access_key: AccessKey {
@@ -850,9 +850,9 @@ mod tests {
     /// read as a list boundary and inflate the apparent number of methods.
     #[test]
     fn method_name_containing_a_comma_stays_one_line() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::account::{AccessKey, AccessKeyPermission, FunctionCallPermission};
-        use near_primitives::action::AddKeyAction;
+        use crate::primitives::AddKeyAction;
+        use crate::primitives::{AccessKey, AccessKeyPermission, FunctionCallPermission};
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::AddKey(Box::new(AddKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             access_key: AccessKey {
@@ -871,11 +871,11 @@ mod tests {
 
     #[test]
     fn add_key_gas_key_permission_renders_balance_and_bounds() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::account::{
+        use crate::primitives::AddKeyAction;
+        use crate::primitives::{
             AccessKey, AccessKeyPermission, FunctionCallPermission, GasKeyInfo,
         };
-        use near_primitives::action::AddKeyAction;
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::AddKey(Box::new(AddKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             access_key: AccessKey {
@@ -912,9 +912,9 @@ mod tests {
 
     #[test]
     fn add_key_gas_key_full_access_renders_prefunded_balance() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::account::{AccessKey, AccessKeyPermission, GasKeyInfo};
-        use near_primitives::action::AddKeyAction;
+        use crate::primitives::AddKeyAction;
+        use crate::primitives::{AccessKey, AccessKeyPermission, GasKeyInfo};
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::AddKey(Box::new(AddKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             access_key: AccessKey {
@@ -946,8 +946,8 @@ mod tests {
 
     #[test]
     fn delete_key_renders_public_key() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::action::DeleteKeyAction;
+        use crate::primitives::DeleteKeyAction;
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::DeleteKey(Box::new(DeleteKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
         }));
@@ -958,8 +958,8 @@ mod tests {
 
     #[test]
     fn stake_renders_stake_amount_and_validator_key() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::action::StakeAction;
+        use crate::primitives::StakeAction;
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::Stake(Box::new(StakeAction {
             stake: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
             public_key: PublicKey::empty(KeyType::ED25519),
@@ -971,8 +971,8 @@ mod tests {
 
     #[test]
     fn transfer_to_gas_key_renders_amount_and_key() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::action::TransferToGasKeyAction;
+        use crate::primitives::TransferToGasKeyAction;
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::TransferToGasKey(Box::new(TransferToGasKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             deposit: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
@@ -988,8 +988,8 @@ mod tests {
 
     #[test]
     fn withdraw_from_gas_key_renders_amount_and_key() {
-        use near_crypto::{KeyType, PublicKey};
-        use near_primitives::action::WithdrawFromGasKeyAction;
+        use crate::primitives::WithdrawFromGasKeyAction;
+        use crate::primitives::{KeyType, PublicKey};
         let action = Action::WithdrawFromGasKey(Box::new(WithdrawFromGasKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
             amount: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
@@ -1001,12 +1001,10 @@ mod tests {
 
     #[test]
     fn deterministic_state_init_renders_deposit_and_flags_state_init_as_undecoded() {
-        use near_primitives::action::DeterministicStateInitAction;
-        use near_primitives::deterministic_account_id::{
-            DeterministicAccountStateInit, DeterministicAccountStateInitV1,
-        };
-        use near_primitives::global_contract::GlobalContractIdentifier;
-        use near_primitives::hash::CryptoHash;
+        use crate::primitives::CryptoHash;
+        use crate::primitives::DeterministicStateInitAction;
+        use crate::primitives::GlobalContractIdentifier;
+        use crate::primitives::{DeterministicAccountStateInit, DeterministicAccountStateInitV1};
         let action = Action::DeterministicStateInit(Box::new(DeterministicStateInitAction {
             state_init: DeterministicAccountStateInit::V1(DeterministicAccountStateInitV1 {
                 code: GlobalContractIdentifier::CodeHash(CryptoHash::default()),
@@ -1026,7 +1024,7 @@ mod tests {
 
     #[test]
     fn deploy_contract_label_is_marked_not_fully_decoded() {
-        use near_primitives::action::DeployContractAction;
+        use crate::primitives::DeployContractAction;
         let action = Action::DeployContract(DeployContractAction { code: vec![0u8; 4] });
         let fields = render_action(&action, 1).expect("render");
         assert_eq!(fields.len(), 1);
@@ -1041,8 +1039,8 @@ mod tests {
 
     #[test]
     fn delegate_action_is_refused() {
-        use near_crypto::{KeyType, PublicKey, Signature};
-        use near_primitives::action::delegate::{DelegateAction, SignedDelegateAction};
+        use crate::primitives::{DelegateAction, SignedDelegateAction};
+        use crate::primitives::{KeyType, PublicKey, Signature};
         let action = Action::Delegate(Box::new(SignedDelegateAction {
             delegate_action: DelegateAction {
                 sender_id: "alice.near".parse().expect("valid account id"),

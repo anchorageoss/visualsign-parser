@@ -16,14 +16,24 @@ hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-move-core-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "move-core-types" }
-move-bytecode-utils = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "move-bytecode-utils" }
+# Pure-Rust Sui BCS types (no fastcrypto, blst, ring, secp256k1 or zstd).
+# `hash` adds Blake2b-256 for Move package digests.
+sui-sdk-types = { version = "0.4.0", default-features = false, features = ["serde", "hash"] }
 
-sui-json = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-json" }
-sui-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-types" }
-sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-json-rpc-types" }
+# Pure-Rust point/scalar parsing preserves legacy envelope rejection checks;
+# transaction signatures are never verified by the parser.
+ed25519-consensus = { version = "2", default-features = false }
+k256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
 visualsign = { workspace = true }
+
+# Differential oracle only: retain the exact pre-migration upstream revision.
+[dev-dependencies]
+move-core-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "move-core-types" }
+move-bytecode-utils = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "move-bytecode-utils" }
+sui-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-types" }
+sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-json-rpc-types" }
 
 [lints]
 workspace = true

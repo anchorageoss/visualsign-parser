@@ -9,6 +9,11 @@
           - 'src/chain_parsers/visualsign-solana/**'
           - 'src/solana_test_utils/**'
 
+"chain:bitcoin":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-bitcoin/**'
+
 "chain:tron":
   - changed-files:
       - any-glob-to-any-file:

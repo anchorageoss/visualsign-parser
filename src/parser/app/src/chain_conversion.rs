@@ -6,12 +6,13 @@ use generated::parser::Chain as ProtoChain;
 pub(crate) fn proto_to_registry(proto: ProtoChain) -> RegistryChain {
     match proto {
         ProtoChain::Solana => RegistryChain::Solana,
+        ProtoChain::Bitcoin => RegistryChain::Bitcoin,
         ProtoChain::Ethereum => RegistryChain::Ethereum,
         ProtoChain::Sui => RegistryChain::Sui,
         ProtoChain::Tron => RegistryChain::Tron,
         ProtoChain::Near => RegistryChain::Near,
         ProtoChain::Unspecified => RegistryChain::Unspecified,
-        _ => RegistryChain::Custom("custom_unknown".into()),
+        ProtoChain::Custom => RegistryChain::Custom("custom_unknown".into()),
     }
 }
 
@@ -23,6 +24,7 @@ mod tests {
         match registry {
             RegistryChain::Unspecified => ProtoChain::Unspecified,
             RegistryChain::Solana => ProtoChain::Solana,
+            RegistryChain::Bitcoin => ProtoChain::Bitcoin,
             RegistryChain::Ethereum => ProtoChain::Ethereum,
             RegistryChain::Sui => ProtoChain::Sui,
             RegistryChain::Near => ProtoChain::Near,
@@ -35,6 +37,7 @@ mod tests {
         // Test supported chains round-trip
         for (proto, registry) in [
             (ProtoChain::Solana, RegistryChain::Solana),
+            (ProtoChain::Bitcoin, RegistryChain::Bitcoin),
             (ProtoChain::Ethereum, RegistryChain::Ethereum),
             (ProtoChain::Sui, RegistryChain::Sui),
             (ProtoChain::Near, RegistryChain::Near),
@@ -43,11 +46,8 @@ mod tests {
             assert_eq!(registry_to_proto(&registry), proto);
         }
 
-        // Test unsupported map to unspecified
-        assert_eq!(
-            registry_to_proto(&RegistryChain::Bitcoin),
-            ProtoChain::Custom
-        );
+        // Test unsupported map to custom
+        assert_eq!(registry_to_proto(&RegistryChain::Aptos), ProtoChain::Custom);
         assert_eq!(
             proto_to_registry(ProtoChain::Unspecified),
             RegistryChain::Unspecified,

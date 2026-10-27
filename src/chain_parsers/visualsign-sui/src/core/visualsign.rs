@@ -1,15 +1,13 @@
 //! Public conversion entry points and wrapper types for `VisualSign` on Sui.
 
 use crate::core::commands::decode_commands;
-use crate::core::helper::SuiModuleResolver;
 use crate::core::transaction::{
     decode_transaction, determine_transaction_type_string, get_tx_details, get_tx_network,
 };
 
-use move_bytecode_utils::module_cache::SyncModuleCache;
+use sui_sdk_types::Transaction as SuiTransaction;
 
-use sui_json_rpc_types::SuiTransactionBlockData;
-use sui_types::transaction::TransactionData;
+use crate::types::SuiTransactionBlockData;
 
 use crate::core::commands;
 use crate::intermediate::build_intermediate_output;
@@ -22,22 +20,23 @@ use visualsign::{
     },
 };
 
-/// Wrapper around Sui's transaction type that implements the Transaction trait
+/// Wrapper around a decoded Sui transaction (`sui_sdk_types::Transaction`) that
+/// implements the Transaction trait
 #[derive(Debug, Clone)]
 pub struct SuiTransactionWrapper {
-    transaction: TransactionData,
+    transaction: SuiTransaction,
 }
 
 impl SuiTransactionWrapper {
     /// Create a new `SuiTransactionWrapper`
     #[must_use]
-    pub fn new(transaction: TransactionData) -> Self {
+    pub fn new(transaction: SuiTransaction) -> Self {
         Self { transaction }
     }
 
     /// Get a reference to the inner transaction
     #[must_use]
-    pub fn inner(&self) -> &TransactionData {
+    pub fn inner(&self) -> &SuiTransaction {
         &self.transaction
     }
 }
@@ -70,14 +69,9 @@ impl VisualSignConverter<SuiTransactionWrapper> for SuiVisualSignConverter {
     ) -> Result<ConversionResult, VisualSignError> {
         let transaction = transaction_wrapper.inner();
 
-        let block_data: SuiTransactionBlockData =
-            SuiTransactionBlockData::try_from_with_module_cache(
-                transaction.clone(),
-                &SyncModuleCache::new(SuiModuleResolver),
-            )
-            .map_err(|e| {
-                VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string()))
-            })?;
+        let block_data = SuiTransactionBlockData::try_from(transaction).map_err(|e| {
+            VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string()))
+        })?;
 
         let payload = convert_to_visual_sign_payload(
             transaction,
@@ -105,7 +99,7 @@ impl VisualSignConverter<SuiTransactionWrapper> for SuiVisualSignConverter {
 /// the intermediate output rather than failing the conversion, so consumers
 /// see no metadata instead of partial metadata. The `SignablePayload` is still
 /// returned.
-fn build_intermediate_bytes(transaction: &TransactionData) -> Option<Vec<u8>> {
+fn build_intermediate_bytes(transaction: &SuiTransaction) -> Option<Vec<u8>> {
     match build_intermediate_output(transaction) {
         Ok(output) => match borsh::to_vec(&output) {
             Ok(bytes) => Some(bytes),
@@ -123,7 +117,7 @@ fn build_intermediate_bytes(transaction: &TransactionData) -> Option<Vec<u8>> {
 
 /// Convert Sui transaction to a `VisualSign` payload.
 fn convert_to_visual_sign_payload(
-    transaction: &TransactionData,
+    transaction: &SuiTransaction,
     block_data: &SuiTransactionBlockData,
     decode_transfers: bool,
     title: Option<String>,
@@ -166,7 +160,7 @@ fn convert_to_visual_sign_payload(
 /// `SuiTransactionBlockData`, if command/transfer decoding fails, or if any
 /// field construction fails during payload building.
 pub fn transaction_to_visual_sign(
-    transaction: TransactionData,
+    transaction: SuiTransaction,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     SuiVisualSignConverter
