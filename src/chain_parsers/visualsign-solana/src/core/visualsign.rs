@@ -451,7 +451,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 
         let idl_registry = create_idl_registry_from_options(&options)?;
         let raw_simulated_instructions =
-            extract_raw_simulated_instructions(&options, &idl_registry);
+            extract_raw_simulated_instructions(&options, &idl_registry)?;
         Ok(
             match build_intermediate_bytes(&message_hex, &idl_registry, raw_simulated_instructions)
             {
@@ -499,10 +499,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
-    raw_simulated_instructions: Option<(
-        Vec<crate::intermediate::SolanaSimulatedInstruction>,
-        Option<crate::intermediate::SolanaSimulationError>,
-    )>,
+    raw_simulated_instructions: Option<SimulationDecode>,
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
         Ok(mut output) => {
@@ -540,35 +537,62 @@ fn build_intermediate_bytes(
     }
 }
 
+/// A supplied simulation's inner instructions, and why it could not be read.
+type SimulationDecode = (
+    Vec<crate::intermediate::SolanaSimulatedInstruction>,
+    Option<crate::intermediate::SolanaSimulationError>,
+);
+
 /// Pulls `simulated_transaction_result` out of `options.metadata`'s Solana
 /// branch, if present, and IDL-decodes it.
 ///
-/// `None` only when no simulation was supplied. Once the field is present a
+/// `Ok(None)` only when no simulation was supplied. Once the field is present a
 /// failure to read it comes back as a `SolanaSimulationError`, not an absence.
+///
+/// A build without the `simulation` feature cannot read the field, so it
+/// refuses the request rather than emit intermediate output without it.
 fn extract_raw_simulated_instructions(
     options: &VisualSignOptions,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Option<(
-    Vec<crate::intermediate::SolanaSimulatedInstruction>,
-    Option<crate::intermediate::SolanaSimulationError>,
-)> {
-    let generated::parser::chain_metadata::Metadata::Solana(solana) =
-        options.metadata.as_ref()?.metadata.as_ref()?
+) -> Result<Option<SimulationDecode>, VisualSignError> {
+    let Some(generated::parser::chain_metadata::Metadata::Solana(solana)) = options
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.metadata.as_ref())
     else {
-        return None;
+        return Ok(None);
     };
-    let raw_json_b64 = solana.simulated_transaction_result.as_ref()?;
-    let raw_json = match base64::engine::general_purpose::STANDARD.decode(raw_json_b64) {
-        Ok(raw_json) => raw_json,
-        Err(e) => {
-            tracing::warn!(error = %e, "simulated_transaction_result is not valid base64");
-            return Some((
-                Vec::new(),
-                Some(crate::intermediate::SolanaSimulationError::InvalidBase64),
-            ));
-        }
+    let Some(raw_json_b64) = solana.simulated_transaction_result.as_ref() else {
+        return Ok(None);
     };
-    Some(crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry))
+    #[cfg(not(feature = "simulation"))]
+    {
+        // Unread without the feature.
+        let _ = (raw_json_b64, idl_registry);
+        Err(VisualSignError::ParseError(
+            TransactionParseError::InvalidFormat(
+                "simulated_transaction_result supplied, but this parser was built without \
+                 the `simulation` feature"
+                    .to_string(),
+            ),
+        ))
+    }
+    #[cfg(feature = "simulation")]
+    {
+        let raw_json = match base64::engine::general_purpose::STANDARD.decode(raw_json_b64) {
+            Ok(raw_json) => raw_json,
+            Err(e) => {
+                tracing::warn!(error = %e, "simulated_transaction_result is not valid base64");
+                return Ok(Some((
+                    Vec::new(),
+                    Some(crate::intermediate::SolanaSimulationError::InvalidBase64),
+                )));
+            }
+        };
+        Ok(Some(
+            crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry),
+        ))
+    }
 }
 
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
@@ -925,6 +949,44 @@ mod tests {
         SolanaVisualSignConverter
             .to_visual_sign_payload(wrapper, options)
             .map(|r| r.payload)
+    }
+
+    /// A build without `simulation` cannot read a supplied simulation, so it
+    /// refuses the request instead of emitting intermediate output without it.
+    #[cfg(not(feature = "simulation"))]
+    #[test]
+    fn supplied_simulation_is_refused_without_the_simulation_feature() {
+        let message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let wrapper = SolanaTransactionWrapper::from_string(
+            &create_transaction_with_empty_signatures(message),
+        )
+        .expect("known transfer parses");
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: None,
+                        idl: None,
+                        idl_mappings: Default::default(),
+                        simulated_transaction_result: Some(
+                            base64::engine::general_purpose::STANDARD.encode("{}"),
+                        ),
+                    },
+                )),
+            }),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(wrapper, options);
+        assert!(
+            matches!(
+                result,
+                Err(VisualSignError::ParseError(TransactionParseError::InvalidFormat(ref msg)))
+                    if msg.contains("simulation")
+            ),
+            "got {result:?}"
+        );
     }
 
     /// End-to-end exercise of the opt-in intermediate-output path: a known

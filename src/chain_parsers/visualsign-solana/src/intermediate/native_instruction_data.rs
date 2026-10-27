@@ -113,8 +113,7 @@ fn parse_json(
 }
 
 /// Without `json-parsed` there is no native decoder; the caller records the
-/// error as `solana_json_parse_error`, while the intermediate output's typed
-/// `native_instruction_decoder` capability identifies why decoding is unavailable.
+/// error as `solana_json_parse_error`.
 #[cfg(not(feature = "json-parsed"))]
 fn parse_json(
     _program_id: &Pubkey,
