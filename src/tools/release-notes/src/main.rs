@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 
+use release_notes::mintlify::{self, DocsDir, Scope};
 use release_notes::render::{Audience, Style, render};
 use release_notes::sources::{Git, collect, gh_repo};
 
@@ -37,6 +38,16 @@ struct Args {
     /// Text appended verbatim (e.g. deploy details). Keep this file outside the repo.
     #[arg(long)]
     footer_file: Option<PathBuf>,
+
+    /// Instead of printing, write the release into the Mintlify docs dir (changelog
+    /// entries, and a blog post for each newly enabled chain). Always the public view.
+    #[arg(long, value_name = "DOCS_DIR", conflicts_with_all = ["format", "audience", "footer_file"])]
+    write_mintlify: Option<PathBuf>,
+
+    /// With --write-mintlify: write only if the release enables a new chain, and only
+    /// that chain's pages.
+    #[arg(long, requires = "write_mintlify")]
+    new_chains_only: bool,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -73,6 +84,24 @@ fn main() -> Result<()> {
         .transpose()?;
 
     let release = collect(&git, &repo, &from, &to)?;
+
+    if let Some(docs_dir) = &args.write_mintlify {
+        let scope = if args.new_chains_only {
+            Scope::NewChainsOnly
+        } else {
+            Scope::All
+        };
+        let plan = mintlify::plan(&release, &git.date(&to)?, scope, &DocsDir(docs_dir))?;
+        mintlify::apply(docs_dir, &plan)?;
+        if plan.is_empty() {
+            eprintln!("nothing to write for {from}..{to}");
+        }
+        for path in plan.keys() {
+            println!("{}", docs_dir.join(path).display());
+        }
+        return Ok(());
+    }
+
     let out = match args.format {
         Format::Json => serde_json::to_string_pretty(&release.visible_to(args.audience))? + "\n",
         Format::Slack => render(&release, Style::Slack, args.audience, footer.as_deref()),
