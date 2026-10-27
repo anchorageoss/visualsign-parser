@@ -44,6 +44,14 @@ impl Git<'_> {
             .to_string())
     }
 
+    /// The committer date of `rev` as `YYYY-MM-DD`, so a release's docs date is stable.
+    pub fn date(&self, rev: &str) -> Result<String> {
+        Ok(self
+            .run(&["log", "-1", "--format=%cs", rev])?
+            .trim()
+            .to_string())
+    }
+
     /// File contents at a ref; empty when the file doesn't exist there.
     pub fn show(&self, rev: &str, path: &str) -> String {
         self.run(&["show", &format!("{rev}:{path}")])

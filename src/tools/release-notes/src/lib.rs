@@ -7,5 +7,6 @@
 
 pub mod chains;
 pub mod entries;
+pub mod mintlify;
 pub mod render;
 pub mod sources;

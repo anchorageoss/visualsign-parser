@@ -60,6 +60,41 @@ cargo run -q -p release-notes -- --repo-dir .. --audience internal --footer-file
 The file is appended verbatim. Take the values from your own deploy runbook and the deploy
 you just ran. Never add them to a public announcement, and never commit the file.
 
+## Publish to the docs site (Mintlify)
+
+`--write-mintlify <docs dir>` writes the release into `docs/` instead of printing it.
+It always writes the public view, because the docs site is public.
+
+- **Every chain and core:** an `<Update>` for the release, newest first, on
+  `changelog/<chain>.mdx` and `changelog/core.mdx`, with integrator notes under the list.
+- **A newly enabled chain** also gets:
+  - its own changelog page, a card on `changelog.mdx` and a "Chain streams" nav entry;
+  - a blog post `blog/<date>-<chain>-support.mdx`, a stub on `blog.mdx` and a Blog nav
+    entry. The post's lead and description come from `docs/chains/<chain>.mdx`, so write
+    that page in the chain PR (wiring step 19).
+- **`--new-chains-only`** writes only the new chain's pages, and nothing at all for a
+  release without one.
+
+The date is the tag's commit date. Re-running for the same release changes nothing, so
+edit generated posts by hand freely. Run it into a copy first and read the diff:
+
+```bash
+cp -r ../docs /tmp/docs-try
+cargo run -q -p release-notes -- --repo-dir .. --from v0.1033.0 --to v0.1046.0 --write-mintlify /tmp/docs-try
+diff -ru ../docs /tmp/docs-try
+```
+
+`.github/workflows/release-announcement.yml` runs this on its own:
+
+- **After each Release run**, it uses `--new-chains-only`, so a release that enables a new
+  chain gets a docs PR with its blog post and changelog page.
+- **Manual dispatch** (`gh workflow run release-announcement.yml -f from=<tag> -f to=<tag>`)
+  writes the full changelog for a range. Use it to batch a "meaningful release".
+
+Either way the result is a PR to review, never a push to main. `make -C docs broken-links`
+flags each changelog page's `rss.xml` link, because the feeds only exist on the deployed
+site; anything else it reports is real.
+
 ## Make the output better at the source
 
 The tool uses each PR's title, minus the `type(scope):` prefix, unless the PR body says
