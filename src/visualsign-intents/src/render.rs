@@ -12,8 +12,8 @@ use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_amount_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
 
-use crate::fmt::charset_safe;
 use crate::network::SettlementNetwork;
+use visualsign::encodings::escape_display_text;
 
 use super::tokens;
 use super::verify::SignatureCheck;
@@ -28,7 +28,7 @@ type Fields = Vec<SignablePayloadField>;
 /// the same information as a `Warning`-labelled text field, keeping the
 /// production payload shape unchanged.
 ///
-/// `message` is charset-filtered here rather than at each call site. Every
+/// `message` is escaped here rather than at each call site. Every
 /// rule on this path quotes untrusted input -- an asset id, a decode error
 /// that echoes the offending value -- so filtering at this choke point is what
 /// makes a newly added rule safe by construction. `rule` is a literal at every
@@ -39,7 +39,7 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
         rule,
         "near-intents",
         visualsign::lint::Severity::Warn,
-        &charset_safe(message),
+        &escape_display_text(message),
         None,
     )
     .signable_payload_field)
@@ -48,10 +48,11 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// See the `diagnostics`-enabled twin above.
 #[cfg(not(feature = "diagnostics"))]
 fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualSignError> {
-    Ok(
-        create_text_field("Warning", &format!("{rule}: {}", charset_safe(message)))?
-            .signable_payload_field,
-    )
+    Ok(create_text_field(
+        "Warning",
+        &format!("{rule}: {}", escape_display_text(message)),
+    )?
+    .signable_payload_field)
 }
 
 /// Report each caller-supplied token-metadata entry the parser refused.
@@ -63,7 +64,7 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// render, since the refusal protects them rather than invalidating them.
 ///
 /// `asset_id` is a caller-controlled map key and `reason` can quote it back (a
-/// JSON parse error, a length); [`diagnostic`] charset-filters the assembled
+/// JSON parse error, a length); [`diagnostic`] escapes the assembled
 /// message, so neither half can render as extra apparent fields on the signing
 /// screen.
 pub fn rejected_metadata_diagnostics(
@@ -71,7 +72,7 @@ pub fn rejected_metadata_diagnostics(
 ) -> Fields {
     // Infallible by construction: reporting a refusal must never be able to
     // withhold the transaction. A field that fails to build (an empty message
-    // after charset filtering, say) is logged and dropped, leaving the signer
+    // after escaping, say) is logged and dropped, leaving the signer
     // a payload minus one caveat rather than no payload at all.
     rejected
         .iter()
@@ -105,9 +106,9 @@ pub fn rejected_metadata_diagnostics(
 /// half as an `AccountId` and takes the remainder verbatim into a plain
 /// `String` (`Nep245TokenId::mt_token_id`, `Nep171TokenId::nft_token_id`), and
 /// `Display` round-trips it. So an asset id echoed into field text carries
-/// whatever bytes the sender chose and must be filtered.
+/// whatever bytes the sender chose and must be escaped.
 ///
-/// The filtered form is for display only. Resolution runs against the raw id,
+/// The escaped form is for display only. Resolution runs against the raw id,
 /// because stripping first would let a crafted id collapse onto a seeded one
 /// (`nep141:wrap\u{7f}.near` -> `nep141:wrap.near`) and borrow that token's
 /// symbol and decimals.
@@ -118,7 +119,7 @@ fn token_amount_field(
     registry: &Reg,
 ) -> Result<Fields, VisualSignError> {
     let resolved = tokens::resolve(asset_id, registry);
-    let asset_id = charset_safe(asset_id);
+    let asset_id = escape_display_text(asset_id);
     match resolved {
         Some(meta) => {
             let mut fields = vec![
@@ -148,13 +149,12 @@ fn token_amount_field(
 /// being present is itself what the signer needs to see.
 ///
 /// Ends in a literal backslash so no attacker-controlled string can ever
-/// equal it: [`charset_safe`] elides every backslash a caller's text
-/// contains, so this marker can be produced only here, never by a real `msg`
-/// that happens to spell out the same words.
+/// equal it: [`escape_display_text`] encodes every backslash a caller's text
+/// contains as `%5C`, so this marker can be produced only here, never by a real
+/// `msg` that happens to spell out the same words.
 const EMPTY_VALUE: &str = "(empty)\\";
 
-/// Charset-filter an optional field string, dropping it when the value is
-/// empty.
+/// Escape an optional field string, dropping it when the value is empty.
 ///
 /// Only for fields whose presence carries no meaning of its own, so that a
 /// value rendering as nothing and a value never supplied are genuinely the
@@ -163,15 +163,15 @@ const EMPTY_VALUE: &str = "(empty)\\";
 /// what executes, use [`present_value`] instead -- dropping the field there
 /// hides the difference between the two on-chain behaviours.
 ///
-/// `charset_safe` marks what it cannot render rather than deleting it, so an
-/// all-non-ASCII memo renders as markers and reaches the signer; only a
-/// genuinely empty string is dropped, which would otherwise render as a
-/// labelled blank line reading as a deliberately empty memo.
-fn nonempty_filtered(text: Option<&str>) -> Option<String> {
-    text.map(charset_safe).filter(|t| !t.is_empty())
+/// Escaping never deletes, so an all-non-ASCII memo renders as its escapes and
+/// reaches the signer; only a genuinely empty string is dropped, which would
+/// otherwise render as a labelled blank line reading as a deliberately empty
+/// memo.
+fn nonempty_escaped(text: Option<&str>) -> Option<String> {
+    text.map(escape_display_text).filter(|t| !t.is_empty())
 }
 
-/// Charset-filter a value whose presence changes what the transaction does,
+/// Escape a value whose presence changes what the transaction does,
 /// substituting [`EMPTY_VALUE`] when nothing renders.
 ///
 /// An empty `msg` still selects a contract-calling form on-chain: a
@@ -181,11 +181,11 @@ fn nonempty_filtered(text: Option<&str>) -> Option<String> {
 /// those byte-identically to the transfer that calls nothing, so the signer
 /// would approve a receiver callback with nothing on screen distinguishing it.
 fn present_value(text: &str) -> String {
-    let filtered = charset_safe(text);
-    if filtered.is_empty() {
+    let escaped = escape_display_text(text);
+    if escaped.is_empty() {
         EMPTY_VALUE.to_string()
     } else {
-        filtered
+        escaped
     }
 }
 
@@ -363,7 +363,7 @@ fn render_intent_body(intent: &Intent, registry: &Reg) -> Result<Fields, VisualS
         Intent::AuthCall(c) => {
             let mut fields = vec![
                 create_text_field("Contract", c.contract_id.as_str())?.signable_payload_field,
-                create_text_field("Message", &charset_safe(&c.msg))?.signable_payload_field,
+                create_text_field("Message", &escape_display_text(&c.msg))?.signable_payload_field,
                 near_amount_field("Attached Deposit", c.attached_deposit.as_yoctonear())?,
             ];
             if c.state_init.is_some() {
@@ -421,7 +421,7 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
         if *delta == 0 {
             return Err(VisualSignError::ValidationError(format!(
                 "token_diff entry for {} has a zero delta",
-                charset_safe(&token_id.to_string())
+                escape_display_text(&token_id.to_string())
             )));
         }
         let label = if *delta < 0 { "Send" } else { "Receive" };
@@ -432,11 +432,11 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
             registry,
         )?);
     }
-    if let Some(memo) = nonempty_filtered(td.memo.as_deref()) {
+    if let Some(memo) = nonempty_escaped(td.memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // `referral` is an `AccountId`: its own charset rules already exclude
-    // everything `charset_safe` would strip, so filtering it would be dead code.
+    // everything `escape_display_text` would encode, so escaping it would be a no-op.
     if let Some(referral) = &td.referral {
         fields.push(create_text_field("Referral", referral.as_str())?.signable_payload_field);
     }
@@ -453,7 +453,7 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
             registry,
         )?);
     }
-    if let Some(memo) = nonempty_filtered(t.memo.as_deref()) {
+    if let Some(memo) = nonempty_escaped(t.memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // A `Transfer`'s optional notification changes what the transfer does
@@ -488,7 +488,7 @@ fn push_withdraw_call_details(
     msg: &Option<String>,
     storage_deposit: Option<near_sdk::NearToken>,
 ) -> Result<(), VisualSignError> {
-    if let Some(memo) = nonempty_filtered(memo.as_deref()) {
+    if let Some(memo) = nonempty_escaped(memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // `Some("")` is not the same withdraw as `None`: it selects the
@@ -527,7 +527,7 @@ fn render_nft_withdraw(w: &NftWithdraw) -> Result<Fields, VisualSignError> {
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
         // `token_id` is a plain `String` (`non_fungible_token::TokenId`), not
         // an `AccountId`, so it carries whatever bytes the sender chose.
-        create_text_field("NFT Token Id", &charset_safe(w.token_id.as_str()))?
+        create_text_field("NFT Token Id", &escape_display_text(w.token_id.as_str()))?
             .signable_payload_field,
     ];
     push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
@@ -555,8 +555,9 @@ fn render_mt_withdraw(w: &MtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
     for (id, amount) in w.token_ids.iter().zip(w.amounts.iter()) {
         // As with `nft_withdraw`'s `token_id`, an MT token id is a plain
         // `String` (`defuse_nep245::TokenId`), so it carries whatever bytes
-        // the sender chose and must be filtered before it reaches field text.
-        fields.push(create_text_field("MT Token", &charset_safe(id))?.signable_payload_field);
+        // the sender chose and must be escaped before it reaches field text.
+        fields
+            .push(create_text_field("MT Token", &escape_display_text(id))?.signable_payload_field);
         fields.extend(token_amount_field(
             "Amount",
             &format!("nep245:{}:{id}", w.token),
@@ -1127,7 +1128,7 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("zero delta"), "{message}");
         assert!(
-            message.contains("nep245:mt.near:x?To: attacker.near?Amount: 1000 USDC"),
+            message.contains("nep245:mt.near:x%0ATo: attacker.near%0AAmount: 1000 USDC"),
             "{message}"
         );
         assert!(!message.contains('\n'), "{message}");
@@ -1497,15 +1498,15 @@ mod tests {
     }
 
     /// The other input that used to reach the same collapse. It no longer
-    /// sanitizes to nothing, so the field carries markers rather than needing
-    /// the placeholder.
+    /// escapes to nothing, so the field carries the escaped text rather than
+    /// needing the placeholder.
     #[test]
-    fn transfer_with_an_unrenderable_notification_message_renders_markers() {
+    fn transfer_with_an_unrenderable_notification_message_renders_escaped() {
         let intent = intent_from(
             r#"{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1"},"msg":"éé"}"#,
         );
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert_eq!(text_at(&fields, "Message"), "??");
+        assert_eq!(text_at(&fields, "Message"), "%C3%A9%C3%A9");
     }
 
     #[test]
@@ -1568,7 +1569,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1580,7 +1581,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1592,7 +1593,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1604,7 +1605,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1618,7 +1619,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1634,8 +1635,29 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "NFT Token Id"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
+    }
+
+    /// Distinct signed token ids must render distinctly. A single-marker
+    /// sanitizer showed `é`, `?` and a line feed identically.
+    #[test]
+    fn nft_withdraw_token_ids_that_a_marker_would_collapse_stay_distinct() {
+        let shown = |token_id: &str| {
+            let intent = intent_from(&format!(
+                r#"{{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":{}}}"#,
+                serde_json::to_string(token_id).unwrap()
+            ));
+            text_at(
+                &render_intent(&intent, &empty_reg()).expect("render"),
+                "NFT Token Id",
+            )
+        };
+        let ids = ["\u{e9}", "?", "\n", "%C3%A9", "%3F"];
+        let rendered: std::collections::BTreeSet<String> = ids.iter().map(|id| shown(id)).collect();
+        assert_eq!(rendered.len(), ids.len(), "{rendered:?}");
+        assert_eq!(shown("\u{e9}"), "%C3%A9");
+        assert_eq!(shown("%C3%A9"), "%25C3%25A9");
     }
 
     #[test]
@@ -1646,7 +1668,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "MT Token"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1658,7 +1680,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1675,7 +1697,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Amount"),
-            "1 (unresolved nep245:mt.near:x?To: attacker.near?Amount: 1000 USDC)"
+            "1 (unresolved nep245:mt.near:x%0ATo: attacker.near%0AAmount: 1000 USDC)"
         );
     }
 
@@ -1721,7 +1743,10 @@ mod tests {
         // The non-`diagnostics` build prefixes the rule onto the same string,
         // so assert on the message's own content rather than the whole field.
         let message = message_of(&field);
-        assert!(message.contains("innocent?To: attacker.near"), "{message}");
+        assert!(
+            message.contains("innocent%0ATo: attacker.near"),
+            "{message}"
+        );
     }
 
     /// The `extraction` rule quotes a `serde_json::Error`, which interpolates

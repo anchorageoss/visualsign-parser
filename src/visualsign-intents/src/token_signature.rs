@@ -645,7 +645,7 @@ pub fn try_extract_from_chain_metadata(
         // to prevent. A fixed-width prefix names the entry the signer's wallet
         // supplied -- enough to identify which mapping was dropped -- without
         // reintroducing an unbounded copy, and the reason carries the length.
-        // `rejected_metadata_diagnostics` charset-filters both halves, so the
+        // `rejected_metadata_diagnostics` escapes both halves, so the
         // prefix cannot smuggle control characters onto the signing screen.
         if asset_id.len() > MAX_ASSET_ID_BYTES {
             let preview: String = asset_id.chars().take(ASSET_ID_PREVIEW_CHARS).collect();

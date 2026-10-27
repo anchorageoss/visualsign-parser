@@ -10,7 +10,6 @@
 //! internals.
 
 mod args;
-mod fmt;
 pub mod network;
 
 /// The account the intents protocol settles through. A multi-token asset id
