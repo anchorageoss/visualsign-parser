@@ -366,6 +366,7 @@ fn render_intent_body(intent: &Intent, registry: &Reg) -> Result<Fields, VisualS
                 create_text_field("Message", &escape_display_text(&c.msg))?.signable_payload_field,
                 near_amount_field("Attached Deposit", c.attached_deposit.as_yoctonear())?,
             ];
+            push_min_gas(&mut fields, c.min_gas)?;
             if c.state_init.is_some() {
                 fields.push(state_init_field()?);
             }
@@ -469,6 +470,7 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
             create_text_field("Message", &present_value(notification.msg.as_str()))?
                 .signable_payload_field,
         );
+        push_min_gas(&mut fields, notification.min_gas)?;
         if notification.state_init.is_some() {
             fields.push(state_init_field()?);
         }
@@ -476,17 +478,36 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     Ok(fields)
 }
 
+/// A signed `min_gas`: the gas the created promise must be given, which
+/// decides whether the callback (and with it anything it moves) can succeed.
+///
+/// Rendered on presence, not on value: an explicit `"0"` and an absent field
+/// sign different payloads (the contract applies its own default only to the
+/// absent one), so the two must not render alike.
+fn push_min_gas(
+    fields: &mut Fields,
+    min_gas: Option<near_sdk::Gas>,
+) -> Result<(), VisualSignError> {
+    if let Some(gas) = min_gas {
+        let tgas = tokens::format_units(u128::from(gas.as_gas()), 12);
+        fields.push(create_text_field("Min Gas", &format!("{tgas} Tgas"))?.signable_payload_field);
+    }
+    Ok(())
+}
+
 /// A withdraw's trailing fields, shared by all three token standards so none
 /// can silently drop one: the optional `memo`, the optional `msg` (switches
-/// the call into its `_transfer_call` form, passing this to the receiver), and
+/// the call into its `_transfer_call` form, passing this to the receiver),
 /// `storage_deposit` (a separate, unconditional wNEAR debit for the receiver's
-/// storage on `token`, never refunded on failure). Each changes what the
-/// withdraw does beyond moving the named token/amount, so each must render.
+/// storage on `token`, never refunded on failure), and `min_gas` (the gas the
+/// withdraw's promise must be given). Each changes what the withdraw does
+/// beyond moving the named token/amount, so each must render.
 fn push_withdraw_call_details(
     fields: &mut Fields,
     memo: &Option<String>,
     msg: &Option<String>,
     storage_deposit: Option<near_sdk::NearToken>,
+    min_gas: Option<near_sdk::Gas>,
 ) -> Result<(), VisualSignError> {
     if let Some(memo) = nonempty_escaped(memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
@@ -503,7 +524,7 @@ fn push_withdraw_call_details(
             deposit.as_yoctonear(),
         )?);
     }
-    Ok(())
+    push_min_gas(fields, min_gas)
 }
 
 fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSignError> {
@@ -517,7 +538,7 @@ fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
         w.amount.0,
         registry,
     )?);
-    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit, w.min_gas)?;
     Ok(fields)
 }
 
@@ -530,7 +551,7 @@ fn render_nft_withdraw(w: &NftWithdraw) -> Result<Fields, VisualSignError> {
         create_text_field("NFT Token Id", &escape_display_text(w.token_id.as_str()))?
             .signable_payload_field,
     ];
-    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit, w.min_gas)?;
     Ok(fields)
 }
 
@@ -565,7 +586,7 @@ fn render_mt_withdraw(w: &MtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
             registry,
         )?);
     }
-    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit, w.min_gas)?;
     Ok(fields)
 }
 
@@ -1507,6 +1528,55 @@ mod tests {
         );
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(text_at(&fields, "Message"), "%C3%A9%C3%A9");
+    }
+
+    /// `min_gas` is signed, and an explicit `"0"` is a different payload from
+    /// an absent one: the contract applies its default gas only when the field
+    /// is missing. Every intent that carries it renders it on presence, so an
+    /// `auth_call` with an attached deposit -- not refunded on failure -- cannot
+    /// preview the same way under either.
+    #[test]
+    fn min_gas_renders_on_presence_for_every_intent_that_carries_it() {
+        let auth = |min_gas: &str| {
+            format!(
+                r#"{{"intent":"auth_call","contract_id":"app.near","msg":"go","attached_deposit":"1000000000000000000000000"{min_gas}}}"#
+            )
+        };
+        let defaulted = render_intent(&intent_from(&auth("")), &empty_reg()).expect("render");
+        let zero =
+            render_intent(&intent_from(&auth(r#","min_gas":"0""#)), &empty_reg()).expect("render");
+        // A static message: CodeQL treats rendered fields as tainted.
+        assert!(
+            defaulted
+                .iter()
+                .filter_map(label_of)
+                .all(|l| l != "Min Gas"),
+            "a defaulted min_gas must render no Min Gas field"
+        );
+        assert_eq!(text_at(&zero, "Min Gas"), "0 Tgas");
+        let labels = |fields: &Fields| -> Vec<String> {
+            fields
+                .iter()
+                .filter_map(label_of)
+                .map(str::to_string)
+                .collect()
+        };
+        assert_ne!(
+            labels(&defaulted),
+            labels(&zero),
+            "the two payloads must not preview alike"
+        );
+
+        for intent in [
+            auth(r#","min_gas":"30000000000000""#),
+            r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","min_gas":"30000000000000"}"#.to_string(),
+            r#"{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":"1","min_gas":"30000000000000"}"#.to_string(),
+            r#"{"intent":"mt_withdraw","token":"mt.near","receiver_id":"alice.near","token_ids":["a"],"amounts":["1"],"min_gas":"30000000000000"}"#.to_string(),
+            r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"},"msg":"m","min_gas":"30000000000000"}"#.to_string(),
+        ] {
+            let fields = render_intent(&intent_from(&intent), &empty_reg()).expect("render");
+            assert_eq!(text_at(&fields, "Min Gas"), "30 Tgas", "{intent}");
+        }
     }
 
     #[test]
