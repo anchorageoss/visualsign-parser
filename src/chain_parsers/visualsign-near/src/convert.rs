@@ -1782,6 +1782,84 @@ mod tests {
         }
     }
 
+    /// The recipient and callback URL are signed free text like the message:
+    /// values a marker or filter would collapse render distinctly.
+    #[test]
+    fn nep413_recipients_and_callbacks_that_a_marker_would_collapse_stay_distinct() {
+        let texts = [
+            "app.example.com/\u{e9}",
+            "app.example.com/?",
+            "app.example.com/\n",
+            "app.example.com/%C3%A9",
+            "app.example.com/%c3%a9",
+        ];
+        let recipient = |r: &str| {
+            render_nep413(
+                nep413_envelope("hello", r, None),
+                VisualSignOptions::default(),
+            )
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::AddressV2 { common, address_v2 }
+                    if common.label == "NEP-413 Recipient" =>
+                {
+                    Some(address_v2.address.clone())
+                }
+                _ => None,
+            })
+            .expect("no recipient field")
+        };
+        let callback = |url: &str| {
+            labeled_text(
+                &render_nep413(
+                    nep413_envelope("hello", "app.example.com", Some(url)),
+                    VisualSignOptions::default(),
+                ),
+                "NEP-413 Callback URL",
+            )
+        };
+        let recipients: std::collections::BTreeSet<String> =
+            texts.iter().map(|t| recipient(t)).collect();
+        assert_eq!(recipients.len(), texts.len(), "{recipients:?}");
+        let callbacks: std::collections::BTreeSet<String> = texts
+            .iter()
+            .map(|t| callback(&format!("https://{t}")))
+            .collect();
+        assert_eq!(callbacks.len(), texts.len(), "{callbacks:?}");
+    }
+
+    /// The intents a NEP-413 message carries render in place of the raw message,
+    /// so their free text has to be reversible too: NFT token ids `é` and `?`
+    /// stay distinct through a complete envelope.
+    #[test]
+    fn nep413_carried_nft_token_ids_that_a_marker_would_collapse_stay_distinct() {
+        let shown = |token_id: &str| {
+            let message = serde_json::json!({
+                "signer_id": "alice.near",
+                "deadline": "2999-01-01T00:00:00Z",
+                "intents": [{
+                    "intent": "nft_withdraw",
+                    "token": "nft.near",
+                    "receiver_id": "bob.near",
+                    "token_id": token_id,
+                }],
+            })
+            .to_string();
+            let payload = render_nep413(
+                nep413_envelope(&message, "intents.near", None),
+                VisualSignOptions::default(),
+            );
+            payload.validate_charset().expect("charset");
+            labeled_text(&payload, "NFT Token Id")
+        };
+        let ids = ["\u{e9}", "?", "\n", "%C3%A9", "%c3%a9"];
+        let shown_all: std::collections::BTreeSet<String> =
+            ids.iter().map(|id| shown(id)).collect();
+        assert_eq!(shown_all.len(), ids.len(), "{shown_all:?}");
+        assert_eq!(shown("\u{e9}"), "%C3%A9");
+    }
+
     /// The signed message determines what is displayed: messages a marker or
     /// filter would collapse together render distinctly.
     #[test]
