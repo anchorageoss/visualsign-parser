@@ -13,7 +13,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 use visualsign::encodings::escape_display_text;
 
-use crate::actions::render_action;
+use crate::actions::render_action_for_receiver;
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
     NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
@@ -306,7 +306,7 @@ impl NearVisualSignConverter {
 
         let total_actions = tx.actions().len();
         for action in tx.actions() {
-            fields.extend(render_action(
+            fields.extend(render_action_for_receiver(
                 action,
                 total_actions,
                 tx.receiver_id().as_str(),
@@ -573,13 +573,7 @@ fn title_for(actions: &[Action], receiver_id: &str) -> String {
         // A recognized contract call names itself, so a signer reads "Wrap"
         // rather than "Function Call". The preset returns None unless the args
         // decoded, so the title never outruns the fields.
-        [Action::FunctionCall(fc)] => {
-            crate::presets::wrap::label(receiver_id, &fc.method_name, &fc.args).map_or_else(
-                || crate::actions::action_label(&Action::FunctionCall(fc.clone())).to_string(),
-                str::to_string,
-            )
-        }
-        [single] => crate::actions::action_label(single).to_string(),
+        [single] => crate::actions::receiver_action_label(single, receiver_id).to_string(),
         _ => "NEAR Transaction".to_string(),
     }
 }
@@ -747,6 +741,42 @@ mod tests {
         assert_eq!(payload.title, "Unwrap");
         let json = payload.to_json().expect("json");
         assert!(json.contains("wNEAR"), "an unwrap moves wNEAR: {json}");
+    }
+
+    /// In a multi-action transaction each wrap call names itself in its
+    /// `Action` boundary as the single-action title does, and a call the preset
+    /// does not recognize keeps the generic label.
+    #[test]
+    fn wraps_name_themselves_in_multi_action_boundaries() {
+        let call = |method: &str, args: &str| {
+            Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: method.to_string(),
+                args: args.as_bytes().to_vec(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(1),
+            }))
+        };
+        let tx = near_tx_as(
+            "alice.near",
+            "wrap.near",
+            vec![
+                call("near_deposit", ""),
+                call("near_withdraw", r#"{"amount":"1000000000000000000000000"}"#),
+                call("storage_deposit", ""),
+            ],
+        );
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect("convert")
+            .payload;
+        let boundaries: Vec<&str> = payload
+            .fields
+            .iter()
+            .filter(|f| f.label() == "Action")
+            .map(field_text)
+            .collect();
+        assert_eq!(boundaries, ["Wrap", "Unwrap", "Function Call"]);
+        assert_eq!(payload.title, "NEAR Transaction");
     }
 
     /// The same method name on another contract is not a wrap, so the title
