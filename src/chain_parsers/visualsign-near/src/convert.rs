@@ -423,11 +423,12 @@ fn render_nep413_envelope(
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    // tx.rs already decoded this as a Nep413Payload, so a failure here means the
-    // validated text and the rendered text have diverged rather than that the
-    // caller sent something malformed.
+    // Decoded under the same rules as `NearTransaction::from_string`, not a
+    // plain serde parse: the enum is public, so this envelope may never have
+    // passed through string decoding, and an intent-shaped message that does not
+    // decode must be refused here rather than shown as text.
     let payload: Nep413Payload =
-        serde_json::from_str(json).map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
+        crate::tx::decode_nep413(json).map_err(VisualSignError::ConversionError)?;
 
     // The resolved network is part of every token-metadata signed scope, so the
     // payload shows which network that scope was checked against -- the same
@@ -1731,6 +1732,54 @@ mod tests {
             labeled_text(&payload, "NEP-413 Callback URL"),
             "https://app.example.com/%E2%80%AEbc"
         );
+    }
+
+    /// The NEP-413 rules hold when a caller builds `NearTransaction::Nep413`
+    /// directly instead of decoding a string: an intent-shaped message that does
+    /// not decode is refused, not rendered as a "NEAR Message", and so are an
+    /// undeclared envelope key and an undeclared key inside the intents.
+    #[test]
+    fn a_directly_built_nep413_envelope_is_held_to_the_decoding_rules() {
+        let render = |envelope: String| {
+            NearVisualSignConverter::new().to_visual_sign_payload(
+                NearTransaction::Nep413(envelope),
+                VisualSignOptions::default(),
+            )
+        };
+        for inner in [
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":[{"intent":"future_unknown"}]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":null}"#,
+        ] {
+            let Err(err) = render(nep413_envelope(inner, "intents.near", None)) else {
+                panic!("an intent-shaped message that does not decode must be refused");
+            };
+            assert!(
+                err.to_string().contains("malformed or unsupported"),
+                "{err}"
+            );
+        }
+
+        let mut extra_envelope_key: serde_json::Value =
+            serde_json::from_str(&nep413_envelope("hello", "app.example.com", None)).unwrap();
+        extra_envelope_key["callback_url"] = serde_json::json!("https://evil.example");
+        let Err(err) = render(extra_envelope_key.to_string()) else {
+            panic!("an undeclared envelope key must be refused");
+        };
+        assert!(err.to_string().contains("\"callback_url\""), "{err}");
+
+        let inner = r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":[],"memo":"hidden"}"#;
+        let Err(err) = render(nep413_envelope(inner, "intents.near", None)) else {
+            panic!("an undeclared key inside the intents must be refused");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+
+        // Ordinary text, JSON naming no `intents` included, still renders.
+        for message in ["hello", r#"{"app":"example","action":"login"}"#] {
+            let payload = render(nep413_envelope(message, "app.example.com", None))
+                .expect("plain message renders")
+                .payload;
+            assert_eq!(payload.title, "NEAR Message");
+        }
     }
 
     /// The signed message determines what is displayed: messages a marker or

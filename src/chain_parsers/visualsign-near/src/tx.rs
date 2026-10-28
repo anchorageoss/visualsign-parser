@@ -121,10 +121,8 @@ impl NearTransaction {
         // NEP-413 is tried second. With strict key sets the envelopes are
         // disjoint for every input, so the order decides only which causes
         // appear when input is neither.
-        let nep413_err = match strict_decode::<Nep413Payload>(trimmed, strict::NEP413_KEYS)
-            .and_then(check_nep413_intents)
-        {
-            Ok(()) => return Ok(Self::Nep413(trimmed.to_string())),
+        let nep413_err = match decode_nep413(trimmed) {
+            Ok(_) => return Ok(Self::Nep413(trimmed.to_string())),
             Err(e) => e,
         };
 
@@ -154,16 +152,44 @@ fn strict_decode<T: DeserializeOwned>(json: &str, allowed: &[&str]) -> Result<T,
     Ok(value)
 }
 
+/// Decode a NEP-413 envelope under every rule [`NearTransaction::Nep413`]
+/// promises: only the keys NEP-413 declares, and a `message` that is either an
+/// intents request held to its own key set or free text.
+///
+/// Shared by string decoding and the converter, because the enum is public: a
+/// caller can build `NearTransaction::Nep413` without going through
+/// [`NearTransaction::from_string_with_options`], and the rules have to hold for
+/// that envelope too.
+pub(crate) fn decode_nep413(json: &str) -> Result<Nep413Payload, String> {
+    let payload = strict_decode::<Nep413Payload>(json, strict::NEP413_KEYS)?;
+    check_nep413_intents(&payload)?;
+    Ok(payload)
+}
+
 /// When a NEP-413 `message` is an intents request, hold it to the same rule as
 /// a raw `DefusePayload`: every key must be one the decoder reads. A message
 /// that is not intents is free text and renders as such.
-fn check_nep413_intents(payload: Nep413Payload) -> Result<(), String> {
-    let message = payload.message.clone();
-    if ExtractDefusePayload::<DefuseIntents>::extract_defuse_payload(payload).is_err() {
+///
+/// A message that is [intent-shaped](visualsign_intents::is_intent_shaped) but
+/// does not extract (an intent kind this build does not know, `intents: null`)
+/// is refused rather than treated as free text: showing it as a plain message
+/// would put raw JSON in front of a signer for an intent the parser could not
+/// interpret.
+fn check_nep413_intents(payload: &Nep413Payload) -> Result<(), String> {
+    if let Err(e) = ExtractDefusePayload::<DefuseIntents>::extract_defuse_payload(payload.clone()) {
+        if visualsign_intents::is_intent_shaped(payload.message.as_bytes()) {
+            return Err(format!(
+                "this NEP-413 message is a NEAR Intents payload that is malformed or \
+                 unsupported: {e}"
+            ));
+        }
         return Ok(());
     }
-    strict::require_declared_keys(message.as_bytes(), strict::NEP413_INTENTS_MESSAGE_KEYS)
-        .map_err(|e| format!("the intents in this NEP-413 message carry {e}"))
+    strict::require_declared_keys(
+        payload.message.as_bytes(),
+        strict::NEP413_INTENTS_MESSAGE_KEYS,
+    )
+    .map_err(|e| format!("the intents in this NEP-413 message carry {e}"))
 }
 
 impl visualsign::vsptrait::Transaction for NearTransaction {
@@ -717,6 +743,26 @@ mod tests {
         .to_string();
         let message = decode_error(&envelope);
         assert!(message.contains("\"extra\""), "{message}");
+    }
+
+    /// A NEP-413 message that is intent-shaped (a JSON object naming `intents`)
+    /// but does not decode is refused rather than accepted as free text: an
+    /// unknown intent kind and `intents: null` both.
+    #[test]
+    fn nep413_intent_shaped_message_that_does_not_decode_is_refused() {
+        for inner in [
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":[{"intent":"future_unknown"}]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":null}"#,
+        ] {
+            let envelope = serde_json::json!({
+                "message": inner,
+                "nonce": "XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=",
+                "recipient": "intents.near",
+            })
+            .to_string();
+            let message = decode_error(&envelope);
+            assert!(message.contains("malformed or unsupported"), "{message}");
+        }
     }
 
     /// A NEP-413 message that is JSON but not an intents request is free text:
