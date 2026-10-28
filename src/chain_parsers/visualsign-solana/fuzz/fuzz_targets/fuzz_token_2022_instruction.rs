@@ -22,10 +22,11 @@ const EXTRA_KEYS: u8 = 10;
 // One Token-2022 instruction through the full legacy-transaction pipeline.
 // Input: [n, n account indices, instruction data...]. Index i names message
 // account i + 2 (wrapping), so 0..=9 are the ten plain accounts, 10..=253 are
-// out of range, 254 is the fee payer and 255 is Token-2022 itself. Seeds in `seeds/fuzz_token_2022_instruction/` come from the
-// token_2022 fixtures and solana-program/token's p-token conformance corpus.
+// out of range, 254 is the fee payer and 255 is Token-2022 itself. Seeds in
+// `seeds/fuzz_token_2022_instruction/` come from the token_2022 fixtures and
+// solana-program/token's p-token conformance corpus.
 //
-// Asserts no panic, and that the payload stays proportional to the input
+// Asserts no panic, and that the payload stays under a loose size ceiling
 // (run with -malloc_limit_mb / -rss_limit_mb to bound allocation too).
 fuzz_target!(|input: &[u8]| {
     let Some((&n, rest)) = input.split_first() else {
@@ -59,6 +60,9 @@ fuzz_target!(|input: &[u8]| {
     };
     if let Ok(payload) = transaction_to_visual_sign(tx, VisualSignOptions::default()) {
         let json = payload.to_json().expect("payload serializes");
+        // A loose ceiling against blow-up (output growing much faster than
+        // the input), not a proportionality check: typical payloads are a
+        // few KB, well under the 64 KiB base.
         let bound = 64 * 1024 + 8 * data.len() + 256 * indices.len();
         assert!(
             json.len() <= bound,

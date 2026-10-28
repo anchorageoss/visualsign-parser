@@ -203,12 +203,12 @@ fn out_of_range_account_index_fails_closed() {
     assert_not_rendered(transaction_to_visual_sign(tx, options_no_idl()));
 }
 
-/// FINDING: accounts after a Transfer's authority are labelled "Multisig
-/// Signer N" even when the transaction does not mark them as signers. The
-/// program ignores such accounts (and all of them when the authority is not
-/// a multisig), so the label claims a co-signer that is not there.
+/// An account after a Transfer's authority that the transaction doesn't mark
+/// as a signer is not labelled a signer. The program ignores such accounts
+/// (and all of them when the authority is not a multisig), so a signer label
+/// would claim a co-signer that is not there. (Finding 3 on #574: they were
+/// labelled "Multisig Signer N"; now "Additional Account N".)
 #[test]
-#[ignore = "finding on #574: non-signer extra accounts are labelled 'Multisig Signer N'"]
 fn non_signer_extra_account_is_not_labelled_a_signer() {
     let payer = Pubkey::new_unique();
     let (source, destination, extra) = (
@@ -240,9 +240,13 @@ fn non_signer_extra_account_is_not_labelled_a_signer() {
         })
         .unwrap_or_else(|| panic!("{:?}", titles(&payload)));
     let expanded = &transfer.expanded.as_ref().unwrap().fields;
-    assert_ne!(
+    assert_eq!(
         find_text(expanded, "Multisig Signer 1"),
-        Some(extra.to_string()),
+        None,
         "{extra} is not a signer of this transaction"
+    );
+    assert_eq!(
+        find_text(expanded, "Additional Account 1"),
+        Some(extra.to_string())
     );
 }

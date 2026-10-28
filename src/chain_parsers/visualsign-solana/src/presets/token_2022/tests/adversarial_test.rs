@@ -10,22 +10,25 @@
 // - `interface_decode`: `TokenInstruction::unpack` / `TransferFeeInstruction::unpack`
 //   from spl-token-2022 10 (spl-token-2022-interface 2.1). The preset is built
 //   on these, so they say what it *should* decode and with which fields. They
-//   are lenient (they ignore trailing bytes), so they are not ground truth.
+//   are lenient (they ignore trailing bytes), so they are not ground truth:
+//   `should_decode` adds the program's exact-length rule and its fee <= amount
+//   rule on top.
 // - `program_decodes`: the Token-2022 program's own entrypoint,
 //   `spl_token_2022::processor::Processor::process`, called with no accounts.
 //   It decodes the data first and only then asks for accounts, so
 //   `NotEnoughAccountKeys` means the program accepted the bytes and any other
 //   error means it rejected them. This is the strict, on-chain ground truth.
 //
-// Tests marked `#[ignore = "..."]` pin findings on #574; they fail today.
+// The three findings these tests pinned on #574 (trailing bytes, fee above
+// the amount, extra accounts labelled multisig signers) were fixed before it
+// merged; their tests now guard the fixes.
 
 use super::*;
-use crate::idl::IdlRegistry;
 use proptest::prelude::*;
-use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::instruction::CompiledInstruction;
+use solana_program_error::ProgramError;
 use solana_sdk::pubkey::Pubkey;
 use std::collections::BTreeMap;
+use visualsign::encodings::decode_hex;
 
 const UNPARSED: &str = "Token 2022 (unparsed)";
 
@@ -41,98 +44,56 @@ const PREEXISTING_TAGS: [u8; 7] = [6, 9, 10, 11, 14, 15, 44];
 /// with the number of fixed accounts.
 const MULTISIG_TAGS: [(u8, usize); 6] = [(3, 3), (4, 3), (5, 2), (7, 3), (8, 3), (13, 4)];
 
-// ── Rendering helpers ────────────────────────────────────────────────────────
-
-struct Render {
-    title: String,
-    rows: Vec<(String, String)>,
-}
-
-impl Render {
-    fn unparsed(&self) -> bool {
-        self.title == UNPARSED
-    }
-
-    fn row(&self, label: &str) -> Option<&str> {
-        self.rows
-            .iter()
-            .find(|(l, _)| l == label)
-            .map(|(_, v)| v.as_str())
-    }
-
-    fn signers(&self) -> Vec<(String, String)> {
-        self.rows
-            .iter()
-            .filter(|(l, _)| l.starts_with("Multisig Signer"))
-            .cloned()
-            .collect()
-    }
-}
+// --- Rendering helpers (on top of mod.rs's `visualize`/`visualize_indices`) ---
 
 fn program_key() -> Pubkey {
     Pubkey::new_from_array(spl_token_2022::id().to_bytes())
 }
 
-/// `n` distinct non-program keys.
-fn distinct_keys(n: usize) -> Vec<Pubkey> {
-    (1..=n)
-        .map(|i| {
-            let mut bytes = [0u8; 32];
-            bytes[0] = 0xa0;
-            bytes[1] = i as u8;
-            Pubkey::new_from_array(bytes)
-        })
+/// An account table: the program id at index 0, then `keys(n)`.
+fn table(n: u8) -> Vec<Pubkey> {
+    let mut t = vec![program_key()];
+    t.extend(keys(n));
+    t
+}
+
+fn unparsed(title: &str) -> bool {
+    title == UNPARSED
+}
+
+/// The text of the first `label: text` row with this label.
+fn row<'a>(rows: &'a [String], label: &str) -> Option<&'a str> {
+    rows.iter()
+        .find_map(|r| r.strip_prefix(label)?.strip_prefix(": "))
+}
+
+/// The "Additional Account N" rows: the accounts after the fixed ones.
+fn extra_accounts(rows: &[String]) -> Vec<&str> {
+    rows.iter()
+        .filter(|r| r.starts_with("Additional Account "))
+        .map(String::as_str)
         .collect()
 }
 
-/// Run `data` through the visualizer as one compiled instruction whose
-/// account indices are `indices` into `keys` (program id at index 0).
-fn render_indices(data: &[u8], keys: &[Pubkey], indices: &[u8]) -> Result<Render, VisualSignError> {
-    let compiled = CompiledInstruction {
-        program_id_index: 0,
-        accounts: indices.to_vec(),
-        data: data.to_vec(),
-    };
-    let sender = SolanaAccount {
-        account_key: keys[0].to_string(),
-        signer: false,
-        writable: false,
-    };
-    let idl = IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, &compiled, keys, &idl, 0);
-    let field = Token2022Visualizer.visualize_tx_commands(&context)?;
-    let SignablePayloadField::PreviewLayout { preview_layout, .. } = field.signable_payload_field
-    else {
-        panic!("expected PreviewLayout");
-    };
-    let rows = preview_layout
-        .expanded
-        .expect("expanded layout")
-        .fields
-        .iter()
-        .map(|f| {
-            let f = &f.signable_payload_field;
-            (f.label().to_string(), f.fallback_text().to_string())
-        })
-        .collect();
-    Ok(Render {
-        title: preview_layout.title.expect("title").text,
-        rows,
-    })
+/// Visualize `data` with `n` distinct accounts, in order. Returns the title,
+/// the expanded rows and the account keys (without the program id).
+fn render(data: &[u8], n: usize) -> (String, Vec<String>, Vec<Pubkey>) {
+    let accounts = keys(n as u8);
+    let (title, rows) = visualize(data.to_vec(), &accounts);
+    (title, rows, accounts)
 }
 
-/// Run `data` with `n` distinct accounts, in order. Returns the render and
-/// the account keys (without the program id).
-fn render(data: &[u8], n: usize) -> (Render, Vec<Pubkey>) {
-    let accounts = distinct_keys(n);
-    let mut keys = vec![program_key()];
-    keys.extend_from_slice(&accounts);
-    let indices: Vec<u8> = (1..=n as u8).collect();
-    let r = render_indices(data, &keys, &indices).expect("all accounts resolve");
-    (r, accounts)
+/// Visualize `data` with compiled account `indices` into `table`. Returns the
+/// title and expanded rows, or the visualizer's error.
+fn render_at(
+    data: &[u8],
+    table: &[Pubkey],
+    indices: &[u8],
+) -> Result<(String, Vec<String>), VisualSignError> {
+    visualize_indices(data.to_vec(), table, indices.to_vec()).map(|(title, _, rows)| (title, rows))
 }
 
-// ── Encoders (layouts from token-2022 interface/src/instruction.rs) ──────────
+// --- Encoders (layouts from token-2022 interface/src/instruction.rs) ---
 
 fn amount_data(tag: u8, amount: u64) -> Vec<u8> {
     let mut d = vec![tag];
@@ -165,7 +126,19 @@ fn exact_len(tag: u8) -> usize {
     }
 }
 
-// ── Oracles ──────────────────────────────────────────────────────────────────
+/// The length the program requires, for the instructions it decodes with
+/// `decode_instruction_data` (exact length). `None` where it ignores trailing
+/// bytes: Revoke, and TransferCheckedWithFee, which it decodes with
+/// `TransferFeeInstruction::unpack` like the preset does.
+fn strict_len(tag: u8) -> Option<usize> {
+    match tag {
+        3 | 4 | 7 | 8 => Some(9),
+        12 | 13 => Some(10),
+        _ => None,
+    }
+}
+
+// --- Oracles ---
 
 #[derive(Debug, Clone, PartialEq)]
 enum Want {
@@ -257,7 +230,7 @@ fn program_decodes(data: &[u8]) -> bool {
     let program_id = spl_token_2022::id();
     match spl_token_2022::processor::Processor::process(&program_id, &[], data) {
         Ok(()) => panic!("no-account call succeeded for {data:02x?}"),
-        Err(e) => format!("{e:?}") == "NotEnoughAccountKeys",
+        Err(e) => matches!(e, ProgramError::NotEnoughAccountKeys),
     }
 }
 
@@ -303,23 +276,31 @@ fn role_positions(want: &Want) -> BTreeMap<&'static str, usize> {
 }
 
 /// Assert that a decoded render shows exactly what `want` says.
-fn assert_fields(r: &Render, want: &Want, data: &[u8]) {
-    assert_eq!(r.row("Raw Data"), Some(hex(data).as_str()), "{data:02x?}");
+fn assert_fields(title: &str, rows: &[String], want: &Want, data: &[u8]) {
+    assert_eq!(
+        row(rows, "Raw Data"),
+        Some(hex(data).as_str()),
+        "{data:02x?}"
+    );
     match want {
         Want::Transfer { amount } => {
-            assert_eq!(r.title, format!("Transfer: {amount} base units"));
-            assert_eq!(r.row("Raw Amount"), Some(amount.to_string().as_str()));
-            assert_eq!(r.row("Amount"), None, "no token amount without decimals");
+            assert_eq!(title, format!("Transfer: {amount} base units"));
+            assert_eq!(row(rows, "Raw Amount"), Some(amount.to_string().as_str()));
+            assert_eq!(
+                row(rows, "Amount"),
+                None,
+                "no token amount without decimals"
+            );
         }
         Want::MintTo { amount } => {
-            assert_eq!(r.title, format!("Mint To: {amount} base units"));
-            assert_eq!(r.row("Raw Amount"), Some(amount.to_string().as_str()));
-            assert_eq!(r.row("Amount"), None);
+            assert_eq!(title, format!("Mint To: {amount} base units"));
+            assert_eq!(row(rows, "Raw Amount"), Some(amount.to_string().as_str()));
+            assert_eq!(row(rows, "Amount"), None);
         }
         Want::Burn { amount } => {
-            assert_eq!(r.title, format!("Burn: {amount} base units"));
-            assert_eq!(r.row("Raw Amount"), Some(amount.to_string().as_str()));
-            assert_eq!(r.row("Amount"), None);
+            assert_eq!(title, format!("Burn: {amount} base units"));
+            assert_eq!(row(rows, "Raw Amount"), Some(amount.to_string().as_str()));
+            assert_eq!(row(rows, "Amount"), None);
         }
         Want::Checked {
             amount,
@@ -332,66 +313,77 @@ fn assert_fields(r: &Render, want: &Want, data: &[u8]) {
                 "Transfer Checked"
             };
             let shown = scaled(*amount, *decimals);
-            assert_eq!(r.title, format!("{name}: {shown} tokens"));
-            assert_eq!(r.row("Amount"), Some(shown.as_str()));
-            assert_eq!(r.row("Raw Amount"), Some(amount.to_string().as_str()));
-            assert_eq!(r.row("Decimals"), Some(decimals.to_string().as_str()));
+            assert_eq!(title, format!("{name}: {shown} tokens"));
+            assert_eq!(row(rows, "Amount"), Some(shown.as_str()));
+            assert_eq!(row(rows, "Raw Amount"), Some(amount.to_string().as_str()));
+            assert_eq!(row(rows, "Decimals"), Some(decimals.to_string().as_str()));
             let want_fee = fee.map(|f| scaled(f, *decimals));
-            assert_eq!(r.row("Fee").map(str::to_string), want_fee);
+            assert_eq!(row(rows, "Fee").map(str::to_string), want_fee);
         }
         Want::Approve {
             amount,
             decimals: None,
         } => {
-            assert_eq!(r.title, format!("Approve: {amount} base units"));
+            assert_eq!(title, format!("Approve: {amount} base units"));
             assert_eq!(
-                r.row("Amount"),
+                row(rows, "Amount"),
                 Some(format!("{amount} base units").as_str())
             );
-            assert_eq!(r.row("Raw Amount"), Some(amount.to_string().as_str()));
+            assert_eq!(row(rows, "Raw Amount"), Some(amount.to_string().as_str()));
         }
         Want::Approve {
             amount,
             decimals: Some(d),
         } => {
             let shown = scaled(*amount, *d);
-            assert_eq!(r.title, format!("Approve Checked: {shown}"));
-            assert_eq!(r.row("Amount"), Some(shown.as_str()));
-            assert_eq!(r.row("Decimals"), Some(d.to_string().as_str()));
+            assert_eq!(title, format!("Approve Checked: {shown}"));
+            assert_eq!(row(rows, "Amount"), Some(shown.as_str()));
+            assert_eq!(row(rows, "Decimals"), Some(d.to_string().as_str()));
         }
-        Want::Revoke => assert_eq!(r.title, "Revoke Delegate"),
+        Want::Revoke => assert_eq!(title, "Revoke Delegate"),
     }
 }
 
 /// Assert every role and signer row names the key at its account position.
-fn assert_accounts(r: &Render, want: &Want, shown_keys: &[Pubkey]) {
+fn assert_accounts(rows: &[String], want: &Want, shown_keys: &[Pubkey]) {
     for (label, pos) in role_positions(want) {
         assert_eq!(
-            r.row(label),
+            row(rows, label),
             Some(shown_keys[pos].to_string().as_str()),
             "{label} should be account {pos}"
         );
     }
     let fixed = want.fixed_accounts();
-    let signers = r.signers();
-    assert_eq!(signers.len(), shown_keys.len().saturating_sub(fixed));
-    for (i, (label, value)) in signers.iter().enumerate() {
-        assert_eq!(label, &format!("Multisig Signer {}", i + 1));
-        assert_eq!(value, &shown_keys[fixed + i].to_string());
+    let extra = extra_accounts(rows);
+    assert_eq!(extra.len(), shown_keys.len().saturating_sub(fixed));
+    for (i, shown) in extra.iter().enumerate() {
+        let key = shown_keys[fixed + i];
+        assert_eq!(*shown, format!("Additional Account {}: {key}", i + 1));
     }
 }
 
-/// Whether the preset should decode `want` given `n` accounts.
-fn should_decode(want: &Want, n: usize) -> bool {
+/// A TransferCheckedWithFee whose fee exceeds its amount. The program's fee
+/// is min(ceil(amount * bps / 10_000), max_fee) with bps <= 10_000, so it
+/// rejects this with FeeMismatch. It checks that after reading the accounts,
+/// so `program_decodes` can't see it; the preset refuses it up front.
+fn fee_exceeds_amount(want: &Want) -> bool {
+    matches!(want, Want::Checked { amount, fee: Some(fee), .. } if fee > amount)
+}
+
+/// Whether the preset should decode `data`, which `unpack` decodes as `want`,
+/// given `n` accounts: `unpack`'s answer plus the program's exact-length and
+/// fee rules and the preset's decimals and account-count bounds.
+fn should_decode(want: &Want, data: &[u8], n: usize) -> bool {
     let decimals_ok = want.decimals().is_none_or(|d| d <= 18);
+    let length_ok = strict_len(data[0]).is_none_or(|len| data.len() == len);
     let accounts_ok = match want {
         Want::Checked { .. } => n == 4,
         _ => n >= want.fixed_accounts(),
     };
-    decimals_ok && accounts_ok
+    decimals_ok && length_ok && !fee_exceeds_amount(want) && accounts_ok
 }
 
-// ── Strategies ───────────────────────────────────────────────────────────────
+// --- Strategies ---
 
 /// Amounts weighted to the edges.
 fn amount() -> impl Strategy<Value = u64> {
@@ -478,35 +470,55 @@ fn adversarial_data() -> impl Strategy<Value = Vec<u8>> {
     ]
 }
 
+/// A valid new instruction with compiled account indices into `table(5)`
+/// (0 is the program id, 1..=5 are accounts, 6.. are out of range). Mostly
+/// `fixed..=fixed + 2` in-range indices, so the boundary cases (a checked
+/// transfer with exactly 4, 5 or 6 accounts) come up often; otherwise
+/// arbitrary indices: out of range, too few, too many, duplicates.
+fn instruction_with_indices() -> impl Strategy<Value = (Vec<u8>, Vec<u8>)> {
+    valid_new_instruction().prop_flat_map(|data| {
+        let fixed = interface_decode(&data)
+            .expect("valid encoding")
+            .fixed_accounts();
+        let indices = prop_oneof![
+            3 => prop::collection::vec(0u8..=5, fixed..=fixed + 2),
+            1 => prop::collection::vec(0u8..10, 0..=14),
+        ];
+        (Just(data), indices)
+    })
+}
+
 proptest! {
     // Default 256 cases; override with PROPTEST_CASES=N.
     #![proptest_config(ProptestConfig::default())]
 
-    /// Differential against the interface crate: the preset decodes exactly
-    /// what `unpack` decodes (for the new instructions, decimals <= 18), with
-    /// the same amount, decimals and fee, and otherwise shows the raw layout
-    /// with the instruction's bytes.
+    /// Differential against the interface crate plus the program's exact
+    /// length and fee rules (`should_decode`): the preset decodes exactly
+    /// those (for the new instructions, decimals <= 18), with the same
+    /// amount, decimals and fee, and otherwise shows the raw layout with the
+    /// instruction's bytes.
     #[test]
     fn decodes_iff_interface_unpack_does(data in adversarial_data()) {
         let want = interface_decode(&data);
         let n = want.as_ref().map_or(4, Want::fixed_accounts);
-        let (r, accounts) = render(&data, n);
+        let (title, rows, accounts) = render(&data, n);
         match want {
-            Some(want) if should_decode(&want, n) => {
-                prop_assert!(!r.unparsed(), "{data:02x?} should decode: {:?}", r.rows);
-                assert_fields(&r, &want, &data);
-                assert_accounts(&r, &want, &accounts);
+            Some(want) if should_decode(&want, &data, n) => {
+                prop_assert!(!unparsed(&title), "{data:02x?} should decode: {rows:?}");
+                assert_fields(&title, &rows, &want, &data);
+                assert_accounts(&rows, &want, &accounts);
             }
             _ => {
-                prop_assert!(r.unparsed(), "{data:02x?} decoded as {}", r.title);
-                prop_assert_eq!(r.row("Raw Data").map(str::to_string), Some(hex(&data)));
-                prop_assert!(r.row("Reason").is_some());
+                prop_assert!(unparsed(&title), "{data:02x?} decoded as {title}");
+                prop_assert_eq!(row(&rows, "Raw Data").map(str::to_string), Some(hex(&data)));
+                prop_assert!(row(&rows, "Reason").is_some());
             }
         }
     }
 
     /// The preset never refuses data the Token-2022 program decodes, apart
-    /// from its own decimals bound.
+    /// from its own decimals bound, and a fee above the amount, which the
+    /// program rejects once it has the accounts.
     #[test]
     fn decodes_whatever_the_program_decodes(data in adversarial_data()) {
         prop_assume!(data.first().is_some_and(|t| NEW_TAGS.contains(t)));
@@ -517,50 +529,60 @@ proptest! {
         // The interface crate is the more lenient of the two.
         let want = want.expect("program decodes, so unpack does");
         prop_assume!(want.decimals().is_none_or(|d| d <= 18));
-        let (r, _) = render(&data, want.fixed_accounts());
-        prop_assert!(!r.unparsed(), "{data:02x?}: {:?}", r.rows);
+        let (title, rows, _) = render(&data, want.fixed_accounts());
+        if fee_exceeds_amount(&want) {
+            prop_assert!(unparsed(&title), "{data:02x?}: fee above amount decoded as {title}");
+        } else {
+            prop_assert!(!unparsed(&title), "{data:02x?}: {rows:?}");
+        }
     }
 
-    /// FINDING: the preset decodes instructions the program rejects. The
-    /// program decodes these instructions with `decode_instruction_data`,
-    /// which requires the exact length; `unpack` ignores trailing bytes.
+    /// The preset decodes nothing the program rejects. The program decodes
+    /// these instructions with `decode_instruction_data`, which requires the
+    /// exact length; `unpack` ignores trailing bytes. (Finding 1 on #574.)
     #[test]
-    #[ignore = "finding on #574: trailing bytes after Transfer/TransferChecked/Approve/ApproveChecked/MintTo/Burn are decoded, but the Token-2022 program rejects them (InvalidInstructionData)"]
     fn decodes_only_what_the_program_decodes(data in adversarial_data()) {
         prop_assume!(data.first().is_some_and(|t| NEW_TAGS.contains(t)));
         let want = interface_decode(&data);
         let n = want.as_ref().map_or(4, Want::fixed_accounts);
-        let (r, _) = render(&data, n);
-        if !r.unparsed() {
-            prop_assert!(program_decodes(&data), "{data:02x?} decoded as {} but the program rejects it", r.title);
+        let (title, _, _) = render(&data, n);
+        if !unparsed(&title) {
+            prop_assert!(program_decodes(&data), "{data:02x?} decoded as {title} but the program rejects it");
         }
     }
 
     /// Amounts: checked instructions show the amount scaled by the
     /// instruction's decimals and say "tokens"; unchecked ones show base
-    /// units and no scaled amount. Decimals above 18 are not decoded.
+    /// units and no scaled amount. Decimals above 18, and a fee above the
+    /// amount, are not decoded. A decoded fee is in the condensed view too.
     #[test]
     fn amounts_are_scaled_and_labelled(data in valid_new_instruction()) {
         let want = interface_decode(&data).expect("valid encoding");
-        let (r, _) = render(&data, want.fixed_accounts());
-        if want.decimals().is_some_and(|d| d > 18) {
-            prop_assert!(r.unparsed());
-            prop_assert!(r.row("Reason").is_some_and(|m| m.contains("exceeds maximum supported value")));
+        let (title, condensed, rows) = visualize_views(data.clone(), &keys(want.fixed_accounts() as u8));
+        if fee_exceeds_amount(&want) {
+            prop_assert!(unparsed(&title));
+            prop_assert!(row(&rows, "Reason").is_some_and(|m| m.contains("exceeds amount")));
+        } else if want.decimals().is_some_and(|d| d > 18) {
+            prop_assert!(unparsed(&title));
+            prop_assert!(row(&rows, "Reason").is_some_and(|m| m.contains("exceeds maximum supported value")));
         } else {
-            prop_assert!(!r.unparsed());
-            assert_fields(&r, &want, &data);
-            let units_in_title = r.title.contains("base units");
+            prop_assert!(!unparsed(&title));
+            assert_fields(&title, &rows, &want, &data);
+            if let Want::Checked { fee: Some(fee), decimals, .. } = want {
+                let shown = scaled(fee, decimals);
+                prop_assert_eq!(row(&condensed, "Fee"), Some(shown.as_str()));
+            }
+            let units_in_title = title.contains("base units");
             let unchecked = want.decimals().is_none() && want != Want::Revoke;
-            prop_assert_eq!(units_in_title, unchecked, "{}", r.title);
+            prop_assert_eq!(units_in_title, unchecked, "{}", title);
         }
     }
 
-    /// FINDING: TransferCheckedWithFee whose fee exceeds the amount. The
-    /// program computes fee <= amount (basis points are capped at 10_000) and
-    /// rejects any other fee with FeeMismatch, but the preview shows it as
-    /// is.
+    /// TransferCheckedWithFee whose fee exceeds the amount. The program
+    /// computes fee <= amount (basis points are capped at 10_000) and rejects
+    /// any other fee with FeeMismatch, so the preview must not show it as a
+    /// normal transfer. (Finding 2 on #574.)
     #[test]
-    #[ignore = "finding on #574: TransferCheckedWithFee with fee > amount is shown as a normal transfer, neither refused nor flagged"]
     fn fee_above_amount_is_refused_or_flagged(
         amount in 0u64..u64::MAX,
         decimals in 0u8..=18,
@@ -568,49 +590,47 @@ proptest! {
     ) {
         let fee = amount.saturating_add(excess);
         prop_assume!(fee > amount);
-        let (r, _) = render(&with_fee_data(amount, decimals, fee), 4);
-        let flagged = r.rows.iter().any(|(_, v)| v.to_lowercase().contains("exceeds"));
-        prop_assert!(r.unparsed() || flagged, "fee {fee} > amount {amount} shown as {}", r.title);
+        let (title, rows, _) = render(&with_fee_data(amount, decimals, fee), 4);
+        let flagged = rows.iter().any(|r| r.to_lowercase().contains("exceeds"));
+        prop_assert!(unparsed(&title) || flagged, "fee {fee} > amount {amount} shown as {title}");
     }
 
     /// Accounts: arbitrary compiled account indices (out of range, too few,
-    /// duplicates, the program id itself). The render either fails closed
-    /// (an unresolvable index), shows the raw layout (too few or, for checked
-    /// transfers, too many), or names each role with the key at its own
-    /// position. It never takes an address from another index.
+    /// too many, duplicates, the program id itself). The render either fails
+    /// closed (an unresolvable index), shows the raw layout (too few or, for
+    /// checked transfers, too many), or names each role with the key at its
+    /// own position. It never takes an address from another index.
     #[test]
     fn accounts_fail_closed_or_match_their_index(
-        data in valid_new_instruction(),
-        indices in prop::collection::vec(0u8..10, 0..=14),
+        (data, indices) in instruction_with_indices(),
     ) {
-        // Index 0 is the program id; 1..=5 are accounts; 6.. are out of range.
-        let mut keys = vec![program_key()];
-        keys.extend(distinct_keys(5));
-        let result = render_indices(&data, &keys, &indices);
-        if indices.iter().any(|&i| usize::from(i) >= keys.len()) {
+        let table = table(5);
+        let result = render_at(&data, &table, &indices);
+        if indices.iter().any(|&i| usize::from(i) >= table.len()) {
             prop_assert!(result.is_err(), "unresolvable index must fail closed");
             return Ok(());
         }
-        let r = result.expect("all indices resolve");
+        let (title, rows) = result.expect("all indices resolve");
         let want = interface_decode(&data).expect("valid encoding");
-        let shown: Vec<Pubkey> = indices.iter().map(|&i| keys[usize::from(i)]).collect();
-        if should_decode(&want, indices.len()) {
-            prop_assert!(!r.unparsed());
-            assert_accounts(&r, &want, &shown);
+        let shown: Vec<Pubkey> = indices.iter().map(|&i| table[usize::from(i)]).collect();
+        if should_decode(&want, &data, indices.len()) {
+            prop_assert!(!unparsed(&title), "{data:02x?} with {} accounts: {rows:?}", indices.len());
+            assert_accounts(&rows, &want, &shown);
         } else {
-            prop_assert!(r.unparsed());
-            let addresses: Vec<String> = keys[1..].iter().map(Pubkey::to_string).collect();
-            for (label, value) in &r.rows {
+            prop_assert!(unparsed(&title), "{data:02x?} with {} accounts decoded as {title}", indices.len());
+            let addresses: Vec<String> = table[1..].iter().map(Pubkey::to_string).collect();
+            for r in &rows {
+                let (label, value) = r.split_once(": ").unwrap_or((r, ""));
                 prop_assert!(
-                    !addresses.contains(value),
+                    !addresses.iter().any(|a| a == value),
                     "raw layout shows an address as {label}"
                 );
             }
         }
     }
 
-    /// Multisig: 0 to 11 (MAX_SIGNERS) signer accounts are listed in order,
-    /// one row each, after the fixed accounts.
+    /// Multisig: 0 to 11 (MAX_SIGNERS) accounts after the fixed ones are
+    /// listed in order, one "Additional Account N" row each.
     #[test]
     fn multisig_signers_match_the_account_list(
         tag_fixed in prop::sample::select(MULTISIG_TAGS.to_vec()),
@@ -626,19 +646,18 @@ proptest! {
         };
         let want = interface_decode(&data).expect("valid encoding");
         prop_assert_eq!(want.fixed_accounts(), fixed);
-        let (r, accounts) = render(&data, fixed + signers);
-        prop_assert!(!r.unparsed());
-        assert_accounts(&r, &want, &accounts);
-        prop_assert_eq!(r.signers().len(), signers);
+        let (title, rows, accounts) = render(&data, fixed + signers);
+        prop_assert!(!unparsed(&title));
+        assert_accounts(&rows, &want, &accounts);
+        prop_assert_eq!(extra_accounts(&rows).len(), signers);
     }
 
-    /// FINDING: more than 11 extra accounts are all labelled multisig
-    /// signers. A multisig has at most 11 (MAX_SIGNERS) signers, so at least
-    /// one of them is not. The program does not refuse the instruction: it
-    /// ignores accounts that do not match a multisig signer.
+    /// More than 11 extra accounts: a multisig has at most 11 (MAX_SIGNERS)
+    /// signers, so at least one of them is not a signer, and the program
+    /// ignores accounts that don't match one. No row may label them signers;
+    /// each is listed as an additional account. (Finding 3 on #574.)
     #[test]
-    #[ignore = "finding on #574: more than MAX_SIGNERS (11) extra accounts are all labelled 'Multisig Signer N'"]
-    fn more_than_eleven_signers_are_not_all_labelled_signers(
+    fn more_than_eleven_extra_accounts_are_not_labelled_signers(
         tag_fixed in prop::sample::select(MULTISIG_TAGS.to_vec()),
         signers in 12usize..=20,
     ) {
@@ -648,15 +667,24 @@ proptest! {
             13 => amount_decimals_data(13, 1, 6),
             _ => amount_data(tag, 1),
         };
-        let (r, _) = render(&data, fixed + signers);
-        prop_assert!(r.unparsed() || r.signers().len() <= 11, "{} signer rows", r.signers().len());
+        let (title, rows, _) = render(&data, fixed + signers);
+        prop_assert!(!unparsed(&title));
+        for r in &rows {
+            let (label, _) = r.split_once(": ").unwrap_or((r, ""));
+            prop_assert!(!label.contains("Signer"), "{r}");
+        }
+        prop_assert_eq!(extra_accounts(&rows).len(), signers);
     }
 
-    /// Extension and unknown instructions, well formed or not (the class of
-    /// Trail of Bits' "Ok returned for malformed extension data"), are never
+    /// Instructions the preset doesn't decode: core instructions 16-25
+    /// (InitializeAccount2, SyncNative, InitializeAccount3, InitializeMultisig2,
+    /// InitializeMint2, GetAccountDataSize, InitializeImmutableOwner,
+    /// AmountToUiAmount, UiAmountToAmount, InitializeMintCloseAuthority),
+    /// extensions (the class of Trail of Bits' "Ok returned for malformed
+    /// extension data") and unknown tags, well formed or not, are never
     /// decoded as a known instruction, and their raw bytes are shown.
     #[test]
-    fn extension_and_unknown_tags_show_raw_data(
+    fn undecoded_core_extension_and_unknown_tags_show_raw_data(
         tag in (16u8..=255).prop_filter("decoded", |t| !NEW_TAGS.contains(t) && !PREEXISTING_TAGS.contains(t)),
         sub in any::<u8>(),
         body in prop::collection::vec(any::<u8>(), 0..64),
@@ -664,10 +692,10 @@ proptest! {
     ) {
         let mut data = vec![tag, sub];
         data.extend(body);
-        let (r, _) = render(&data, n);
-        prop_assert_eq!(&r.title, UNPARSED);
-        prop_assert_eq!(r.row("Raw Data").map(str::to_string), Some(hex(&data)));
-        prop_assert!(r.row("Reason").is_some());
+        let (title, rows, _) = render(&data, n);
+        prop_assert_eq!(&title, UNPARSED);
+        prop_assert_eq!(row(&rows, "Raw Data").map(str::to_string), Some(hex(&data)));
+        prop_assert!(row(&rows, "Reason").is_some());
     }
 
     /// TransferFeeExtension sub-instructions other than
@@ -680,13 +708,13 @@ proptest! {
     ) {
         let mut data = vec![26, sub];
         data.extend(body);
-        let (r, _) = render(&data, 4);
-        prop_assert_eq!(&r.title, UNPARSED);
-        prop_assert_eq!(r.row("Raw Data").map(str::to_string), Some(hex(&data)));
+        let (title, rows, _) = render(&data, 4);
+        prop_assert_eq!(&title, UNPARSED);
+        prop_assert_eq!(row(&rows, "Raw Data").map(str::to_string), Some(hex(&data)));
     }
 }
 
-// ── Examples ─────────────────────────────────────────────────────────────────
+// --- Examples ---
 
 /// Hand-pinned amounts, independent of `scaled`.
 #[test]
@@ -699,12 +727,12 @@ fn pinned_amount_literals() {
         (1, 18, "0.000000000000000001"),
         (1_500_000, 6, "1.5"),
     ] {
-        let (r, _) = render(&amount_decimals_data(12, amount, decimals), 4);
-        assert_eq!(r.title, format!("Transfer Checked: {shown} tokens"));
+        let (title, _, _) = render(&amount_decimals_data(12, amount, decimals), 4);
+        assert_eq!(title, format!("Transfer Checked: {shown} tokens"));
         assert_eq!(scaled(amount, decimals), shown);
     }
-    let (r, _) = render(&amount_decimals_data(12, 1, 255), 4);
-    assert!(r.unparsed(), "decimals 255 must not be decoded");
+    let (title, _, _) = render(&amount_decimals_data(12, 1, 255), 4);
+    assert!(unparsed(&title), "decimals 255 must not be decoded");
 }
 
 /// The concrete repro for `decodes_only_what_the_program_decodes`: each new
@@ -724,20 +752,23 @@ fn exact_and_short_lengths_agree_with_the_program() {
     ] {
         assert_eq!(data.len(), exact_len(data[0]));
         let want = interface_decode(&data).unwrap();
-        let (r, _) = render(&data, want.fixed_accounts());
-        assert!(!r.unparsed(), "{data:02x?}");
+        let (title, _, _) = render(&data, want.fixed_accounts());
+        assert!(!unparsed(&title), "{data:02x?}");
         assert!(program_decodes(&data), "{data:02x?}");
         if data.len() > 1 {
             let short = &data[..data.len() - 1];
-            let (r, _) = render(short, want.fixed_accounts());
-            assert!(r.unparsed(), "{short:02x?} decoded as {}", r.title);
+            let (title, _, _) = render(short, want.fixed_accounts());
+            assert!(unparsed(&title), "{short:02x?} decoded as {title}");
             assert!(!program_decodes(short), "{short:02x?}");
         }
     }
 }
 
+/// One trailing byte: rejected by the program, and not decoded, for the
+/// instructions it decodes at their exact length (finding 1 on #574).
+/// Revoke and TransferCheckedWithFee, which the program decodes with
+/// trailing bytes, still decode.
 #[test]
-#[ignore = "finding on #574: one trailing byte after these instructions is decoded, but the program rejects it with InvalidInstructionData"]
 fn one_trailing_byte_is_not_decoded() {
     let mut decoded = Vec::new();
     for mut data in [
@@ -750,32 +781,57 @@ fn one_trailing_byte_is_not_decoded() {
     ] {
         data.push(0);
         let want = interface_decode(&data).unwrap();
-        let (r, _) = render(&data, want.fixed_accounts());
+        let (title, _, _) = render(&data, want.fixed_accounts());
         assert!(!program_decodes(&data), "{data:02x?}");
-        if !r.unparsed() {
-            decoded.push(format!("{} -> {}", hex(&data), r.title));
+        if !unparsed(&title) {
+            decoded.push(format!("{} -> {title}", hex(&data)));
         }
     }
     assert!(
         decoded.is_empty(),
         "decoded but rejected on chain: {decoded:#?}"
     );
+    for mut data in [vec![5], with_fee_data(7, 6, 1)] {
+        data.push(0);
+        let want = interface_decode(&data).unwrap();
+        let (title, _, _) = render(&data, want.fixed_accounts());
+        assert!(program_decodes(&data), "{data:02x?}");
+        assert!(!unparsed(&title), "{data:02x?}");
+    }
 }
 
+/// Amount 1 base unit, fee 2: the program always rejects this (FeeMismatch).
 #[test]
-#[ignore = "finding on #574: TransferCheckedWithFee with fee > amount is shown as a normal transfer"]
 fn fee_above_amount_example() {
-    // amount 1 base unit, fee 2: the program always rejects this (FeeMismatch).
-    let (r, _) = render(&with_fee_data(1, 0, 2), 4);
-    assert!(r.unparsed(), "shown as {} with {:?}", r.title, r.rows);
+    let (title, rows, _) = render(&with_fee_data(1, 0, 2), 4);
+    assert!(unparsed(&title), "shown as {title} with {rows:?}");
+}
+
+/// A checked transfer with a 5th account (a transfer hook's or a multisig
+/// signer) is not decoded, with either form; with exactly 4 it is.
+/// Deterministic companion to `accounts_fail_closed_or_match_their_index`.
+#[test]
+fn checked_transfer_with_exactly_five_accounts_is_unparsed() {
+    for data in [amount_decimals_data(12, 7, 6), with_fee_data(7, 6, 1)] {
+        let (title, rows, _) = render(&data, 4);
+        assert!(!unparsed(&title), "{data:02x?} with 4 accounts: {rows:?}");
+        let (title, rows, _) = render(&data, 5);
+        assert!(
+            unparsed(&title),
+            "{data:02x?} with 5 accounts decoded as {title}"
+        );
+        assert!(
+            row(&rows, "Reason").is_some_and(|r| r.contains("extra accounts")),
+            "{rows:?}"
+        );
+    }
 }
 
 /// Source equal to destination is a valid self-transfer on chain. The
 /// preview shows the same address in both rows, as the instruction says.
 #[test]
 fn source_equal_to_destination_is_shown_as_is() {
-    let mut keys = vec![program_key()];
-    keys.extend(distinct_keys(3));
+    let table = table(3);
     for data in [amount_decimals_data(12, 5, 2), amount_data(3, 5)] {
         let want = interface_decode(&data).unwrap();
         let indices: Vec<u8> = match want {
@@ -784,10 +840,13 @@ fn source_equal_to_destination_is_shown_as_is() {
             // source, destination(=source), authority
             _ => vec![1, 1, 3],
         };
-        let r = render_indices(&data, &keys, &indices).unwrap();
-        assert!(!r.unparsed());
-        assert_eq!(r.row("Source"), Some(keys[1].to_string().as_str()));
-        assert_eq!(r.row("Destination"), Some(keys[1].to_string().as_str()));
+        let (title, rows) = render_at(&data, &table, &indices).unwrap();
+        assert!(!unparsed(&title));
+        assert_eq!(row(&rows, "Source"), Some(table[1].to_string().as_str()));
+        assert_eq!(
+            row(&rows, "Destination"),
+            Some(table[1].to_string().as_str())
+        );
     }
 }
 
@@ -798,40 +857,44 @@ fn source_equal_to_destination_is_shown_as_is() {
 fn mint_and_decimals_are_shown_as_the_instruction_says() {
     // USDC-like mint (6 decimals) paired with 9 decimals in the instruction.
     let data = amount_decimals_data(12, 1_000_000_000, 9);
-    let (r, accounts) = render(&data, 4);
-    assert_eq!(r.title, "Transfer Checked: 1 tokens");
-    assert_eq!(r.row("Decimals"), Some("9"));
-    assert_eq!(r.row("Mint"), Some(accounts[1].to_string().as_str()));
+    let (title, rows, accounts) = render(&data, 4);
+    assert_eq!(title, "Transfer Checked: 1 tokens");
+    assert_eq!(row(&rows, "Decimals"), Some("9"));
+    assert_eq!(row(&rows, "Mint"), Some(accounts[1].to_string().as_str()));
     // The same bytes with the mint in the source position: roles follow
     // positions, not keys.
-    let mut keys = vec![program_key()];
-    keys.extend(distinct_keys(4));
-    let r = render_indices(&data, &keys, &[2, 1, 3, 4]).unwrap();
-    assert_eq!(r.row("Source"), Some(keys[2].to_string().as_str()));
-    assert_eq!(r.row("Mint"), Some(keys[1].to_string().as_str()));
+    let table = table(4);
+    let (_, rows) = render_at(&data, &table, &[2, 1, 3, 4]).unwrap();
+    assert_eq!(row(&rows, "Source"), Some(table[2].to_string().as_str()));
+    assert_eq!(row(&rows, "Mint"), Some(table[1].to_string().as_str()));
 }
 
 /// A multisig signer that is also the source or destination keeps both
 /// roles, each at its own position.
 #[test]
 fn signer_that_is_also_source_or_destination() {
-    let mut keys = vec![program_key()];
-    keys.extend(distinct_keys(3));
+    let table = table(3);
     // Transfer: source=1, destination=2, authority=3, signers=[1, 2].
-    let r = render_indices(&amount_data(3, 9), &keys, &[1, 2, 3, 1, 2]).unwrap();
-    assert_eq!(r.row("Source"), Some(keys[1].to_string().as_str()));
-    assert_eq!(r.row("Destination"), Some(keys[2].to_string().as_str()));
-    assert_eq!(r.row("Owner/Delegate"), Some(keys[3].to_string().as_str()));
+    let (_, rows) = render_at(&amount_data(3, 9), &table, &[1, 2, 3, 1, 2]).unwrap();
+    assert_eq!(row(&rows, "Source"), Some(table[1].to_string().as_str()));
     assert_eq!(
-        r.signers(),
+        row(&rows, "Destination"),
+        Some(table[2].to_string().as_str())
+    );
+    assert_eq!(
+        row(&rows, "Owner/Delegate"),
+        Some(table[3].to_string().as_str())
+    );
+    assert_eq!(
+        extra_accounts(&rows),
         vec![
-            ("Multisig Signer 1".to_string(), keys[1].to_string()),
-            ("Multisig Signer 2".to_string(), keys[2].to_string()),
+            format!("Additional Account 1: {}", table[1]),
+            format!("Additional Account 2: {}", table[2]),
         ]
     );
 }
 
-// ── p-token conformance corpus ───────────────────────────────────────────────
+// --- p-token conformance corpus ---
 
 #[derive(serde::Deserialize)]
 struct Corpus {
@@ -860,10 +923,7 @@ fn load_corpus() -> Corpus {
 }
 
 fn corpus_bytes(case: &CorpusCase) -> Vec<u8> {
-    (0..case.data.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&case.data[i..i + 2], 16).expect("hex"))
-        .collect()
+    decode_hex(&case.data).unwrap_or_else(|e| panic!("{}: {e}", case.fixture))
 }
 
 /// The SPL Token (p-token) conformance fixtures' instruction data and
@@ -874,24 +934,23 @@ fn corpus_bytes(case: &CorpusCase) -> Vec<u8> {
 fn ptoken_conformance_corpus_matches_interface_unpack() {
     let corpus = load_corpus();
     assert!(corpus.cases.len() > 150, "corpus shrank");
-    let mut keys = vec![program_key()];
-    keys.extend(distinct_keys(16));
+    let table = table(16);
     let mut decoded = 0;
     for case in &corpus.cases {
         let data = corpus_bytes(case);
         let indices: Vec<u8> = case.accounts.iter().map(|a| a.index + 1).collect();
-        let shown: Vec<Pubkey> = indices.iter().map(|&i| keys[usize::from(i)]).collect();
-        let r = render_indices(&data, &keys, &indices)
-            .unwrap_or_else(|e| panic!("{}: {e}", case.fixture));
+        let shown: Vec<Pubkey> = indices.iter().map(|&i| table[usize::from(i)]).collect();
+        let (title, rows) =
+            render_at(&data, &table, &indices).unwrap_or_else(|e| panic!("{}: {e}", case.fixture));
         let new_tag = data.first().is_some_and(|t| NEW_TAGS.contains(t));
         match interface_decode(&data) {
-            Some(want) if new_tag && should_decode(&want, indices.len()) => {
-                assert!(!r.unparsed(), "{}: {:?}", case.fixture, r.rows);
-                assert_fields(&r, &want, &data);
-                assert_accounts(&r, &want, &shown);
+            Some(want) if new_tag && should_decode(&want, &data, indices.len()) => {
+                assert!(!unparsed(&title), "{}: {rows:?}", case.fixture);
+                assert_fields(&title, &rows, &want, &data);
+                assert_accounts(&rows, &want, &shown);
                 decoded += 1;
             }
-            _ if new_tag => assert!(r.unparsed(), "{}: {}", case.fixture, r.title),
+            _ if new_tag => assert!(unparsed(&title), "{}: {title}", case.fixture),
             _ => {}
         }
     }
@@ -904,8 +963,7 @@ fn ptoken_conformance_corpus_matches_interface_unpack() {
 #[test]
 fn ptoken_conformance_corpus_matches_the_program() {
     let corpus = load_corpus();
-    let mut keys = vec![program_key()];
-    keys.extend(distinct_keys(16));
+    let table = table(16);
     let mut mismatches = Vec::new();
     for case in &corpus.cases {
         let data = corpus_bytes(case);
@@ -913,8 +971,8 @@ fn ptoken_conformance_corpus_matches_the_program() {
             continue;
         }
         let indices: Vec<u8> = case.accounts.iter().map(|a| a.index + 1).collect();
-        let r = render_indices(&data, &keys, &indices).unwrap();
-        if !r.unparsed() && !program_decodes(&data) {
+        let (title, _) = render_at(&data, &table, &indices).unwrap();
+        if !unparsed(&title) && !program_decodes(&data) {
             mismatches.push(format!("{}: {}", case.fixture, case.data));
         }
     }
