@@ -10,7 +10,9 @@ rust-version.workspace = true
 intents = ["dep:visualsign-intents"]
 default    = ["cli-plugin", "simulation", "stake-pool"]
 cli-plugin = ["dep:clap", "dep:parser_cli_core"]
-diagnostics = ["visualsign/diagnostics"]
+# Forwarded weakly to visualsign-intents: when `intents` is also on, its soft
+# findings (an expired deadline) render as Diagnostic fields, not Warning text.
+diagnostics = ["visualsign/diagnostics", "visualsign-intents?/diagnostics"]
 # Solana's `jsonParsed` decoder for native programs, used by the intermediate
 # output. Pulls solana-transaction-status 2.x (solana-sdk 2.x, openssl-sys,
 # zstd-sys), which does not build for iOS. Off: native instructions in the

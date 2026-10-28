@@ -66,6 +66,9 @@ test: build
 	@# intents ON: the message path that renders a DefusePayload carried by a
 	@# Solana signature rather than a NEAR one.
 	cargo test --no-fail-fast -p visualsign-solana --features intents --lib
+	@# intents and diagnostics ON together: intents findings render as
+	@# Diagnostic fields only if diagnostics reaches visualsign-intents.
+	cargo test --no-fail-fast -p visualsign-solana --features intents,diagnostics --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
 # declares its submodules through `include!(concat!(env!("OUT_DIR"), ...))`, a

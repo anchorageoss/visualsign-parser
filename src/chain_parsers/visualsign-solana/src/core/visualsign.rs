@@ -1118,11 +1118,12 @@ fn message_to_visual_sign_payload(
     // A message carrying NEAR Intents renders the intents. A signer approving a
     // token movement has to see the movement, not the JSON that encodes it.
     //
-    // The envelope's address renders here too: it names the Solana key that
-    // will produce the signature, which the intents alone do not show. It is
-    // labelled "Signing Address" because the intents already render a "Signer"
-    // field, the payload's `signer_id`, which is a NEAR account rather than the
-    // key that signs.
+    // The envelope's address renders here too: it is the Solana address the
+    // caller says will sign, which the intents alone do not show (the wallet,
+    // not this parser, binds it to the key that signs). It is labelled
+    // "Signing Address" because the intents already render a "Signer" field,
+    // the payload's `signer_id`, which is a NEAR account rather than the
+    // signing key.
     #[cfg(feature = "intents")]
     if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
         let mut fields = rendered.fields;
@@ -4847,5 +4848,54 @@ mod solana_intents_message_tests {
         let payload = render("Sign in to app.example.com");
         assert_eq!(payload.title, "Solana Message");
         assert_eq!(field_text(&payload, "Signer"), SIGNER);
+    }
+
+    /// A message that is intent-shaped (a JSON object naming `intents`) but does
+    /// not decode is refused, not shown as a "Solana Message": an unknown intent
+    /// kind and `intents: null` both. JSON that names no `intents` is ordinary
+    /// text and still renders.
+    #[test]
+    fn intent_shaped_messages_that_do_not_decode_are_refused() {
+        for malformed in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"future_unknown"}]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":null}"#,
+        ] {
+            let envelope = json!({ "message": malformed, "signerAddress": SIGNER }).to_string();
+            let result = SolanaVisualSignConverter.to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            );
+            let Err(err) = result else {
+                panic!("an intent-shaped message that does not decode must be refused");
+            };
+            assert!(
+                err.to_string().contains("malformed or unsupported"),
+                "{err}"
+            );
+        }
+        let payload = render(r#"{"greeting":"hi"}"#);
+        assert_eq!(payload.title, "Solana Message");
+    }
+
+    /// With `diagnostics` on, an intents finding is a structured `Diagnostic`,
+    /// not the `Warning` text fallback: the feature has to reach
+    /// `visualsign-intents`, which builds those fields.
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn an_expired_intent_is_a_diagnostic_when_diagnostics_is_on() {
+        let expired = INTENTS.replace("2999-01-01T00:00:00Z", "2020-01-01T00:00:00Z");
+        let payload = render(&expired);
+        assert!(
+            payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.rule == "deadline"
+            )),
+            "expected a deadline Diagnostic, got labels {:?}",
+            labels(&payload)
+        );
+        assert!(
+            !labels(&payload).iter().any(|l| l == "Warning"),
+            "a finding fell back to Warning text"
+        );
     }
 }
