@@ -1660,6 +1660,75 @@ mod tests {
         assert_eq!(shown("%C3%A9"), "%25C3%25A9");
     }
 
+    /// Every shared free-text field the signer approves (an `auth_call` or
+    /// withdraw message, a memo) shows distinct signed texts distinctly: a
+    /// character and the marker a lossy sanitizer put in its place, a line feed
+    /// and `?`, and a literal escape in either case and the character it would
+    /// encode. No message can render as the empty-value marker.
+    #[test]
+    fn freeform_texts_a_marker_would_collapse_stay_distinct() {
+        let texts = [
+            "\u{e9}",
+            "?",
+            "hello\nworld",
+            "hello?world",
+            "%C3%A9",
+            "%c3%a9",
+            "%0A",
+            "%0a",
+            "(empty)",
+            "(empty)\\",
+        ];
+        let render = |template: &str, text: &str, label: &str| {
+            let json = template.replace("TEXT", &serde_json::to_string(text).unwrap());
+            text_at(
+                &render_intent(&intent_from(&json), &empty_reg()).expect("render"),
+                label,
+            )
+        };
+        let fields = [
+            (
+                r#"{"intent":"auth_call","contract_id":"c.near","msg":TEXT}"#,
+                "Message",
+            ),
+            (
+                r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":TEXT}"#,
+                "Message",
+            ),
+            (
+                r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"},"memo":TEXT}"#,
+                "Memo",
+            ),
+            (
+                r#"{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":TEXT}"#,
+                "NFT Token Id",
+            ),
+        ];
+        for (template, label) in fields {
+            let shown: Vec<String> = texts.iter().map(|t| render(template, t, label)).collect();
+            let unique: std::collections::BTreeSet<&String> = shown.iter().collect();
+            assert_eq!(unique.len(), texts.len(), "{label}: {shown:?}");
+            assert!(
+                !shown.iter().any(|t| t == EMPTY_VALUE),
+                "{label}: a present text rendered as the empty marker: {shown:?}"
+            );
+            for (text, display) in texts.iter().zip(&shown) {
+                assert_eq!(
+                    visualsign::encodings::unescape_display_text(display).as_deref(),
+                    Some(*text),
+                    "{label}: {display} does not decode back"
+                );
+            }
+        }
+        // The withdraw's empty `msg` keeps its own marker, distinct from all of
+        // the above.
+        assert_eq!(
+            render(fields[1].0, "", "Message"),
+            EMPTY_VALUE,
+            "an empty msg renders as the marker"
+        );
+    }
+
     #[test]
     fn mt_withdraw_token_id_with_embedded_newline_is_sanitized() {
         let intent = intent_from(&format!(
