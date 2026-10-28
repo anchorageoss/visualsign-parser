@@ -4528,6 +4528,26 @@ mod solana_intents_message_tests {
         assert_eq!(payload.title, "Solana Message");
     }
 
+    /// JSON that carries a `DefusePayload`'s other fields but no `intents` key
+    /// is not intents, though the typed decode defaults the missing list to
+    /// empty. It renders as the text it is: not as an empty intents request,
+    /// and not refused for a key (`action`) the envelope does not declare.
+    #[test]
+    fn json_without_intents_renders_as_text_even_in_the_envelope_shape() {
+        for message in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","action":"login"}"#,
+        ] {
+            let payload = render(message);
+            assert_eq!(payload.title, "Solana Message", "{message}");
+            assert_eq!(
+                field_text(&payload, "Message"),
+                escape_display_text(message)
+            );
+            assert_eq!(field_text(&payload, "Signer"), SIGNER);
+        }
+    }
+
     /// With `diagnostics` on, an intents finding is a structured `Diagnostic`,
     /// not the `Warning` text fallback: the feature has to reach
     /// `visualsign-intents`, which builds those fields.
