@@ -44,6 +44,10 @@ solana-hash = { version = "4.7.0" }
 solana-instruction = { version = "4.0.0" }
 solana-keccak-hasher = { version = "3.1.0", features = ["sha3"] }
 solana-message = { version = "6.0.0", features = ["serde"] }
+# `PACKET_DATA_SIZE` for the size gate in `core::visualsign`. None of the split
+# crates here re-exports it (solana-sdk's `packet` re-export, deprecated in 2.3,
+# is gone with solana-sdk); 4.4 is the line solana-transaction 6 tests against.
+solana-packet = { version = "4.4.0" }
 solana-program-option = { version = "3.1.0" }
 solana-pubkey = { version = "4.4.0", features = ["curve25519", "sha2"] }
 solana-sdk-ids = { version = "3.1.0" }

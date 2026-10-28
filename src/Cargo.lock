@@ -2758,7 +2758,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -10729,7 +10729,7 @@ checksum = "b526398ade5dea37f1f147ce55dae49aa017a5d7326606359b0445ca8d946581"
 dependencies = [
  "num_enum 0.7.6",
  "solana-hash 2.3.0",
- "solana-packet",
+ "solana-packet 2.2.1",
  "solana-pubkey 2.4.0",
  "solana-sanitize 2.2.1",
  "solana-sha256-hasher 2.3.0",
@@ -10749,6 +10749,16 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_with",
+]
+
+[[package]]
+name = "solana-packet"
+version = "4.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "993f9d2969eaffcaaa017d5de6d282d584ad3def7a0718185a3660a4cca3c2c6"
+dependencies = [
+ "bitflags 2.10.0",
+ "solana-pubkey 4.4.0",
 ]
 
 [[package]]
@@ -10784,7 +10794,7 @@ dependencies = [
  "solana-hash 2.3.0",
  "solana-message 2.4.0",
  "solana-metrics",
- "solana-packet",
+ "solana-packet 2.2.1",
  "solana-pubkey 2.4.0",
  "solana-rayon-threadlimit",
  "solana-sdk-ids 2.2.1",
@@ -11339,7 +11349,7 @@ dependencies = [
  "solana-native-token",
  "solana-nonce-account",
  "solana-offchain-message",
- "solana-packet",
+ "solana-packet 2.2.1",
  "solana-poh-config",
  "solana-precompile-error",
  "solana-precompiles",
@@ -11699,7 +11709,7 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-net-utils",
- "solana-packet",
+ "solana-packet 2.2.1",
  "solana-perf",
  "solana-pubkey 2.4.0",
  "solana-quic-definitions",
@@ -12004,7 +12014,7 @@ dependencies = [
  "bincode",
  "log",
  "rand 0.8.5",
- "solana-packet",
+ "solana-packet 2.2.1",
  "solana-perf",
  "solana-short-vec 2.2.1",
  "solana-signature 2.3.0",
@@ -14632,6 +14642,7 @@ dependencies = [
  "solana-keccak-hasher 3.1.0",
  "solana-message 2.4.0",
  "solana-message 6.0.0",
+ "solana-packet 4.4.1",
  "solana-parser-fuzz-core",
  "solana-program-option 3.1.0",
  "solana-pubkey 2.4.0",
