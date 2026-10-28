@@ -1098,7 +1098,9 @@ mod tests {
     /// Like [`visualize`], but returns the condensed rows as well:
     /// `(title, condensed, expanded)`.
     fn visualize_views(data: Vec<u8>, accounts: &[Pubkey]) -> (String, Vec<String>, Vec<String>) {
-        let mut keys = vec![Pubkey::new_from_array(spl_token_2022_interface::id().to_bytes())];
+        let mut keys = vec![Pubkey::new_from_array(
+            spl_token_2022_interface::id().to_bytes(),
+        )];
         keys.extend_from_slice(accounts);
         let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
