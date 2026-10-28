@@ -253,6 +253,16 @@ fn parse_token_2022_instruction(
 
     if data.first() == Some(&TRANSFER_FEE_EXTENSION_DISCRIMINATOR) {
         return match TransferFeeInstruction::unpack(&data[1..]) {
+            // The program's fee is min(ceil(amount * bps / 10_000), max_fee)
+            // with bps <= 10_000, so a fee above the amount never matches it
+            // and the transfer fails with FeeMismatch.
+            Ok(TransferFeeInstruction::TransferCheckedWithFee { amount, fee, .. })
+                if fee > amount =>
+            {
+                Err(format!(
+                    "Invalid transferCheckedWithFee: fee {fee} exceeds amount {amount} (the program rejects it with FeeMismatch)"
+                ))
+            }
             Ok(TransferFeeInstruction::TransferCheckedWithFee {
                 amount,
                 decimals,
@@ -267,6 +277,7 @@ fn parse_token_2022_instruction(
         #[allow(deprecated)]
         match sdk_instruction {
             TokenInstruction::Transfer { amount } => {
+                exact_data_len("transfer", data, AMOUNT_DATA_LEN)?;
                 let [source, destination, authority] = required(accounts, "transfer")?;
                 return Ok(Token2022Instruction::Transfer {
                     amount,
@@ -277,9 +288,11 @@ fn parse_token_2022_instruction(
                 });
             }
             TokenInstruction::TransferChecked { amount, decimals } => {
+                exact_data_len("transferChecked", data, AMOUNT_CHECKED_DATA_LEN)?;
                 return checked_transfer(amount, decimals, None, accounts);
             }
             TokenInstruction::Approve { amount } => {
+                exact_data_len("approve", data, AMOUNT_DATA_LEN)?;
                 let [source, delegate, owner] = required(accounts, "approve")?;
                 return Ok(Token2022Instruction::Approve {
                     amount,
@@ -292,6 +305,7 @@ fn parse_token_2022_instruction(
                 });
             }
             TokenInstruction::ApproveChecked { amount, decimals } => {
+                exact_data_len("approveChecked", data, AMOUNT_CHECKED_DATA_LEN)?;
                 check_decimals("approveChecked", decimals)?;
                 let [source, mint, delegate, owner] = required(accounts, "approveChecked")?;
                 return Ok(Token2022Instruction::Approve {
@@ -313,6 +327,7 @@ fn parse_token_2022_instruction(
                 });
             }
             TokenInstruction::MintTo { amount } => {
+                exact_data_len("mintTo", data, AMOUNT_DATA_LEN)?;
                 let [mint, account, mint_authority] = required(accounts, "mintTo")?;
                 return Ok(Token2022Instruction::MintTo {
                     amount,
@@ -323,6 +338,7 @@ fn parse_token_2022_instruction(
                 });
             }
             TokenInstruction::Burn { amount } => {
+                exact_data_len("burn", data, AMOUNT_DATA_LEN)?;
                 let [account, mint, authority] = required(accounts, "burn")?;
                 return Ok(Token2022Instruction::Burn {
                     amount,
@@ -333,6 +349,7 @@ fn parse_token_2022_instruction(
                 });
             }
             TokenInstruction::MintToChecked { amount, decimals } => {
+                exact_data_len("mintToChecked", data, AMOUNT_CHECKED_DATA_LEN)?;
                 if accounts.len() < 3 {
                     return Err("Invalid mintToChecked: insufficient accounts".to_string());
                 }
@@ -351,6 +368,7 @@ fn parse_token_2022_instruction(
                 });
             }
             TokenInstruction::BurnChecked { amount, decimals } => {
+                exact_data_len("burnChecked", data, AMOUNT_CHECKED_DATA_LEN)?;
                 if accounts.len() < 3 {
                     return Err("Invalid burnChecked: insufficient accounts".to_string());
                 }
@@ -433,6 +451,27 @@ fn required<const N: usize>(accounts: &[String], name: &str) -> Result<[String; 
         .ok_or_else(|| format!("Invalid {name}: insufficient accounts"))
 }
 
+/// Instruction data length (tag + u64 amount) the program requires for
+/// Transfer, Approve, MintTo and Burn.
+const AMOUNT_DATA_LEN: usize = 9;
+/// Instruction data length (tag + u64 amount + u8 decimals) the program
+/// requires for the Checked variants.
+const AMOUNT_CHECKED_DATA_LEN: usize = 10;
+
+/// The program decodes amount instructions with `decode_instruction_data`,
+/// which rejects any length but the exact one. `TokenInstruction::unpack`
+/// ignores trailing bytes, so check the length here too: otherwise the
+/// preview would show an instruction the program refuses.
+fn exact_data_len(name: &str, data: &[u8], len: usize) -> Result<(), String> {
+    if data.len() != len {
+        return Err(format!(
+            "Invalid {name}: {} bytes of instruction data, expected {len} (the program rejects trailing bytes)",
+            data.len()
+        ));
+    }
+    Ok(())
+}
+
 fn check_decimals(name: &str, decimals: u8) -> Result<(), String> {
     if decimals > MAX_TOKEN_DECIMALS {
         return Err(format!(
@@ -487,11 +526,15 @@ fn create_unparsed_preview_layout(
     preview_field(title, condensed, expanded, context)
 }
 
+/// Accounts after the authority. The program checks them against the
+/// authority's signers only when the authority is a multisig, and ignores
+/// them otherwise; the instruction alone can't tell which, nor whether each
+/// one signed, so they are not labelled as signers.
 fn signer_fields(signers: &[String]) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     signers
         .iter()
         .enumerate()
-        .map(|(i, s)| create_text_field(&format!("Multisig Signer {}", i + 1), s))
+        .map(|(i, s)| create_text_field(&format!("Additional Account {}", i + 1), s))
         .collect()
 }
 
@@ -587,11 +630,17 @@ fn create_token_2022_preview_layout(
                 "Transfer Checked"
             };
             let title = format!("{name}: {formatted} tokens");
-            let condensed = vec![
+            let mut condensed = vec![
                 create_text_field("Action", name)?,
                 create_text_field("Amount", &formatted)?,
-                create_text_field("Destination", destination)?,
             ];
+            if let Some(fee) = fee {
+                condensed.push(create_text_field(
+                    "Fee",
+                    &format_token_amount(*fee, *decimals),
+                )?);
+            }
+            condensed.push(create_text_field("Destination", destination)?);
             let mut expanded = vec![
                 create_text_field("Instruction", name)?,
                 create_text_field("Amount", &formatted)?,
@@ -1042,7 +1091,14 @@ mod tests {
     /// Visualize `data` with `n` accounts and return the preview title and
     /// expanded rows as `label: text`.
     fn visualize(data: Vec<u8>, accounts: &[Pubkey]) -> (String, Vec<String>) {
-        let mut keys = vec![spl_token_2022_interface::id()];
+        let (title, _, expanded) = visualize_views(data, accounts);
+        (title, expanded)
+    }
+
+    /// Like [`visualize`], but returns the condensed rows as well:
+    /// `(title, condensed, expanded)`.
+    fn visualize_views(data: Vec<u8>, accounts: &[Pubkey]) -> (String, Vec<String>, Vec<String>) {
+        let mut keys = vec![Pubkey::new_from_array(spl_token_2022_interface::id().to_bytes())];
         keys.extend_from_slice(accounts);
         let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
@@ -1062,17 +1118,18 @@ mod tests {
         else {
             panic!("expected PreviewLayout");
         };
-        let rows = preview_layout
-            .expanded
-            .unwrap()
-            .fields
-            .iter()
-            .map(|f| {
-                let f = &f.signable_payload_field;
-                format!("{}: {}", f.label(), f.fallback_text())
-            })
-            .collect();
-        (preview_layout.title.unwrap().text, rows)
+        let rows = |fields: &[AnnotatedPayloadField]| -> Vec<String> {
+            fields
+                .iter()
+                .map(|f| {
+                    let f = &f.signable_payload_field;
+                    format!("{}: {}", f.label(), f.fallback_text())
+                })
+                .collect()
+        };
+        let condensed = rows(&preview_layout.condensed.unwrap().fields);
+        let expanded = rows(&preview_layout.expanded.unwrap().fields);
+        (preview_layout.title.unwrap().text, condensed, expanded)
     }
 
     fn keys(n: u8) -> Vec<Pubkey> {
@@ -1133,8 +1190,10 @@ mod tests {
     }
 
     #[test]
-    fn deprecated_transfer_and_multisig_signers() {
-        // Transfer with a multisig owner and two signer accounts.
+    fn deprecated_transfer_extra_accounts_are_not_called_signers() {
+        // Accounts after the authority are only checked as signers when the
+        // authority is a multisig; otherwise the program ignores them. The
+        // instruction alone can't tell which, so they get a neutral label.
         let k = keys(5);
         let mut data = vec![3];
         data.extend_from_slice(&42u64.to_le_bytes());
@@ -1145,12 +1204,76 @@ mod tests {
             "{rows:#?}"
         );
         assert!(
-            rows.contains(&format!("Multisig Signer 1: {}", k[3])),
+            rows.contains(&format!("Additional Account 1: {}", k[3])),
             "{rows:#?}"
         );
         assert!(
-            rows.contains(&format!("Multisig Signer 2: {}", k[4])),
+            rows.contains(&format!("Additional Account 2: {}", k[4])),
             "{rows:#?}"
+        );
+        assert!(!rows.iter().any(|r| r.contains("Signer")), "{rows:#?}");
+    }
+
+    #[test]
+    fn trailing_bytes_the_program_rejects_are_unparsed() {
+        // The program decodes these with `decode_instruction_data`, which
+        // requires the exact length (9 bytes, or 10 with decimals).
+        for (tag, len) in [
+            (3u8, 9usize), // Transfer
+            (4, 9),        // Approve
+            (7, 9),        // MintTo
+            (8, 9),        // Burn
+            (12, 10),      // TransferChecked
+            (13, 10),      // ApproveChecked
+            (14, 10),      // MintToChecked
+            (15, 10),      // BurnChecked
+        ] {
+            let mut data = amount_decimals(tag, 1, 0);
+            data.resize(len + 1, 0);
+            let (title, rows) = visualize(data, &keys(4));
+            assert_eq!(title, "Token 2022 (unparsed)", "tag {tag}: {rows:#?}");
+            assert!(
+                rows.iter().any(|r| r.contains("trailing bytes")),
+                "tag {tag}: {rows:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_the_program_ignores_still_decode() {
+        // Revoke reads no instruction data, so the program accepts extra bytes.
+        assert_eq!(visualize(vec![5, 0], &keys(2)).0, "Revoke Delegate");
+    }
+
+    fn transfer_with_fee(amount: u64, decimals: u8, fee: u64) -> Vec<u8> {
+        let mut data = vec![26, 1];
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(decimals);
+        data.extend_from_slice(&fee.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn fee_above_amount_is_unparsed() {
+        // The program's fee is at most amount * 10_000 / 10_000, so any
+        // larger fee fails with FeeMismatch.
+        let (title, rows) = visualize(transfer_with_fee(1, 0, 2), &keys(4));
+        assert_eq!(title, "Token 2022 (unparsed)", "{rows:#?}");
+        assert!(
+            rows.iter().any(|r| r.contains("exceeds amount")),
+            "{rows:#?}"
+        );
+        // A fee equal to the amount (10_000 bps) is still valid.
+        let (title, _) = visualize(transfer_with_fee(2, 0, 2), &keys(4));
+        assert_eq!(title, "Transfer Checked With Fee: 2 tokens");
+    }
+
+    #[test]
+    fn transfer_with_fee_condensed_view_shows_fee() {
+        let (_, condensed, _) = visualize_views(transfer_with_fee(2_000_000, 6, 10_000), &keys(4));
+        assert!(
+            condensed.contains(&"Fee: 0.01".to_string()),
+            "{condensed:#?}"
         );
     }
 
