@@ -46,6 +46,9 @@ pub(crate) const NEAR_DECIMALS: u8 = 24;
 
 #[derive(Debug, Error)]
 pub enum NearIntentsError {
+    /// The input is not a NEAR Intents payload: not JSON, or JSON that is not
+    /// [intent-shaped](is_intent_shaped). A caller that renders arbitrary
+    /// messages shows this input as text.
     #[error("input was not valid JSON: {0}")]
     InputNotJson(String),
     #[error("Failed to render intents: {0}")]
@@ -81,17 +84,6 @@ pub enum NearIntentsError {
 pub fn is_intent_shaped(json: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(json)
         .is_ok_and(|value| value.as_object().is_some_and(|o| o.contains_key("intents")))
-}
-
-/// Classify a failed typed decode of `json`: [`NearIntentsError::MalformedIntentEnvelope`]
-/// when the input is [intent-shaped](is_intent_shaped), otherwise
-/// [`NearIntentsError::InputNotJson`].
-fn decode_error(json: &[u8], e: &serde_json::Error) -> NearIntentsError {
-    if is_intent_shaped(json) {
-        NearIntentsError::MalformedIntentEnvelope(e.to_string())
-    } else {
-        NearIntentsError::InputNotJson(e.to_string())
-    }
 }
 
 /// Translate a render-layer failure into this module's error.
@@ -244,17 +236,28 @@ pub struct RenderedEnvelope {
 /// This is the user-signing view: it reuses the envelope + per-intent rendering
 /// but skips signature verification (no signature exists at signing time).
 ///
-/// Input that is not a `DefusePayload` is [`NearIntentsError::InputNotJson`],
-/// unless it is [intent-shaped](is_intent_shaped), which is
-/// [`NearIntentsError::MalformedIntentEnvelope`].
+/// Input that is not [intent-shaped](is_intent_shaped) is
+/// [`NearIntentsError::InputNotJson`]; input that is, but does not decode as a
+/// `DefusePayload`, is [`NearIntentsError::MalformedIntentEnvelope`].
 pub fn try_render_single_intent(
     payload_json: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
     _options: &visualsign::vsptrait::VisualSignOptions,
     network: crate::network::SettlementNetwork,
 ) -> Result<RenderedEnvelope, NearIntentsError> {
+    // Classified before the typed decode, which defaults a missing `intents` to
+    // an empty list: ordinary JSON that happens to carry the envelope's other
+    // fields (a sign-in challenge naming a `signer_id` and `deadline`) would
+    // otherwise decode as a request to do nothing, and a caller that shows
+    // non-intents text as text would never get to.
+    if !is_intent_shaped(payload_json) {
+        return Err(NearIntentsError::InputNotJson(
+            "not a NEAR Intents payload: no top-level `intents` key".to_string(),
+        ));
+    }
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
-        serde_json::from_slice(payload_json).map_err(|e| decode_error(payload_json, &e))?;
+        serde_json::from_slice(payload_json)
+            .map_err(|e| NearIntentsError::MalformedIntentEnvelope(e.to_string()))?;
     let fields = render::render_single(&payload, token_registry, network).map_err(render_error)?;
     Ok(RenderedEnvelope {
         title: render::title_for_intents(&payload.intents),
@@ -468,6 +471,32 @@ mod tests {
             assert!(
                 matches!(err, NearIntentsError::InputNotJson(_)),
                 "{not_intents}: {err:?}"
+            );
+        }
+    }
+
+    /// `DefusePayload` defaults a missing `intents` to an empty list, so JSON
+    /// that carries the envelope's other fields but no `intents` key decodes as
+    /// one. It is not a NEAR Intents payload and must stay on the text
+    /// fallback: neither rendered as an empty request nor refused for a key
+    /// the envelope does not declare.
+    #[test]
+    fn single_intent_leaves_json_without_intents_to_the_text_fallback() {
+        let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        for message in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","action":"login"}"#,
+        ] {
+            let result = try_render_single_intent(
+                message.as_bytes(),
+                &reg,
+                &VisualSignOptions::default(),
+                crate::network::SettlementNetwork::Mainnet,
+            );
+            assert!(
+                matches!(result, Err(NearIntentsError::InputNotJson(_))),
+                "{message}: {:?}",
+                result.map(|rendered| rendered.title)
             );
         }
     }
