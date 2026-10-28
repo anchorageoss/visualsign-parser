@@ -11,9 +11,6 @@ use visualsign::vsptrait::{
 };
 use visualsign::{SignablePayload, SignablePayloadField};
 
-use defuse_core::intents::DefuseIntents;
-use defuse_core::payload::{DefusePayload, ExtractDefusePayload};
-use defuse_nep413::Nep413Payload;
 use visualsign::encodings::escape_display_text;
 
 use crate::actions::render_action;
@@ -427,7 +424,7 @@ fn render_nep413_envelope(
     // plain serde parse: the enum is public, so this envelope may never have
     // passed through string decoding, and an intent-shaped message that does not
     // decode must be refused here rather than shown as text.
-    let payload: Nep413Payload =
+    let (payload, intents) =
         crate::tx::decode_nep413(json).map_err(VisualSignError::ConversionError)?;
 
     // The resolved network is part of every token-metadata signed scope, so the
@@ -461,15 +458,10 @@ fn render_nep413_envelope(
         );
     }
 
-    // Lifting the intents out of `message` fails for any message that is not an
-    // intents request, which is the ordinary case for this envelope.
-    let intents_json = payload
-        .clone()
-        .extract_defuse_payload()
-        .ok()
-        .and_then(|defuse: DefusePayload<DefuseIntents>| serde_json::to_vec(&defuse).ok());
-
-    let Some(intents_json) = intents_json else {
+    // `decode_nep413` classifies the message: `None` is free text, the ordinary
+    // case for this envelope, and an intent-shaped message that does not
+    // extract has already been refused.
+    let Some(intents) = intents else {
         fields.push(
             create_text_field("NEP-413 Message", &escape_display_text(&payload.message))?
                 .signable_payload_field,
@@ -483,6 +475,9 @@ fn render_nep413_envelope(
         )));
     };
 
+    let intents_json = serde_json::to_vec(&intents).map_err(|e| {
+        VisualSignError::ConversionError(format!("re-encode the NEP-413 intents: {e}"))
+    })?;
     let tokens = if crate::presets::intents::single_intent_consumes_token_registry(&intents_json) {
         token_registry_for(options, network, trust_policy)
     } else {
@@ -1582,6 +1577,31 @@ mod tests {
             !has_labeled_text(&without_url, "NEP-413 Callback URL"),
             "an absent callback URL must not render a field: {:?}",
             without_url.fields
+        );
+    }
+
+    /// The enum is public, so a NEP-413 envelope built directly reaches the
+    /// converter without string decoding. A message that shares an intents
+    /// request's `signer_id` and `deadline` but names no `intents` renders as
+    /// the text it is, not as an empty intents request and not refused for
+    /// its `action` key.
+    #[test]
+    fn nep413_json_message_without_intents_renders_as_text() {
+        let message =
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","action":"login"}"#;
+        let payload = render_nep413(
+            nep413_envelope(message, "app.example.com", None),
+            VisualSignOptions::default(),
+        );
+        assert_eq!(payload.title, "NEAR Message");
+        assert_eq!(
+            labeled_text(&payload, "NEP-413 Message"),
+            escape_display_text(message)
+        );
+        assert!(
+            payload.fields.iter().all(|f| f.label() != "Intent"),
+            "{:?}",
+            payload.fields
         );
     }
 

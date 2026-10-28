@@ -110,11 +110,18 @@ impl NearTransaction {
         }
         // Validate eagerly so malformed input is rejected at parse time
         // rather than at render time.
+        // The typed decode defaults a missing `intents` to an empty list, so a
+        // successful decode is a raw intents message only when the input is
+        // intent-shaped: JSON without that key is not one, whatever other
+        // fields it shares with one. A failed decode keeps serde's own cause.
         let intent_err = match strict_decode::<DefusePayload<DefuseIntents>>(
             trimmed,
             strict::DEFUSE_PAYLOAD_KEYS,
         ) {
-            Ok(_) => return Ok(Self::RawMessage(trimmed.to_string())),
+            Ok(_) if visualsign_intents::is_intent_shaped(trimmed.as_bytes()) => {
+                return Ok(Self::RawMessage(trimmed.to_string()));
+            }
+            Ok(_) => "not a DefusePayload: no top-level `intents` key".to_string(),
             Err(e) => e,
         };
 
@@ -154,42 +161,51 @@ fn strict_decode<T: DeserializeOwned>(json: &str, allowed: &[&str]) -> Result<T,
 
 /// Decode a NEP-413 envelope under every rule [`NearTransaction::Nep413`]
 /// promises: only the keys NEP-413 declares, and a `message` that is either an
-/// intents request held to its own key set or free text.
+/// intents request held to its own key set or free text. Returns the intents
+/// the message carries, or `None` when it is free text.
 ///
 /// Shared by string decoding and the converter, because the enum is public: a
 /// caller can build `NearTransaction::Nep413` without going through
 /// [`NearTransaction::from_string_with_options`], and the rules have to hold for
 /// that envelope too.
-pub(crate) fn decode_nep413(json: &str) -> Result<Nep413Payload, String> {
+pub(crate) fn decode_nep413(
+    json: &str,
+) -> Result<(Nep413Payload, Option<DefusePayload<DefuseIntents>>), String> {
     let payload = strict_decode::<Nep413Payload>(json, strict::NEP413_KEYS)?;
-    check_nep413_intents(&payload)?;
-    Ok(payload)
+    let intents = nep413_intents(&payload)?;
+    Ok((payload, intents))
 }
 
-/// When a NEP-413 `message` is an intents request, hold it to the same rule as
-/// a raw `DefusePayload`: every key must be one the decoder reads. A message
-/// that is not intents is free text and renders as such.
+/// The intents a NEP-413 `message` carries, held to the same rule as a raw
+/// `DefusePayload`: every key must be one the decoder reads. A message that is
+/// not [intent-shaped](visualsign_intents::is_intent_shaped) is free text and
+/// renders as such.
 ///
-/// A message that is [intent-shaped](visualsign_intents::is_intent_shaped) but
-/// does not extract (an intent kind this build does not know, `intents: null`)
-/// is refused rather than treated as free text: showing it as a plain message
-/// would put raw JSON in front of a signer for an intent the parser could not
-/// interpret.
-fn check_nep413_intents(payload: &Nep413Payload) -> Result<(), String> {
-    if let Err(e) = ExtractDefusePayload::<DefuseIntents>::extract_defuse_payload(payload.clone()) {
-        if visualsign_intents::is_intent_shaped(payload.message.as_bytes()) {
-            return Err(format!(
+/// The message is classified before extraction, not by whether extraction
+/// succeeds: extraction defaults a missing `intents` to an empty list, so a
+/// sign-in challenge that happens to carry `signer_id` and `deadline` would
+/// otherwise extract as a request for nothing and then be refused for its own
+/// keys. A message that is intent-shaped but does not extract (an intent kind
+/// this build does not know, `intents: null`) is refused rather than treated as
+/// free text: showing it as a plain message would put raw JSON in front of a
+/// signer for an intent the parser could not interpret.
+fn nep413_intents(payload: &Nep413Payload) -> Result<Option<DefusePayload<DefuseIntents>>, String> {
+    if !visualsign_intents::is_intent_shaped(payload.message.as_bytes()) {
+        return Ok(None);
+    }
+    let intents = ExtractDefusePayload::<DefuseIntents>::extract_defuse_payload(payload.clone())
+        .map_err(|e| {
+            format!(
                 "this NEP-413 message is a NEAR Intents payload that is malformed or \
                  unsupported: {e}"
-            ));
-        }
-        return Ok(());
-    }
+            )
+        })?;
     strict::require_declared_keys(
         payload.message.as_bytes(),
         strict::NEP413_INTENTS_MESSAGE_KEYS,
     )
-    .map_err(|e| format!("the intents in this NEP-413 message carry {e}"))
+    .map_err(|e| format!("the intents in this NEP-413 message carry {e}"))?;
+    Ok(Some(intents))
 }
 
 impl visualsign::vsptrait::Transaction for NearTransaction {
@@ -596,6 +612,11 @@ mod tests {
     /// case, since NEP-413 is used for web sign-in where it is a domain.
     const PLAIN_NEP413: &str = r#"{"message":"Sign in to app.example.com","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"app.example.com"}"#;
 
+    /// A sign-in message whose keys overlap an intents request's (`signer_id`,
+    /// `deadline`) but that names no `intents`.
+    const OVERLAPPING_SIGN_IN: &str =
+        r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","action":"login"}"#;
+
     /// The same intents content as `SWAP_INTENT` in a different envelope:
     /// `signer_id` and `deadline` sit inside `message`, and
     /// `verifying_contract` comes from the envelope's `recipient`.
@@ -780,6 +801,37 @@ mod tests {
             NearTransaction::from_string(&envelope),
             Ok(NearTransaction::Nep413(_))
         ));
+    }
+
+    /// A sign-in message that shares an intents request's `signer_id` and
+    /// `deadline` but names no `intents` is free text. Extraction alone would
+    /// default the missing list to empty and accept it as intents, then refuse
+    /// `action` as an undeclared intents key.
+    #[test]
+    fn a_nep413_message_sharing_intents_fields_without_intents_is_free_text() {
+        let envelope = serde_json::json!({
+            "message": OVERLAPPING_SIGN_IN,
+            "nonce": "XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=",
+            "recipient": "app.example.com",
+        })
+        .to_string();
+        assert!(
+            matches!(
+                NearTransaction::from_string(&envelope),
+                Ok(NearTransaction::Nep413(_))
+            ),
+            "{:?}",
+            NearTransaction::from_string(&envelope)
+        );
+    }
+
+    /// A raw message is accepted only as intents, and JSON without `intents` is
+    /// not intents even when it carries every other `DefusePayload` field.
+    #[test]
+    fn a_raw_defuse_shape_without_intents_is_not_a_raw_message() {
+        let without_intents = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#;
+        let message = decode_error(without_intents);
+        assert!(message.contains("no top-level `intents` key"), "{message}");
     }
 
     /// A key that appears twice has no single value to render, so either
