@@ -114,14 +114,19 @@ impl NearTransaction {
         // successful decode is a raw intents message only when the input is
         // intent-shaped: JSON without that key is not one, whatever other
         // fields it shares with one. A failed decode keeps serde's own cause.
-        let intent_err = match strict_decode::<DefusePayload<DefuseIntents>>(
-            trimmed,
-            strict::DEFUSE_PAYLOAD_KEYS,
-        ) {
-            Ok(_) if visualsign_intents::is_intent_shaped(trimmed.as_bytes()) => {
+        // Each intent is held to its own kind's keys as well as the envelope.
+        let intent_err = match serde_json::from_str::<DefusePayload<DefuseIntents>>(trimmed)
+            .map_err(|e| e.to_string())
+            .and_then(|_| {
+                strict::require_declared_payload_keys(
+                    trimmed.as_bytes(),
+                    strict::DEFUSE_PAYLOAD_KEYS,
+                )
+            }) {
+            Ok(()) if visualsign_intents::is_intent_shaped(trimmed.as_bytes()) => {
                 return Ok(Self::RawMessage(trimmed.to_string()));
             }
-            Ok(_) => "not a DefusePayload: no top-level `intents` key".to_string(),
+            Ok(()) => "not a DefusePayload: no top-level `intents` key".to_string(),
             Err(e) => e,
         };
 
@@ -200,7 +205,7 @@ fn nep413_intents(payload: &Nep413Payload) -> Result<Option<DefusePayload<Defuse
                  unsupported: {e}"
             )
         })?;
-    strict::require_declared_keys(
+    strict::require_declared_payload_keys(
         payload.message.as_bytes(),
         strict::NEP413_INTENTS_MESSAGE_KEYS,
     )
@@ -801,6 +806,33 @@ mod tests {
             NearTransaction::from_string(&envelope),
             Ok(NearTransaction::Nep413(_))
         ));
+    }
+
+    /// A key inside an intent that its kind does not declare is refused on
+    /// both envelopes: `native_withdraw` has no `memo`, so the typed decode
+    /// would drop it and the signer would never see it.
+    #[test]
+    fn an_undeclared_key_inside_an_intent_is_refused_on_either_envelope() {
+        let intent =
+            r#"{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1","memo":"hidden"}"#;
+        let raw = format!(
+            r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{intent}]}}"#
+        );
+        let nep413 = serde_json::json!({
+            "message": format!(
+                r#"{{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":[{intent}]}}"#
+            ),
+            "nonce": "XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=",
+            "recipient": "intents.near",
+        })
+        .to_string();
+        for input in [raw, nep413] {
+            let message = decode_error(&input);
+            assert!(
+                message.contains("\"memo\"") && message.contains("native_withdraw"),
+                "{message}"
+            );
+        }
     }
 
     /// A sign-in message that shares an intents request's `signer_id` and
