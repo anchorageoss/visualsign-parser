@@ -58,6 +58,40 @@ pub enum NearIntentsError {
     /// request.
     #[error("{0}")]
     NetworkMismatch(String),
+    /// The input is a JSON object with an `intents` key, so it is meant as a
+    /// `DefusePayload`, but it does not decode as one this build understands:
+    /// an intent kind it does not know (`{"intent":"future_unknown"}`), or an
+    /// `intents` value of the wrong shape (`null`). Kept distinct from
+    /// [`Self::InputNotJson`] so a caller that shows non-intents text as text
+    /// refuses this instead: rendering it as a plain message would show a
+    /// signer raw JSON for an intent the parser could not interpret.
+    #[error("recognized NEAR Intents payload is malformed or unsupported: {0}")]
+    MalformedIntentEnvelope(String),
+}
+
+/// Whether `json` is meant as a NEAR Intents payload: a JSON object carrying an
+/// `intents` key, whatever that key holds. Every intents message has one (the
+/// `DefusePayload` and the NEP-413 inner message alike), and ordinary text a
+/// signer approves does not.
+///
+/// A chain that renders arbitrary messages uses this to fail closed: an
+/// intent-shaped message that does not decode must be refused, not shown as
+/// text.
+#[must_use]
+pub fn is_intent_shaped(json: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(json)
+        .is_ok_and(|value| value.as_object().is_some_and(|o| o.contains_key("intents")))
+}
+
+/// Classify a failed typed decode of `json`: [`NearIntentsError::MalformedIntentEnvelope`]
+/// when the input is [intent-shaped](is_intent_shaped), otherwise
+/// [`NearIntentsError::InputNotJson`].
+fn decode_error(json: &[u8], e: &serde_json::Error) -> NearIntentsError {
+    if is_intent_shaped(json) {
+        NearIntentsError::MalformedIntentEnvelope(e.to_string())
+    } else {
+        NearIntentsError::InputNotJson(e.to_string())
+    }
 }
 
 /// Translate a render-layer failure into this module's error.
@@ -209,6 +243,10 @@ pub struct RenderedEnvelope {
 ///
 /// This is the user-signing view: it reuses the envelope + per-intent rendering
 /// but skips signature verification (no signature exists at signing time).
+///
+/// Input that is not a `DefusePayload` is [`NearIntentsError::InputNotJson`],
+/// unless it is [intent-shaped](is_intent_shaped), which is
+/// [`NearIntentsError::MalformedIntentEnvelope`].
 pub fn try_render_single_intent(
     payload_json: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
@@ -216,8 +254,7 @@ pub fn try_render_single_intent(
     network: crate::network::SettlementNetwork,
 ) -> Result<RenderedEnvelope, NearIntentsError> {
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
-        serde_json::from_slice(payload_json)
-            .map_err(|e| NearIntentsError::InputNotJson(e.to_string()))?;
+        serde_json::from_slice(payload_json).map_err(|e| decode_error(payload_json, &e))?;
     let fields = render::render_single(&payload, token_registry, network).map_err(render_error)?;
     Ok(RenderedEnvelope {
         title: render::title_for_intents(&payload.intents),
@@ -390,6 +427,49 @@ mod tests {
         .err()
         .expect("malformed JSON should error");
         assert!(matches!(err, NearIntentsError::InputNotJson(_)));
+    }
+
+    /// A payload that names `intents` but does not decode (an intent kind this
+    /// build does not know, or `intents` of the wrong shape) is refused as a
+    /// malformed intents payload, not reported as non-JSON: a caller that falls
+    /// back to rendering text on `InputNotJson` must not show it as a message.
+    /// Plain text and JSON without `intents` keep the `InputNotJson` fallback.
+    #[test]
+    fn single_intent_classifies_a_malformed_intent_envelope() {
+        let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        let render = |json: &str| {
+            try_render_single_intent(
+                json.as_bytes(),
+                &reg,
+                &VisualSignOptions::default(),
+                crate::network::SettlementNetwork::Mainnet,
+            )
+            .err()
+            .expect("must not render")
+        };
+        for malformed in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"future_unknown"}]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":null}"#,
+            r#"{"intents":[{"intent":"future_unknown"}]}"#,
+        ] {
+            let err = render(malformed);
+            assert!(
+                matches!(err, NearIntentsError::MalformedIntentEnvelope(_)),
+                "{malformed}: {err:?}"
+            );
+        }
+        for not_intents in [
+            "hello world",
+            r#"{"greeting":"hi"}"#,
+            "[1,2]",
+            r#""intents""#,
+        ] {
+            let err = render(not_intents);
+            assert!(
+                matches!(err, NearIntentsError::InputNotJson(_)),
+                "{not_intents}: {err:?}"
+            );
+        }
     }
 
     #[test]
