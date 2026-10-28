@@ -66,7 +66,7 @@ pub(crate) fn verify_and_extract(
             // signed but would never render.
             match signed_payload_json(payload) {
                 Some((json, allowed)) => {
-                    strict::require_declared_keys(json.as_bytes(), allowed).map(|()| defuse)
+                    strict::require_declared_payload_keys(json.as_bytes(), allowed).map(|()| defuse)
                 }
                 None => Ok(defuse),
             }

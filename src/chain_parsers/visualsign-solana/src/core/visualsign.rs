@@ -4842,6 +4842,46 @@ mod solana_intents_message_tests {
         assert!(err.to_string().contains("\"memo\""), "{err}");
     }
 
+    /// A key inside an intent that its kind does not declare is refused, not
+    /// dropped: `native_withdraw` has no `memo`, so the typed decode ignores
+    /// it and the structured preview, which replaces the message, would never
+    /// show what was signed.
+    #[test]
+    fn an_intent_with_an_undeclared_key_is_refused() {
+        let message = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000","memo":"hidden"}]}"#;
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+            VisualSignOptions::default(),
+        );
+        let Err(err) = result else {
+            panic!("expected a refusal for an undeclared key inside an intent");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+    }
+
+    /// An `auth_call` with an attached deposit previews differently with an
+    /// explicit `min_gas` of `"0"` than with the field absent: they are
+    /// different signed payloads, and the deposit is not refunded if the call
+    /// fails for lack of gas.
+    #[test]
+    fn auth_call_min_gas_zero_and_absent_preview_differently() {
+        let auth = |min_gas: &str| {
+            format!(
+                r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{{"intent":"auth_call","contract_id":"app.near","msg":"go","attached_deposit":"1000000000000000000000000"{min_gas}}}]}}"#
+            )
+        };
+        let defaulted = render(&auth(""));
+        let zero = render(&auth(r#","min_gas":"0""#));
+        // A static message: CodeQL treats rendered fields as tainted.
+        assert!(
+            !labels(&defaulted).iter().any(|l| l == "Min Gas"),
+            "a defaulted min_gas must render no Min Gas field"
+        );
+        assert_eq!(field_text(&zero, "Min Gas"), "0 Tgas");
+        assert_ne!(labels(&defaulted), labels(&zero));
+    }
+
     /// A message that is not intents still renders as text with its signer.
     #[test]
     fn a_plain_message_still_renders_as_text() {

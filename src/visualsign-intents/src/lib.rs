@@ -267,7 +267,7 @@ pub struct RenderedEnvelope {
 /// Input that is not [intent-shaped](is_intent_shaped) is
 /// [`NearIntentsError::InputNotJson`]; input that is, but does not decode as a
 /// `DefusePayload`, is [`NearIntentsError::MalformedIntentEnvelope`]. One that
-/// decodes but carries an undeclared top-level key is
+/// decodes but carries an undeclared key, on the envelope or inside an intent, is
 /// [`NearIntentsError::UndeclaredFields`] (see [`strict`]).
 pub fn try_render_single_intent(
     payload_json: &[u8],
@@ -291,7 +291,7 @@ pub fn try_render_single_intent(
             .map_err(|e| NearIntentsError::MalformedIntentEnvelope(e.to_string()))?;
     // The typed decode ignores keys it does not declare; a signer would approve
     // them without seeing them.
-    strict::require_declared_keys(payload_json, strict::DEFUSE_PAYLOAD_KEYS)
+    strict::require_declared_payload_keys(payload_json, strict::DEFUSE_PAYLOAD_KEYS)
         .map_err(NearIntentsError::UndeclaredFields)?;
     let fields = render::render_single(&payload, token_registry, network).map_err(render_error)?;
     Ok(RenderedEnvelope {
@@ -372,6 +372,28 @@ mod tests {
     #[test]
     fn execute_intents_withholds_a_payload_with_an_undeclared_key() {
         let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}],"memo":"hidden"}"#;
+        let (labels, json) = render_execute_intents(&serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]}));
+        assert!(
+            !labels.iter().any(|l| l == "Intent"),
+            "intents rendered: {labels:?}"
+        );
+        assert!(
+            json.contains("does not declare") && json.contains("memo"),
+            "{json}"
+        );
+    }
+
+    /// The same holds for a key inside one intent that its kind does not
+    /// declare: `native_withdraw` has no `memo`, so a signed one would never
+    /// render.
+    #[test]
+    fn execute_intents_withholds_an_intent_with_an_undeclared_key() {
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000","memo":"hidden"}]}"#;
         let (labels, json) = render_execute_intents(&serde_json::json!({"signed":[{
             "standard": "raw_ed25519",
             "payload": inner,
@@ -648,6 +670,22 @@ mod tests {
     #[test]
     fn single_intent_with_an_undeclared_key_is_refused() {
         let payload = br#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[],"memo":"hidden"}"#;
+        let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        let Err(NearIntentsError::UndeclaredFields(message)) = try_render_single_intent(
+            payload,
+            &reg,
+            &VisualSignOptions::default(),
+            crate::network::SettlementNetwork::Mainnet,
+        ) else {
+            panic!("expected UndeclaredFields");
+        };
+        assert!(message.contains("\"memo\""), "{message}");
+    }
+
+    /// The single-intent path holds each intent to its kind's keys too.
+    #[test]
+    fn single_intent_with_an_undeclared_key_inside_an_intent_is_refused() {
+        let payload = br#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1","memo":"hidden"}]}"#;
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
         let Err(NearIntentsError::UndeclaredFields(message)) = try_render_single_intent(
             payload,
