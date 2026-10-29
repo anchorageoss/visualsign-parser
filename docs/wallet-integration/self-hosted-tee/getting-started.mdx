@@ -182,8 +182,10 @@ Workflows for a pull request from a fork run in this repository, with a read-onl
    - Run it manually: **Actions → stagex → Run workflow**, or `gh workflow run stagex.yml --repo <owner>/visualsign-parser --ref <branch-or-tag>`.
    - Push a `v*.*.*` tag.
    - Push to `main` with changes under `src/`, `images/`, `scripts/`, `.github/` or the `Makefile`.
-3. Find the images at `ghcr.io/<owner>/parser_app`, `parser_cli`, `parser_gateway` and `parser_http_server`. `<owner>` is your user or organization name in lowercase, since ghcr.io only accepts lowercase paths. Every build is tagged with its full commit SHA. Manual runs and tag pushes are also tagged with the branch or tag name, and pushes to `main` with `latest`, `main` and `v<semver>`.
-4. New packages on ghcr.io are private. TVC has to pull the image, so make each package you deploy public: on the package's page, open **Package settings** and change its visibility.
+3. Find the images at `ghcr.io/<owner>/parser_app`, `parser_cli`, `parser_gateway` and `parser_http_server`. `<owner>` is your user or organization name in lowercase, since ghcr.io only accepts lowercase paths. Every build is tagged with its full commit SHA. Manual runs and tag pushes are also tagged with the branch or tag name, and pushes to `main` with `latest`, `main` and `v<semver>`. A manual run on `main` gets `latest` and `main` too, but not `v<semver>`.
+4. New packages on ghcr.io are private. TVC has to pull the image, so make each package you deploy public: on the package's page, open **Package settings** and change its visibility. Only `ghcr.io/anchorageoss/*` images are official. A public `ghcr.io/<owner>/...` package is yours and carries no endorsement from this project. If your TVC setup can pull a private image with credentials, that is the alternative to making it public; this page hasn't confirmed that TVC supports it.
+
+Each image's `org.opencontainers.image.source` label names the repository that built it. Treat it as a label, not proof: an image is identified by its registry path and digest.
 
 You don't need to add secrets or change settings. The job requests `packages: write` itself and pushes with your fork's `GITHUB_TOKEN`.
 
@@ -201,15 +203,38 @@ For `parser_app` and `parser_http_server`, each `stagex` run's summary lists the
 
 Before you deploy an image you didn't build, such as one from a contributor's fork, rebuild it rather than trusting it. The images are built with [StageX](https://stagex.tools), so the same commit and build inputs produce the same binary.
 
-Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and is derived from the branch name and commit history, so pass the same value when you rebuild. The build needs Docker with the containerd image store enabled and a `docker-container` buildx builder, as in CI:
+A rebuild that matches proves the binary was built from that source. It does not prove the source is safe, so read the source before you deploy it. The rebuild also runs the fork's build files on your machine: its `Makefile` (including any `$(shell ...)` call) and its Containerfiles. Review them first, or do the rebuild in a disposable VM.
+
+Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION**, the **SOURCE_URL** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and `SOURCE_URL` is recorded in the image's source label, so pass the same values when you rebuild. The run summary comes from the fork, so check each value before you use it. Save these steps as a script, which stops at the first failure:
 
 ```bash
-git fetch https://github.com/<owner>/visualsign-parser <commit>
-git checkout <commit>
+#!/usr/bin/env bash
+set -euo pipefail
+COMMIT='<commit>'          # from the run summary
+VERSION='<version>'        # from the run summary
+SOURCE_URL='<source-url>'  # from the run summary
+
+[[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected COMMIT" >&2; exit 1; }
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[A-Za-z0-9-]+)?$ ]] || { echo "unexpected VERSION" >&2; exit 1; }
+[[ "$SOURCE_URL" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "unexpected SOURCE_URL" >&2; exit 1; }
+
+git fetch "$SOURCE_URL" "$COMMIT"
+# Read all of this before you build. Look hardest at Makefile, images/** and scripts/**.
+git diff origin/main...FETCH_HEAD   # origin is your clone of anchorageoss/visualsign-parser
+```
+
+The workflow refuses to build with a `VERSION` of any other shape, and the `Makefile` passes both values to the shell, so a value with a quote or a `;` in it would run commands on your machine. After you have read the diff, build. The build needs Docker with the containerd image store enabled and a `docker-container` buildx builder, as in CI:
+
+```bash
+git checkout "$COMMIT"
 docker buildx create --driver docker-container --name build --use   # once
-make VERSION='<version>' out/parser_http_server/index.json
+make VERSION="$VERSION" SOURCE_URL="$SOURCE_URL" out/parser_http_server/index.json
 jq -r '.manifests[0].digest' out/parser_http_server/index.json      # compare with the run summary
 ```
+
+A manifest digest mismatch is not conclusive. This reads the first entry of `index.json`, which assumes it has a single entry, and this page hasn't confirmed that it equals the registry digest after `docker load` and push. The pivot hash below is what decides.
+
+Runs started by a pull request build a temporary merge commit that isn't in the fork. Their summary lists the PR head and base commits instead, and they can't be reproduced exactly. Verify a manual, tag or `main` run.
 
 Then compare the pivot binary from your build with the one in the published image. This is the hash TVC measures, so it's the check that matters:
 
