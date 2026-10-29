@@ -51,6 +51,8 @@ test: build
 	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test --no-fail-fast -p parser_cli --all-targets
+	@# Solana intents are opt-in (solana-intents); run the CLI fixtures with them.
+	cargo test --no-fail-fast -p parser_cli --features solana-intents --test cli_test
 	@# zcash is not a default feature, but visualsign-zcash is consumed as a
 	@# library elsewhere; run the CLI's zcash fixtures with every chain on.
 	cargo test --no-fail-fast -p parser_cli --features zcash --all-targets
@@ -137,6 +139,7 @@ lint: fmt-check lint-shell
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
+	cargo clippy -p parser_cli --features solana-intents --all-targets -- -D warnings
 	cargo clippy -p parser_cli --features zcash --all-targets -- -D warnings
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
 	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
@@ -184,6 +187,9 @@ narrow-build-check:
 		cargo check -p parser_app --no-default-features --features $$c; \
 		cargo clippy -p parser_app --no-default-features --features $$c --all-targets -- -D warnings; \
 	done
+	@# Opt-in extras that are not a chain of their own.
+	cargo check -p parser_app --no-default-features --features solana-intents
+	cargo clippy -p parser_app --no-default-features --features solana-intents --all-targets -- -D warnings
 	make dev-signing-absent-check
 
 .PHONY: parser-cli-narrow-build-check
