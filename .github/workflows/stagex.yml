@@ -212,7 +212,13 @@ jobs:
           [ -n "$SEMVER_TAG" ] && all_tags+=( "$SEMVER_TAG" )
           [ -n "$SHA_TAG" ]    && all_tags+=( "$SHA_TAG" )
           for tag in "${all_tags[@]}"; do
-              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "${IMAGE_REPO}:${tag}"
+              # A registry tag allows only [A-Za-z0-9_.-], at most 128 characters, and
+              # can't start with "." or "-". Branch names can hold "/" (`feature/x`),
+              # which a manual run on that branch would otherwise fail to tag. The
+              # usual tags (latest, main, pr-N, vX.Y.Z, a 40-char sha) pass unchanged.
+              safe_tag=$(printf '%s' "$tag" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^[.-]*//' | cut -c1-128)
+              [ -n "$safe_tag" ] || continue
+              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "${IMAGE_REPO}:${safe_tag}"
           done
           docker image push --all-tags "${IMAGE_REPO}"
 
