@@ -370,7 +370,6 @@ fn push_amount_and_notes(
     Ok(())
 }
 
-/// Human-readable label for an action variant.
 /// The label for `action` sent to `receiver_id`: a call a contract preset
 /// fully understands names itself ("Wrap"), anything else takes its generic
 /// [`action_label`]. The preset returns a label only when the args decoded,
@@ -385,6 +384,7 @@ pub(crate) fn receiver_action_label(action: &Action, receiver_id: &str) -> &'sta
     }
 }
 
+/// Human-readable label for an action variant.
 pub(crate) fn action_label(action: &Action) -> &'static str {
     match action {
         Action::CreateAccount(_) => "Create Account",
