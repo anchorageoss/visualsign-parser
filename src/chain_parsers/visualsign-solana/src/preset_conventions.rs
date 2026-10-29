@@ -16,10 +16,10 @@
 
 use crate::core::{InstructionVisualizer, VisualizerContext, preset_visualizers_by_name};
 use crate::idl::IdlRegistry;
+use solana_message::compiled_instruction::CompiledInstruction;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_parser::{Idl, decode_idl_data, parse_instruction_with_idl};
-use solana_sdk::instruction::CompiledInstruction;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
