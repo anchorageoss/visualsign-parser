@@ -630,7 +630,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                 )?
             }
             SolanaTransactionWrapper::Message(envelope) => {
-                message_to_visual_sign_payload(envelope)?
+                message_to_visual_sign_payload(envelope, &options)?
             }
         };
 
@@ -1017,8 +1017,10 @@ fn check_message_domain(message: &[u8]) -> Result<(), VisualSignError> {
 /// The text is escaped before it renders: it is caller-supplied and reaches a
 /// signer's screen, where an unescaped line separator could forge a second
 /// field.
+#[cfg_attr(not(feature = "intents"), allow(unused_variables))]
 fn message_to_visual_sign_payload(
     envelope: &OffChainMessage,
+    options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     // `OffChainMessage` has public fields, so an embedder can build the wrapper
     // without the envelope decoder. Check the address here too, so a
@@ -1031,6 +1033,49 @@ fn message_to_visual_sign_payload(
     }
     // Here rather than at decode, so a directly built wrapper is held to it too.
     check_message_domain(envelope.message.as_bytes())?;
+
+    // A message carrying NEAR Intents renders the intents. A signer approving a
+    // token movement has to see the movement, not the JSON that encodes it.
+    //
+    // The envelope's address renders here too: it is the Solana address the
+    // caller says will sign, which the intents alone do not show (the wallet,
+    // not this parser, binds it to the key that signs). It carries the same
+    // label as on the plain-message path, [`SIGNING_ADDRESS_LABEL`], so a
+    // wallet always finds the Solana key under it; the intents' own "Signer"
+    // is the payload's `signer_id`, a NEAR account, not the signing key.
+    #[cfg(feature = "intents")]
+    if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
+        let mut fields = rendered.fields;
+        fields.push(
+            create_address_field(
+                SIGNING_ADDRESS_LABEL,
+                &envelope.signer_address,
+                None,
+                None,
+                None,
+                None,
+            )?
+            .signable_payload_field,
+        );
+        return Ok(SignablePayload::new(
+            0,
+            rendered.title,
+            None,
+            fields,
+            MESSAGE_PAYLOAD_TYPE.to_string(),
+        ));
+    }
+    // A build without the decoder can't show what such a message does, and
+    // showing its JSON as a harmless "Solana Message" would let it be signed
+    // as text. Refused instead.
+    #[cfg(not(feature = "intents"))]
+    if looks_like_intents(envelope.message.as_bytes()) {
+        return Err(VisualSignError::ConversionError(
+            "the message is shaped like a NEAR Intents payload, and this build was compiled \
+             without the `intents` feature that renders one"
+                .to_string(),
+        ));
+    }
     Ok(SignablePayload::new(
         0,
         "Solana Message".to_string(),
@@ -1052,6 +1097,21 @@ fn message_to_visual_sign_payload(
         ],
         MESSAGE_PAYLOAD_TYPE.to_string(),
     ))
+}
+
+/// Whether a message is shaped like a NEAR Intents `DefusePayload`, by the same
+/// rule as `visualsign_intents::is_intent_shaped`: a JSON object with an
+/// `intents` key or every required envelope key. Kept here so a build without
+/// the `intents` feature, which links no decoder, can still refuse one; a test
+/// under the feature checks the two agree.
+#[cfg(any(not(feature = "intents"), test))]
+fn looks_like_intents(message: &[u8]) -> bool {
+    const REQUIRED: [&str; 4] = ["signer_id", "verifying_contract", "deadline", "nonce"];
+    serde_json::from_slice::<serde_json::Value>(message).is_ok_and(|value| {
+        value.as_object().is_some_and(|o| {
+            o.contains_key("intents") || REQUIRED.iter().all(|k| o.contains_key(*k))
+        })
+    })
 }
 
 /// `payload_type` for an off-chain message: what the signature covers is a
@@ -3862,5 +3922,308 @@ mod solana_message_tests {
         let legacy = bincode::serialize(&utf8_transfer_message()).expect("serialize");
         assert!(check_message_domain(&legacy).is_err());
         assert!(check_message_domain(b"Sign in to app.example.com").is_ok());
+    }
+}
+
+/// Without the `intents` feature there is no decoder, so a message shaped like
+/// an intents payload (a cancel included) is refused rather than shown as text.
+#[cfg(all(test, not(feature = "intents")))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_message_without_intents_tests {
+    use super::*;
+    use serde_json::json;
+
+    const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
+
+    fn convert(message: &str) -> Result<SignablePayload, VisualSignError> {
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .map(|result| result.payload)
+    }
+
+    #[test]
+    fn an_intents_shaped_message_is_refused() {
+        for message in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1"}]}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"intents":[]}"#,
+        ] {
+            let err = convert(message).expect_err("an intents payload must not render as text");
+            assert!(err.to_string().contains("`intents` feature"), "{err}");
+        }
+        assert_eq!(
+            convert(r#"{"greeting":"hi"}"#).expect("text").title,
+            "Solana Message"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "intents"))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_intents_message_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The Solana key that signs. Base58, 32 bytes.
+    const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
+
+    /// A `DefusePayload` withdrawing 1 wNEAR, as a Solana wallet signs it under
+    /// `raw_ed25519`: the payload is the message itself.
+    const INTENTS: &str = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+    fn render(message: &str) -> SignablePayload {
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload
+    }
+
+    fn labels(payload: &SignablePayload) -> Vec<String> {
+        payload
+            .fields
+            .iter()
+            .map(|f| f.label().to_string())
+            .collect()
+    }
+
+    fn field_text(payload: &SignablePayload, label: &str) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
+                    Some(address_v2.address.clone())
+                }
+                _ => None,
+            })
+            // A static message: CodeQL treats anything derived from the payload
+            // as tainted, so the label is not interpolated.
+            .expect("no field with the requested label")
+    }
+
+    /// A message carrying intents renders as intents, and the Solana key that
+    /// will sign still shows. The intents' own "Signer" is the payload's NEAR
+    /// account, so the signing key needs its own field to be visible at all.
+    #[test]
+    fn intents_message_shows_the_signing_address() {
+        let payload = render(INTENTS);
+        let labels = labels(&payload);
+        assert!(
+            labels.iter().any(|l| l == "Intent"),
+            "not rendered as intents: {labels:?}"
+        );
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+        assert_eq!(field_text(&payload, "Signer"), "alice.near");
+        // What the signature covers is a message, whatever it carries.
+        assert_eq!(payload.payload_type, "SolanaMessage");
+    }
+
+    /// The signing address appears once, after the intents' own fields.
+    #[test]
+    fn signing_address_is_the_last_field_and_appears_once() {
+        let labels = labels(&render(INTENTS));
+        assert_eq!(labels.iter().filter(|l| *l == "Signing Address").count(), 1);
+        assert_eq!(labels.last().map(String::as_str), Some("Signing Address"));
+    }
+
+    /// The parser validates the payload's charset before returning it, so the
+    /// intents render must pass that check with the extra field in place.
+    #[test]
+    fn intents_message_passes_charset_validation() {
+        render(INTENTS).validate_charset().expect("charset");
+    }
+
+    /// A message that is intents but carries an undeclared key is refused
+    /// rather than shown as text: the extra key would be signed without being
+    /// shown, and falling back to the raw JSON would show a payload the parser
+    /// partly understood.
+    #[test]
+    fn intents_with_an_undeclared_key_are_refused() {
+        let mut intents: serde_json::Value = serde_json::from_str(INTENTS).expect("json");
+        intents["memo"] = json!("hidden");
+        let envelope =
+            json!({ "message": intents.to_string(), "signerAddress": SIGNER }).to_string();
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+            VisualSignOptions::default(),
+        );
+        let Err(err) = result else {
+            panic!("expected a refusal for an undeclared intents key");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+    }
+
+    /// A key inside an intent that its kind does not declare is refused, not
+    /// dropped: `native_withdraw` has no `memo`, so the typed decode ignores
+    /// it and the structured preview, which replaces the message, would never
+    /// show what was signed.
+    #[test]
+    fn an_intent_with_an_undeclared_key_is_refused() {
+        let message = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000","memo":"hidden"}]}"#;
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+            VisualSignOptions::default(),
+        );
+        let Err(err) = result else {
+            panic!("expected a refusal for an undeclared key inside an intent");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+    }
+
+    /// An `auth_call` with an attached deposit previews differently with an
+    /// explicit `min_gas` of `"0"` than with the field absent: they are
+    /// different signed payloads, and the deposit is not refunded if the call
+    /// fails for lack of gas.
+    #[test]
+    fn auth_call_min_gas_zero_and_absent_preview_differently() {
+        let auth = |min_gas: &str| {
+            format!(
+                r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{{"intent":"auth_call","contract_id":"app.near","msg":"go","attached_deposit":"1000000000000000000000000"{min_gas}}}]}}"#
+            )
+        };
+        let defaulted = render(&auth(""));
+        let zero = render(&auth(r#","min_gas":"0""#));
+        // A static message: CodeQL treats rendered fields as tainted.
+        assert!(
+            !labels(&defaulted).iter().any(|l| l == "Min Gas"),
+            "a defaulted min_gas must render no Min Gas field"
+        );
+        assert_eq!(field_text(&zero, "Min Gas"), "0 Tgas");
+        assert_ne!(labels(&defaulted), labels(&zero));
+    }
+
+    /// A message that is not intents still renders as text with its signer.
+    #[test]
+    fn a_plain_message_still_renders_as_text() {
+        let payload = render("Sign in to app.example.com");
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+    }
+
+    /// A message that is intent-shaped (a JSON object naming `intents`) but does
+    /// not decode is refused, not shown as a "Solana Message": an unknown intent
+    /// kind and `intents: null` both. JSON that names no `intents` is ordinary
+    /// text and still renders.
+    #[test]
+    fn intent_shaped_messages_that_do_not_decode_are_refused() {
+        for malformed in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"future_unknown"}]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":null}"#,
+        ] {
+            let envelope = json!({ "message": malformed, "signerAddress": SIGNER }).to_string();
+            let result = SolanaVisualSignConverter.to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            );
+            let Err(err) = result else {
+                panic!("an intent-shaped message that does not decode must be refused");
+            };
+            assert!(
+                err.to_string().contains("malformed or unsupported"),
+                "{err}"
+            );
+        }
+        let payload = render(r#"{"greeting":"hi"}"#);
+        assert_eq!(payload.title, "Solana Message");
+    }
+
+    /// A payload with no intents only spends its nonce, which is how a user
+    /// cancels a pending signed quote or order, so it must be signable from a
+    /// Solana wallet too. `intents` is optional: the absent and the empty form
+    /// both render as a cancel with the signer, verifying contract, deadline,
+    /// nonce and the Solana signing address.
+    #[test]
+    fn a_payload_without_intents_renders_as_a_cancel() {
+        for message in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[]}"#,
+        ] {
+            let payload = render(message);
+            assert_eq!(payload.title, "Cancel: invalidate nonce", "{message}");
+            assert_eq!(payload.payload_type, "SolanaMessage");
+            assert_eq!(field_text(&payload, "Signer"), "alice.near");
+            assert_eq!(field_text(&payload, "Verifying Contract"), "intents.near");
+            assert_eq!(
+                field_text(&payload, "Deadline"),
+                "2999-01-01T00:00:00+00:00"
+            );
+            assert_eq!(
+                field_text(&payload, "Nonce"),
+                "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f"
+            );
+            assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+            payload.validate_charset().expect("charset");
+        }
+    }
+
+    /// A cancel carrying a key the envelope does not declare is refused, like
+    /// any other payload with one: the key would be signed without being shown.
+    #[test]
+    fn a_cancel_with_an_undeclared_key_is_refused() {
+        let message = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","action":"login"}"#;
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        let err = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .err()
+            .expect("an undeclared key must be refused");
+        assert!(err.to_string().contains("\"action\""), "{err}");
+    }
+
+    /// The feature-free shape check refuses exactly what the decoder treats as
+    /// intents, so turning the feature off never turns a payload into text.
+    #[test]
+    fn the_feature_free_shape_check_agrees_with_the_decoder() {
+        for message in [
+            INTENTS,
+            r#"{"signer_id":"a","verifying_contract":"b","deadline":"c","nonce":"d"}"#,
+            r#"{"intents":null}"#,
+            r#"{"signer_id":"a","deadline":"c","nonce":"d"}"#,
+            r#"{"greeting":"hi"}"#,
+            "[1,2]",
+            "Sign in to app.example.com",
+        ] {
+            assert_eq!(
+                looks_like_intents(message.as_bytes()),
+                visualsign_intents::is_intent_shaped(message.as_bytes()),
+                "{message}"
+            );
+        }
+    }
+
+    /// With `diagnostics` on, an intents finding is a structured `Diagnostic`,
+    /// not the `Warning` text fallback: the feature has to reach
+    /// `visualsign-intents`, which builds those fields.
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn an_expired_intent_is_a_diagnostic_when_diagnostics_is_on() {
+        let expired = INTENTS.replace("2999-01-01T00:00:00Z", "2020-01-01T00:00:00Z");
+        let payload = render(&expired);
+        assert!(
+            payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.rule == "deadline"
+            )),
+            "expected a deadline Diagnostic, got labels {:?}",
+            labels(&payload)
+        );
+        assert!(
+            !labels(&payload).iter().any(|l| l == "Warning"),
+            "a finding fell back to Warning text"
+        );
     }
 }

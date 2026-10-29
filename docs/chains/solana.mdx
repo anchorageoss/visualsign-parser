@@ -88,6 +88,8 @@ Besides transactions, the parser renders a message a wallet is asked to sign wit
 - The message text is escaped, never filtered: printable ASCII passes through, and every other byte, plus `%` and `\`, is shown as `%XX` (`%0A` for a line feed, `%E2%80%AE` for a right-to-left override). A space that is first, last or next to another space is shown as `%20`.
 - Some messages are refused because a signature over their bytes means more than "signed this text": a message of exactly 32 bytes that is not all ASCII letters and digits (it may be the SHA-256 prehash a NEP-413, SEP-53 or TON Connect verifier checks), and a message whose bytes are a serialized Solana transaction message.
 
+A message that is a NEAR Intents `DefusePayload` (the `raw_ed25519` standard signs the payload JSON as the message) renders as the intents it carries, with a payload that has no intents titled `Cancel: invalidate nonce`, when the `intents` feature of `visualsign-solana` is on (`solana-intents` in parser_app and parser_cli). It is off by default because it links `near-sdk`, which brings `near-crypto` and the C library `secp256k1-sys`. Without it, a message shaped like an intents payload is refused rather than shown as text.
+
 This path does not parse the Solana off-chain message standard (the `\xffsolana offchain` signing domain). A JSON string decodes to UTF-8, and `0xff` never occurs in UTF-8, so a message framed that way cannot arrive here. What a wallet must do with the result is in [Solana for Wallets](/wallet-integration/chains/solana).
 
 ## Resources
