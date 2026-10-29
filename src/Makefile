@@ -108,6 +108,18 @@ lint: fmt-check
 	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
 
+# Library crates that must build for Apple Silicon (iOS device) with no
+# C/C++/asm in the dependency tree. Add a chain here once its crate passes.
+APPLE_NO_C_CRATES := visualsign visualsign-ethereum visualsign-tron visualsign-unspecified
+
+.PHONY: apple-silicon-check
+apple-silicon-check:
+	@# Any build script that compiles C calls the C compiler; pointing it at
+	@# `false` turns a C dependency into a build failure. Run on an Apple
+	@# Silicon macOS host (CI: macos-latest), which also runs the tests natively.
+	CC=/usr/bin/false CXX=/usr/bin/false cargo build --lib --target aarch64-apple-ios $(addprefix -p ,$(APPLE_NO_C_CRATES))
+	cargo test --no-fail-fast $(addprefix -p ,$(APPLE_NO_C_CRATES))
+
 .PHONY: narrow-build-check
 narrow-build-check:
 	@# Guards parser_app's per-chain feature gating. If a future change

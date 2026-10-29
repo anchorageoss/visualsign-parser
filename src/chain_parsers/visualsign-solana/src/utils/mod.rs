@@ -276,9 +276,10 @@ mod tests {
 pub mod test_utils {
     use crate::core::VisualizerContext;
     use crate::transaction_string_to_visual_sign;
+    use solana_instruction::Instruction;
+    use solana_message::compiled_instruction::CompiledInstruction;
     use solana_parser::solana::structs::SolanaAccount;
-    use solana_sdk::instruction::{CompiledInstruction, Instruction};
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
     use visualsign::SignablePayload;
     use visualsign::vsptrait::VisualSignOptions;
 
