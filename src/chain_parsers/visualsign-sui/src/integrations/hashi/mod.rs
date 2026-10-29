@@ -16,13 +16,13 @@ use crate::core::{
 };
 use crate::utils::{decode_number, get_object_value, pure_bcs_bytes};
 
-use bech32::{ToBase32, Variant, u5};
-use crate::types::{TypeTag, type_tag_to_string};
+use crate::types::{ObjectID, SuiAddress};
 use crate::types::{
     SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg, SuiProgrammableMoveCall, SuiReservation,
     SuiWithdrawFrom, SuiWithdrawalTypeArg,
 };
-use crate::types::{ObjectID, SuiAddress};
+use crate::types::{TypeTag, type_tag_to_string};
+use bech32::{Hrp, segwit};
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -386,7 +386,8 @@ fn resolve_cancellation(
     match command {
         SuiCommand::MoveCall(call)
             if is_framework_call(call, "from_balance")
-                && matches!(call.arguments.as_slice(), [balance] if refers_to(*balance, result_of(cancel)?)) => {}
+                && matches!(call.arguments.as_slice(), [balance] if refers_to(*balance, result_of(cancel)?)) =>
+            {}
         _ => return Err(unsupported_refund()),
     }
 
@@ -399,9 +400,7 @@ fn resolve_cancellation(
         {
             call.arguments[1]
         }
-        SuiCommand::TransferObjects(objects, recipient)
-            if matches!(objects.as_slice(), [sent] if refers_to(*sent, coin)) =>
-        {
+        SuiCommand::TransferObjects(objects, recipient) if matches!(objects.as_slice(), [sent] if refers_to(*sent, coin)) => {
             *recipient
         }
         _ => return Err(unsupported_refund()),
@@ -426,7 +425,9 @@ fn unsupported_refund() -> VisualSignError {
 fn result_of(command: usize) -> Result<SuiArgument, VisualSignError> {
     u16::try_from(command)
         .map(SuiArgument::Result)
-        .map_err(|_| VisualSignError::MissingData(format!("Command index {command} is out of range")))
+        .map_err(|_| {
+            VisualSignError::MissingData(format!("Command index {command} is out of range"))
+        })
 }
 
 /// The one later command that uses the result of `producer`. A balance or coin
@@ -957,9 +958,8 @@ fn possibly_mutable_arguments(
 /// (mainnet-v1.68.1).
 fn is_read_only_call(call: &SuiProgrammableMoveCall, deployment: &HashiDeployment) -> bool {
     let framework = call.package == ObjectID::from_single_byte(2);
-    let framework_value = framework
-        && matches!(call.module.as_str(), "coin" | "balance")
-        && call.function == "value";
+    let framework_value =
+        framework && matches!(call.module.as_str(), "coin" | "balance") && call.function == "value";
     let framework_by_value = framework
         && call.module == "coin"
         && matches!(call.function.as_str(), "from_balance" | "send_funds");
@@ -1129,21 +1129,18 @@ fn encode_bitcoin_address(
     let program: Vec<u8> = bcs::from_bytes(bcs_bytes).map_err(|e| {
         VisualSignError::DecodeError(format!("Invalid bitcoin_address encoding: {e}"))
     })?;
-    let (witness_version, variant) = match program.len() {
-        P2WPKH_PROGRAM_LEN => (0, Variant::Bech32),
-        P2TR_PROGRAM_LEN => (1, Variant::Bech32m),
+    let hrp = Hrp::parse(network.bech32_hrp())
+        .map_err(|e| VisualSignError::DecodeError(format!("Invalid bech32 HRP: {e}")))?;
+    let encoded = match program.len() {
+        P2WPKH_PROGRAM_LEN => segwit::encode_v0(hrp, &program),
+        P2TR_PROGRAM_LEN => segwit::encode_v1(hrp, &program),
         other => {
             return Err(VisualSignError::DecodeError(format!(
                 "Bitcoin address must be a 20-byte P2WPKH or 32-byte P2TR program, got {other} bytes"
             )));
         }
     };
-    let version = u5::try_from_u8(witness_version)
-        .map_err(|e| VisualSignError::DecodeError(format!("Invalid witness version: {e}")))?;
-    let data: Vec<u5> = std::iter::once(version)
-        .chain(program.to_base32())
-        .collect();
-    bech32::encode(network.bech32_hrp(), data, variant)
+    encoded
         .map_err(|e| VisualSignError::DecodeError(format!("Bitcoin address encoding failed: {e}")))
 }
 
