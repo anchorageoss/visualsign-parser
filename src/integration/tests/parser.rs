@@ -1273,6 +1273,16 @@ async fn parser_near_intent_envelope_e2e() {
 /// args, 30 Tgas, and the deposit noted on each (1 NEAR for the wrap, 1
 /// yoctoNEAR for the NEP-141 calls). `intents_tx_hex` in
 /// `visualsign-near/src/cli_plugin.rs` builds the same `Transaction::V0`.
+///
+/// The hops are independent constants: the amounts agree (1 wNEAR wrapped,
+/// deposited and swapped; 998 usdc.near received and withdrawn) because they
+/// were built that way, and nothing derives one hop from another. Change them
+/// together.
+///
+/// Unwrapping (`near_withdraw` on wrap.near) is not a hop here: the wNEAR is
+/// swapped away, so the journey never unwraps. Its title and amount are
+/// covered by the wrap preset's unit tests and the `near-wrap-withdraw` CLI
+/// fixture.
 #[tokio::test]
 async fn parser_near_intents_journey_e2e() {
     async fn test(test_args: TestArgs) {
@@ -1351,7 +1361,9 @@ async fn parser_near_intents_journey_e2e() {
         //    ft_transfer_call is a NEP-141 standard method, so it is decoded by
         //    method name on any token contract; the on-chain path does not
         //    resolve token metadata here, so the amount is base units, labelled
-        //    as such.
+        //    as such. This hop does not exercise the wrap preset. If wrap.near's
+        //    NEP-141 calls later render in wNEAR (as near_withdraw already
+        //    does), this assertion changes on purpose, not as a regression.
         let deposited = hop(&mut client, DEPOSIT).await;
         assert_eq!(text(&deposited, "To"), "wrap.near");
         assert_eq!(text(&deposited, "Method"), "ft_transfer_call");
