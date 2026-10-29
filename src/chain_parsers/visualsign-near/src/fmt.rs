@@ -82,10 +82,12 @@ pub fn format_near(yocto: u128) -> String {
     format_fixed(yocto, 24)
 }
 
-/// Format gas as Tgas (10^12 gas units) with trailing-zero trim.
+/// Format gas as Tgas (10^12 gas units) with trailing-zero trim. Delegates to
+/// the intents crate's formatter, so a gas value reads the same on the
+/// transaction path and inside an intent.
 #[must_use]
 pub fn format_tgas(gas: u64) -> String {
-    format_fixed(u128::from(gas), 12)
+    visualsign_intents::format_tgas(gas)
 }
 
 #[cfg(test)]
