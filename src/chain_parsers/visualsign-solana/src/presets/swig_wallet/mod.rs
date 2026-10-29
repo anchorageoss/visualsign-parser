@@ -9,15 +9,12 @@ use crate::core::{
     VisualizerKind, available_visualizers, resolve_program_display, visualize_with_any,
 };
 use config::SwigWalletConfig;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_parser::solana::structs::SolanaAccount;
-use solana_program::system_instruction::SystemInstruction;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey,
-};
+use solana_pubkey::Pubkey;
+use solana_system_interface::instruction::SystemInstruction;
 use solana_system_interface::program as system_program;
-use spl_token::instruction::{AuthorityType as SplAuthorityType, TokenInstruction};
+use spl_token_interface::instruction::{AuthorityType as SplAuthorityType, TokenInstruction};
 use std::convert::TryInto;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::create_text_field;
@@ -25,6 +22,9 @@ use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
+
+/// Lamports per SOL (solana-sdk `native_token::LAMPORTS_PER_SOL`).
+const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
 static SWIG_WALLET_CONFIG: SwigWalletConfig = SwigWalletConfig;
 
@@ -826,7 +826,7 @@ fn describe_inner_instruction(
         return summary;
     }
 
-    if program_id == &spl_token::ID {
+    if program_id == &spl_token_interface::ID {
         if let Ok(ix) = TokenInstruction::unpack(data)
             && let Some(summary) = format_token_instruction_summary(ix, accounts)
         {
@@ -879,7 +879,7 @@ fn visualize_inner_instruction(instruction: Instruction, parent_depth: usize) ->
         account_keys.push(meta.pubkey);
     }
     let num_accounts = u8::try_from(instruction.accounts.len()).ok()?;
-    let compiled = solana_sdk::instruction::CompiledInstruction {
+    let compiled = solana_message::compiled_instruction::CompiledInstruction {
         program_id_index: 0,
         accounts: (1..=num_accounts).collect(),
         data: instruction.data.clone(),
@@ -2006,8 +2006,8 @@ fn derive_eth_address_from_uncompressed(uncompressed: &[u8]) -> Option<String> {
     if uncompressed.len() != 64 {
         return None;
     }
-    let hash = solana_sdk::keccak::hash(uncompressed);
-    let address = hex::encode(&hash.0[12..32]);
+    let hash = solana_keccak_hasher::hash(uncompressed);
+    let address = hex::encode(&hash.to_bytes()[12..32]);
     Some(format!("0x{address}"))
 }
 
@@ -2309,7 +2309,7 @@ fn format_web_authn_field_order(order: &[u8]) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
     use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
     use visualsign::{AnnotatedPayloadField, SignablePayload, SignablePayloadField};
 
@@ -2736,9 +2736,9 @@ mod tests {
     fn test_deeply_nested_sign_v1_does_not_stack_overflow() {
         use crate::core::{InstructionVisualizer, VisualizerContext};
         use crate::idl::IdlRegistry;
+        use solana_message::compiled_instruction::CompiledInstruction;
         use solana_parser::solana::structs::SolanaAccount;
-        use solana_sdk::instruction::CompiledInstruction;
-        use solana_sdk::pubkey::Pubkey;
+        use solana_pubkey::Pubkey;
         use std::str::FromStr;
         use visualsign::SignablePayloadField;
 

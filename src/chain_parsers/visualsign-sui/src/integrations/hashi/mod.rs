@@ -17,12 +17,12 @@ use crate::core::{
 use crate::utils::{decode_number, get_object_value, pure_bcs_bytes};
 
 use bech32::{ToBase32, Variant, u5};
-use move_core_types::language_storage::TypeTag;
-use sui_json_rpc_types::{
+use crate::types::{TypeTag, type_tag_to_string};
+use crate::types::{
     SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg, SuiProgrammableMoveCall, SuiReservation,
     SuiWithdrawFrom, SuiWithdrawalTypeArg,
 };
-use sui_types::base_types::{ObjectID, SuiAddress};
+use crate::types::{ObjectID, SuiAddress};
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -794,11 +794,7 @@ fn resolve_redeemed_amount(
         ));
     };
     let SuiWithdrawalTypeArg::Balance(balance_type) = &withdrawal.type_arg;
-    let balance_type: TypeTag = balance_type
-        .clone()
-        .try_into()
-        .map_err(|e| VisualSignError::DecodeError(format!("Invalid funds withdrawal type: {e}")))?;
-    if !coin_type_matches(&balance_type.to_string(), expected_coin_type) {
+    if !coin_type_matches(&type_tag_to_string(balance_type), expected_coin_type) {
         return Err(VisualSignError::MissingData(format!(
             "Funds withdrawal is not denominated in {expected_coin_type}"
         )));

@@ -1,7 +1,7 @@
 use super::determine_transaction_type_string;
 
-use sui_json_rpc_types::{SuiTransactionBlockData, SuiTransactionBlockDataAPI};
-use sui_types::transaction::TransactionData;
+use crate::types::SuiTransactionBlockData;
+use sui_sdk_types::Transaction;
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -17,7 +17,7 @@ pub fn get_tx_network() -> Result<AnnotatedPayloadField, VisualSignError> {
 }
 
 pub fn get_tx_details(
-    tx_data: &TransactionData,
+    tx_data: &Transaction,
     block_data: &SuiTransactionBlockData,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let payload_fields: Vec<AnnotatedPayloadField> = vec![create_tx_type_fields(block_data)?]
@@ -105,9 +105,9 @@ fn create_tx_gas_fields(
 }
 
 fn create_tx_data_fields(
-    tx_data: &TransactionData,
+    tx_data: &Transaction,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    let Ok(encoded) = bcs::to_bytes::<TransactionData>(tx_data) else {
+    let Ok(encoded) = bcs::to_bytes::<Transaction>(tx_data) else {
         return Ok(vec![]);
     };
 

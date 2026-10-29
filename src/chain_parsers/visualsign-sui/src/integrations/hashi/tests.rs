@@ -1,25 +1,85 @@
 use super::*;
 
 use super::config::SuiNetwork;
-use crate::core::SuiModuleResolver;
+use crate::types::{SuiTransactionBlockData, SuiTransactionBlockKind};
 use crate::utils::run_aggregated_fixture;
 
 use base64::Engine;
-use move_bytecode_utils::module_cache::SyncModuleCache;
-use sui_json_rpc_types::{
-    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
-};
-use sui_types::base_types::SequenceNumber;
-use sui_types::transaction::{
-    Argument, CallArg, Command, FundsWithdrawalArg, ObjectArg, ProgrammableMoveCall,
-    ProgrammableTransaction, SharedObjectMutability, TransactionData, TransactionDataAPI,
-    TransactionKind,
+use sui_sdk_types::{
+    Address, Argument, Command, Digest, FundsWithdrawal, Identifier, Input, MakeMoveVector,
+    MergeCoins, MoveCall, Mutability, ObjectReference, ProgrammableTransaction, SharedInput,
+    SplitCoins, Transaction, TransactionKind, TransferObjects, WithdrawFrom,
 };
 use visualsign::SignablePayload;
 use visualsign::test_utils::check_signable_payload_field;
 use visualsign::vsptrait::VisualSignOptions;
 
 const FIXTURE: &str = include_str!("aggregated_test_data.json");
+
+// Constructors over `sui_sdk_types` in the shape the tests below were written in.
+
+fn package_id(byte: u8) -> Address {
+    Address::new(ObjectID::from_single_byte(byte).into_bytes())
+}
+
+fn package_literal(literal: &str) -> Address {
+    Address::new(ObjectID::from_hex_literal(literal).unwrap().into_bytes())
+}
+
+fn ident(name: &str) -> Identifier {
+    Identifier::new(name).unwrap()
+}
+
+fn parse_type_tag(tag: &str) -> Result<TypeTag, sui_sdk_types::TypeParseError> {
+    tag.parse()
+}
+
+fn command_move_call(
+    package: Address,
+    module: Identifier,
+    function: Identifier,
+    type_arguments: Vec<TypeTag>,
+    arguments: Vec<Argument>,
+) -> Command {
+    Command::MoveCall(MoveCall {
+        package,
+        module,
+        function,
+        type_arguments,
+        arguments,
+    })
+}
+
+fn merge_coins(coin: Argument, coins_to_merge: Vec<Argument>) -> Command {
+    Command::MergeCoins(MergeCoins {
+        coin,
+        coins_to_merge,
+    })
+}
+
+fn split_coins(coin: Argument, amounts: Vec<Argument>) -> Command {
+    Command::SplitCoins(SplitCoins { coin, amounts })
+}
+
+fn transfer_objects(objects: Vec<Argument>, address: Argument) -> Command {
+    Command::TransferObjects(TransferObjects { objects, address })
+}
+
+fn make_move_vec(type_: Option<TypeTag>, elements: Vec<Argument>) -> Command {
+    Command::MakeMoveVector(MakeMoveVector { type_, elements })
+}
+
+fn balance_from_sender(amount: u64, coin_type: TypeTag) -> FundsWithdrawal {
+    FundsWithdrawal::new(amount, coin_type, WithdrawFrom::Sender)
+}
+
+fn balance_from_sponsor(amount: u64, coin_type: TypeTag) -> FundsWithdrawal {
+    FundsWithdrawal::new(amount, coin_type, WithdrawFrom::Sponsor)
+}
+
+fn block_data(tx: &Transaction) -> SuiTransactionBlockData {
+    SuiTransactionBlockData::try_from(tx).unwrap()
+}
 const HASHI_PACKAGE: &str = "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485";
 // Version 1 of the package, so it also defines `btc::BTC`.
 const HBTC_TYPE_ORIGIN: &str = HASHI_PACKAGE;
@@ -92,14 +152,14 @@ fn encoded_fixture_tx(section: &str, function: &str, digest: &str) -> String {
         .to_string()
 }
 
-fn fixture_tx(section: &str, function: &str, digest: &str) -> TransactionData {
+fn fixture_tx(section: &str, function: &str, digest: &str) -> Transaction {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded_fixture_tx(section, function, digest))
         .unwrap();
     bcs::from_bytes(&bytes).unwrap()
 }
 
-fn deposit_tx() -> TransactionData {
+fn deposit_tx() -> Transaction {
     fixture_tx("deposit", "deposit", DEPOSIT_DIGEST)
 }
 
@@ -110,28 +170,28 @@ const SPLIT_AMOUNT_SATS: u64 = 24_185_763;
 const TOP_UP_AMOUNT_SATS: u64 = 143_809_724;
 const TOP_UP_REDEEMED_SATS: u64 = 138_017_594;
 
-fn owned_coin(byte: u8) -> CallArg {
-    CallArg::Object(ObjectArg::ImmOrOwnedObject((
-        ObjectID::from_single_byte(byte),
-        SequenceNumber::from_u64(1),
-        sui_types::digests::ObjectDigest::new([byte; 32]),
-    )))
+fn owned_coin(byte: u8) -> Input {
+    Input::ImmutableOrOwned(ObjectReference::new(
+        package_id(byte),
+        1,
+        Digest::new([byte; 32]),
+    ))
 }
 
-fn real_request_withdrawal(tx: &TransactionData) -> ProgrammableMoveCall {
-    let TransactionKind::ProgrammableTransaction(pt) = tx.kind() else {
+fn real_request_withdrawal(tx: &Transaction) -> MoveCall {
+    let TransactionKind::ProgrammableTransaction(pt) = &tx.kind else {
         panic!("expected a programmable transaction");
     };
     let Command::MoveCall(call) = &pt.commands[REDEEM_WITHDRAWAL_COMMAND] else {
         panic!("expected request_withdrawal at command {REDEEM_WITHDRAWAL_COMMAND}");
     };
-    (**call).clone()
+    call.clone()
 }
 
 /// The real withdrawal's inputs are `I0 hashi, I1 clock, I2 address,
 /// I3 funds withdrawal`.
-fn real_withdrawal_inputs(tx: &TransactionData) -> (CallArg, CallArg, CallArg, CallArg) {
-    let TransactionKind::ProgrammableTransaction(pt) = tx.kind() else {
+fn real_withdrawal_inputs(tx: &Transaction) -> (Input, Input, Input, Input) {
+    let TransactionKind::ProgrammableTransaction(pt) = &tx.kind else {
         panic!("expected a programmable transaction");
     };
     (
@@ -142,7 +202,7 @@ fn real_withdrawal_inputs(tx: &TransactionData) -> (CallArg, CallArg, CallArg, C
     )
 }
 
-fn withdrawal_tx() -> TransactionData {
+fn withdrawal_tx() -> Transaction {
     let mut tx = redeem_withdrawal_tx();
     let (hashi, clock, address, _) = real_withdrawal_inputs(&tx);
     let mut request = real_request_withdrawal(&tx);
@@ -156,17 +216,17 @@ fn withdrawal_tx() -> TransactionData {
     pt.inputs = vec![
         owned_coin(0xa1),
         owned_coin(0xa2),
-        CallArg::Pure(bcs::to_bytes(&SPLIT_AMOUNT_SATS).unwrap()),
+        Input::Pure(bcs::to_bytes(&SPLIT_AMOUNT_SATS).unwrap()),
         hashi,
         clock,
         address,
     ];
     pt.commands = vec![
-        Command::MergeCoins(
+        merge_coins(
             Argument::Input(HBTC_COIN_INPUT),
             vec![Argument::Input(1)],
         ),
-        Command::SplitCoins(
+        split_coins(
             Argument::Input(HBTC_COIN_INPUT),
             vec![Argument::Input(SPLIT_AMOUNT_INPUT)],
         ),
@@ -177,19 +237,19 @@ fn withdrawal_tx() -> TransactionData {
             Some(&hbtc_type()),
             vec![Argument::NestedResult(1, 0)],
         ),
-        Command::MoveCall(Box::new(request)),
+        Command::MoveCall(request),
     ];
     tx
 }
 
-fn redeem_withdrawal_tx() -> TransactionData {
+fn redeem_withdrawal_tx() -> Transaction {
     fixture_tx("withdraw", "request_withdrawal", REDEEM_WITHDRAWAL_DIGEST)
 }
 
-fn top_up_withdrawal_tx() -> TransactionData {
+fn top_up_withdrawal_tx() -> Transaction {
     let mut tx = redeem_withdrawal_tx();
     let (hashi, clock, address, _) = real_withdrawal_inputs(&tx);
-    let sender = tx.sender();
+    let sender = tx.sender;
     let mut request = real_request_withdrawal(&tx);
     request.arguments = vec![
         Argument::Input(0),
@@ -203,9 +263,9 @@ fn top_up_withdrawal_tx() -> TransactionData {
         clock,
         address,
         owned_coin(0xb3),
-        CallArg::FundsWithdrawal(hbtc_from_sender(TOP_UP_REDEEMED_SATS)),
-        CallArg::Pure(bcs::to_bytes(&TOP_UP_AMOUNT_SATS).unwrap()),
-        CallArg::Pure(bcs::to_bytes(&sender).unwrap()),
+        Input::FundsWithdrawal(hbtc_from_sender(TOP_UP_REDEEMED_SATS)),
+        Input::Pure(bcs::to_bytes(&TOP_UP_AMOUNT_SATS).unwrap()),
+        Input::Pure(bcs::to_bytes(&sender).unwrap()),
     ];
     pt.commands = vec![
         framework_call(
@@ -215,11 +275,11 @@ fn top_up_withdrawal_tx() -> TransactionData {
             Some(&hbtc_type()),
             vec![Argument::Input(4)],
         ),
-        Command::MergeCoins(
+        merge_coins(
             Argument::Input(TOP_UP_HBTC_COIN_INPUT),
             vec![result(0)],
         ),
-        Command::SplitCoins(
+        split_coins(
             Argument::Input(TOP_UP_HBTC_COIN_INPUT),
             vec![Argument::Input(TOP_UP_SPLIT_AMOUNT_INPUT)],
         ),
@@ -240,19 +300,19 @@ fn top_up_withdrawal_tx() -> TransactionData {
                 Argument::Input(6),
             ],
         ),
-        Command::MoveCall(Box::new(request)),
+        Command::MoveCall(request),
     ];
     tx
 }
 
-fn programmable(tx: &mut TransactionData) -> &mut ProgrammableTransaction {
-    match tx.kind_mut() {
+fn programmable(tx: &mut Transaction) -> &mut ProgrammableTransaction {
+    match &mut tx.kind {
         TransactionKind::ProgrammableTransaction(pt) => pt,
         _ => panic!("expected a programmable transaction"),
     }
 }
 
-fn move_call(tx: &mut TransactionData, index: usize) -> &mut ProgrammableMoveCall {
+fn move_call(tx: &mut Transaction, index: usize) -> &mut MoveCall {
     match &mut programmable(tx).commands[index] {
         Command::MoveCall(call) => call,
         other => panic!("expected a move call at command {index}, got {other:?}"),
@@ -270,26 +330,26 @@ fn framework_call(
     type_arg: Option<&str>,
     args: Vec<Argument>,
 ) -> Command {
-    Command::move_call(
-        ObjectID::from_single_byte(package),
+    command_move_call(
+        package_id(package),
         module.parse().unwrap(),
         function.parse().unwrap(),
         type_arg
-            .map(|tag| vec![sui_types::parse_sui_type_tag(tag).unwrap()])
+            .map(|tag| vec![parse_type_tag(tag).unwrap()])
             .unwrap_or_default(),
         args,
     )
 }
 
-fn push_pure_input(tx: &mut TransactionData, bytes: Vec<u8>) -> Argument {
+fn push_pure_input(tx: &mut Transaction, bytes: Vec<u8>) -> Argument {
     let inputs = &mut programmable(tx).inputs;
-    inputs.push(CallArg::Pure(bytes));
+    inputs.push(Input::Pure(bytes));
     Argument::Input(u16::try_from(inputs.len() - 1).unwrap())
 }
 
 fn tamper_call(function: &str, args: Vec<Argument>) -> Command {
-    Command::move_call(
-        ObjectID::from_single_byte(0x42),
+    command_move_call(
+        package_id(0x42),
         "tamper".parse().unwrap(),
         function.parse().unwrap(),
         vec![],
@@ -303,7 +363,7 @@ fn hbtc_type() -> String {
 
 /// Inserts `command` at `index`, shifting later commands and every `Result`
 /// reference to them so the rest of the PTB keeps pointing where it did.
-fn insert_command(tx: &mut TransactionData, index: usize, command: Command) {
+fn insert_command(tx: &mut Transaction, index: usize, command: Command) {
     let pt = programmable(tx);
     let shift = |argument: &mut Argument| match argument {
         Argument::Result(target) | Argument::NestedResult(target, _)
@@ -316,31 +376,33 @@ fn insert_command(tx: &mut TransactionData, index: usize, command: Command) {
     for existing in &mut pt.commands {
         match existing {
             Command::MoveCall(call) => call.arguments.iter_mut().for_each(shift),
-            Command::TransferObjects(objects, recipient) => {
-                objects.iter_mut().for_each(shift);
-                shift(recipient);
+            Command::TransferObjects(transfer) => {
+                transfer.objects.iter_mut().for_each(shift);
+                shift(&mut transfer.address);
             }
-            Command::SplitCoins(coin, amounts) | Command::MergeCoins(coin, amounts) => {
-                shift(coin);
-                amounts.iter_mut().for_each(shift);
+            Command::SplitCoins(split) => {
+                shift(&mut split.coin);
+                split.amounts.iter_mut().for_each(shift);
             }
-            Command::MakeMoveVec(_, elements) => elements.iter_mut().for_each(shift),
-            Command::Upgrade(_, _, _, ticket) => shift(ticket),
-            Command::Publish(_, _) => {}
+            Command::MergeCoins(merge) => {
+                shift(&mut merge.coin);
+                merge.coins_to_merge.iter_mut().for_each(shift);
+            }
+            Command::MakeMoveVector(make) => make.elements.iter_mut().for_each(shift),
+            Command::Upgrade(upgrade) => shift(&mut upgrade.ticket),
+            _ => {}
         }
     }
     pt.commands.insert(index, command);
 }
 
+// Takes the transaction by value so callers can hand over the one they built.
+#[allow(clippy::needless_pass_by_value)]
 fn visualize(
-    tx: TransactionData,
+    tx: Transaction,
     command_index: usize,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    let block_data = SuiTransactionBlockData::try_from_with_module_cache(
-        tx,
-        &SyncModuleCache::new(SuiModuleResolver),
-    )
-    .unwrap();
+    let block_data = block_data(&tx);
     let SuiTransactionBlockKind::ProgrammableTransaction(pt) = block_data.transaction() else {
         panic!("expected a programmable transaction");
     };
@@ -432,7 +494,7 @@ fn layout_labels(field: &AnnotatedPayloadField) -> (Vec<String>, Vec<String>) {
     )
 }
 
-fn payload_of(tx: &TransactionData) -> SignablePayload {
+fn payload_of(tx: &Transaction) -> SignablePayload {
     crate::utils::payload_from_b64(
         &base64::engine::general_purpose::STANDARD.encode(bcs::to_bytes(tx).unwrap()),
     )
@@ -468,10 +530,10 @@ fn address_name(fields: &[SignablePayloadField], label: &str) -> Option<String> 
     })
 }
 
-fn deposit_to(recipient: Option<[u8; 32]>) -> TransactionData {
+fn deposit_to(recipient: Option<[u8; 32]>) -> Transaction {
     let mut tx = deposit_tx();
     programmable(&mut tx).inputs[DERIVATION_PATH_INPUT] =
-        CallArg::Pure(bcs::to_bytes(&recipient).unwrap());
+        Input::Pure(bcs::to_bytes(&recipient).unwrap());
     tx
 }
 
@@ -506,7 +568,7 @@ fn taproot_withdrawal_address_renders_as_a_full_bech32m_address() {
         hex::decode("a790d556b86a2a295e9e32b54febbf5c2983e94ffd4762a9c009a510d9f9ee05").unwrap();
     let mut tx = withdrawal_tx();
     programmable(&mut tx).inputs[usize::from(BITCOIN_ADDRESS_INPUT)] =
-        CallArg::Pure(bcs::to_bytes(&program).unwrap());
+        Input::Pure(bcs::to_bytes(&program).unwrap());
     let fields = visualize(tx, WITHDRAWAL_COMMAND).unwrap();
     assert_eq!(
         card_headline(&fields[0]),
@@ -542,7 +604,7 @@ fn deposit_without_derivation_path_warns_in_the_title_and_recipient_row() {
 fn withdrawal_to_p2wpkh_encodes_bech32_v0() {
     let mut tx = withdrawal_tx();
     programmable(&mut tx).inputs[usize::from(BITCOIN_ADDRESS_INPUT)] =
-        CallArg::Pure(bcs::to_bytes(&vec![0x75u8; 20]).unwrap());
+        Input::Pure(bcs::to_bytes(&vec![0x75u8; 20]).unwrap());
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND).unwrap();
     assert_eq!(
@@ -597,7 +659,7 @@ fn sui_network_display_names() {
 fn withdrawal_with_unsupported_address_length_fails() {
     let mut tx = withdrawal_tx();
     programmable(&mut tx).inputs[usize::from(BITCOIN_ADDRESS_INPUT)] =
-        CallArg::Pure(bcs::to_bytes(&vec![0u8; 25]).unwrap());
+        Input::Pure(bcs::to_bytes(&vec![0u8; 25]).unwrap());
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -608,7 +670,7 @@ fn withdrawal_with_unsupported_address_length_fails() {
 #[test]
 fn deposit_with_a_txid_that_is_not_32_bytes_fails() {
     let mut tx = deposit_tx();
-    programmable(&mut tx).inputs[usize::from(TXID_INPUT)] = CallArg::Pure(vec![0u8; 31]);
+    programmable(&mut tx).inputs[usize::from(TXID_INPUT)] = Input::Pure(vec![0u8; 31]);
 
     expect_error(
         visualize(tx, DEPOSIT_COMMAND),
@@ -619,7 +681,7 @@ fn deposit_with_a_txid_that_is_not_32_bytes_fails() {
 #[test]
 fn deposit_with_an_invalid_derivation_path_encoding_fails() {
     let mut tx = deposit_tx();
-    programmable(&mut tx).inputs[DERIVATION_PATH_INPUT] = CallArg::Pure(vec![2]);
+    programmable(&mut tx).inputs[DERIVATION_PATH_INPUT] = Input::Pure(vec![2]);
 
     expect_error(
         visualize(tx, DEPOSIT_COMMAND),
@@ -641,7 +703,7 @@ fn deposit_whose_utxo_comes_from_another_hashi_function_fails() {
 #[test]
 fn deposit_whose_utxo_comes_from_a_foreign_package_fails() {
     let mut tx = deposit_tx();
-    move_call(&mut tx, UTXO_COMMAND).package = ObjectID::from_single_byte(0x42);
+    move_call(&mut tx, UTXO_COMMAND).package = package_id(0x42);
 
     expect_error(
         visualize(tx, DEPOSIT_COMMAND),
@@ -652,7 +714,7 @@ fn deposit_whose_utxo_comes_from_a_foreign_package_fails() {
 #[test]
 fn deposit_whose_utxo_id_comes_from_a_foreign_package_fails() {
     let mut tx = deposit_tx();
-    move_call(&mut tx, UTXO_ID_COMMAND).package = ObjectID::from_single_byte(0x42);
+    move_call(&mut tx, UTXO_ID_COMMAND).package = package_id(0x42);
 
     expect_error(
         visualize(tx, DEPOSIT_COMMAND),
@@ -777,7 +839,7 @@ fn withdrawal_coin_merged_after_the_split_fails() {
     insert_command(
         &mut tx,
         INTO_BALANCE_COMMAND,
-        Command::MergeCoins(split_coin, vec![Argument::Input(HBTC_COIN_INPUT)]),
+        merge_coins(split_coin, vec![Argument::Input(HBTC_COIN_INPUT)]),
     );
 
     expect_error(
@@ -794,12 +856,12 @@ fn withdrawal_coin_resplit_after_the_split_fails() {
     insert_command(
         &mut tx,
         INTO_BALANCE_COMMAND,
-        Command::SplitCoins(split_coin, vec![resplit_amount]),
+        split_coins(split_coin, vec![resplit_amount]),
     );
     insert_command(
         &mut tx,
         INTO_BALANCE_COMMAND + 1,
-        Command::MergeCoins(
+        merge_coins(
             Argument::Input(HBTC_COIN_INPUT),
             vec![Argument::NestedResult(
                 u16::try_from(INTO_BALANCE_COMMAND).unwrap(),
@@ -899,12 +961,12 @@ fn withdrawal_split_amount_reused_by_value_before_the_split_renders() {
     insert_command(
         &mut tx,
         0,
-        Command::MakeMoveVec(None, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
+        make_move_vec(None, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
     );
     insert_command(
         &mut tx,
         1,
-        Command::SplitCoins(other_coin, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
+        split_coins(other_coin, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
     );
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND + 2).unwrap();
@@ -928,22 +990,22 @@ fn withdrawal_address_modified_after_the_withdrawal_renders() {
 
 /// The real deposit plus a second deposit of output 2 of the same Bitcoin
 /// transaction, reusing the first deposit's txid, amount and recipient inputs.
-fn batched_deposit_tx() -> TransactionData {
+fn batched_deposit_tx() -> Transaction {
     let mut tx = deposit_tx();
     let second_vout = push_pure_input(&mut tx, bcs::to_bytes(&2u32).unwrap());
-    let hashi = ObjectID::from_hex_literal(HASHI_PACKAGE).unwrap();
+    let hashi = package_literal(HASHI_PACKAGE);
     let deposit_call = move_call(&mut tx, DEPOSIT_COMMAND).clone();
     let hashi_input = deposit_call.arguments[0];
     let clock_input = deposit_call.arguments[2];
     let commands = &mut programmable(&mut tx).commands;
-    commands.push(Command::move_call(
+    commands.push(command_move_call(
         hashi,
         "utxo".parse().unwrap(),
         "utxo_id".parse().unwrap(),
         vec![],
         vec![Argument::Input(TXID_INPUT), second_vout],
     ));
-    commands.push(Command::move_call(
+    commands.push(command_move_call(
         hashi,
         "utxo".parse().unwrap(),
         "utxo".parse().unwrap(),
@@ -954,7 +1016,7 @@ fn batched_deposit_tx() -> TransactionData {
             Argument::Input(u16::try_from(DERIVATION_PATH_INPUT).unwrap()),
         ],
     ));
-    commands.push(Command::move_call(
+    commands.push(command_move_call(
         hashi,
         "deposit".parse().unwrap(),
         "deposit".parse().unwrap(),
@@ -985,8 +1047,8 @@ fn deposit_recipient_passed_to_a_foreign_utxo_module_fails() {
     insert_command(
         &mut tx,
         0,
-        Command::move_call(
-            ObjectID::from_single_byte(0x42),
+        command_move_call(
+            package_id(0x42),
             "utxo".parse().unwrap(),
             "utxo".parse().unwrap(),
             vec![],
@@ -1066,7 +1128,7 @@ fn deposit_utxo_id_rewritten_before_the_utxo_is_built_fails() {
 fn deposit_with_a_wrong_width_amount_fails() {
     let mut tx = deposit_tx();
     programmable(&mut tx).inputs[usize::from(DEPOSIT_AMOUNT_INPUT)] =
-        CallArg::Pure(bcs::to_bytes(&7u32).unwrap());
+        Input::Pure(bcs::to_bytes(&7u32).unwrap());
 
     expect_error(
         visualize(tx, DEPOSIT_COMMAND),
@@ -1077,7 +1139,7 @@ fn deposit_with_a_wrong_width_amount_fails() {
 #[test]
 fn deposit_with_a_txid_that_is_not_an_input_fails() {
     let mut tx = deposit_tx();
-    move_call(&mut tx, UTXO_ID_COMMAND).arguments[0] = Argument::GasCoin;
+    move_call(&mut tx, UTXO_ID_COMMAND).arguments[0] = Argument::Gas;
 
     expect_error(
         visualize(tx, DEPOSIT_COMMAND),
@@ -1105,7 +1167,7 @@ fn withdrawal_coin_aliased_by_result_and_nested_result_fails() {
     insert_command(
         &mut tx,
         INTO_BALANCE_COMMAND,
-        Command::MergeCoins(
+        merge_coins(
             Argument::Input(HBTC_COIN_INPUT),
             vec![Argument::NestedResult(
                 u16::try_from(SPLIT_COMMAND).unwrap(),
@@ -1123,7 +1185,7 @@ fn withdrawal_coin_aliased_by_result_and_nested_result_fails() {
 #[test]
 fn withdrawal_balance_from_a_foreign_into_balance_fails() {
     let mut tx = withdrawal_tx();
-    move_call(&mut tx, INTO_BALANCE_COMMAND).package = ObjectID::from_single_byte(0x42);
+    move_call(&mut tx, INTO_BALANCE_COMMAND).package = package_id(0x42);
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1134,7 +1196,7 @@ fn withdrawal_balance_from_a_foreign_into_balance_fails() {
 #[test]
 fn withdrawal_balance_from_a_foreign_module_fails() {
     let mut tx = withdrawal_tx();
-    move_call(&mut tx, INTO_BALANCE_COMMAND).module = "balance".to_string();
+    move_call(&mut tx, INTO_BALANCE_COMMAND).module = ident("balance");
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1145,7 +1207,7 @@ fn withdrawal_balance_from_a_foreign_module_fails() {
 #[test]
 fn withdrawal_funded_by_the_gas_coin_fails() {
     let mut tx = withdrawal_tx();
-    move_call(&mut tx, INTO_BALANCE_COMMAND).arguments[0] = Argument::GasCoin;
+    move_call(&mut tx, INTO_BALANCE_COMMAND).arguments[0] = Argument::Gas;
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1156,10 +1218,10 @@ fn withdrawal_funded_by_the_gas_coin_fails() {
 #[test]
 fn withdrawal_split_from_the_gas_coin_fails() {
     let mut tx = withdrawal_tx();
-    let Command::SplitCoins(source, _) = &mut programmable(&mut tx).commands[SPLIT_COMMAND] else {
+    let Command::SplitCoins(split) = &mut programmable(&mut tx).commands[SPLIT_COMMAND] else {
         panic!("expected SplitCoins at command {SPLIT_COMMAND}");
     };
-    *source = Argument::GasCoin;
+    split.coin = Argument::Gas;
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1172,11 +1234,11 @@ fn withdrawal_split_from_a_coin_split_off_the_gas_coin_fails() {
     let mut tx = withdrawal_tx();
     let pt = programmable(&mut tx);
     pt.commands[0] =
-        Command::SplitCoins(Argument::GasCoin, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]);
-    let Command::SplitCoins(source, _) = &mut pt.commands[SPLIT_COMMAND] else {
+        split_coins(Argument::Gas, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]);
+    let Command::SplitCoins(split) = &mut pt.commands[SPLIT_COMMAND] else {
         panic!("expected SplitCoins at command {SPLIT_COMMAND}");
     };
-    *source = Argument::NestedResult(0, 0);
+    split.coin = Argument::NestedResult(0, 0);
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1184,15 +1246,15 @@ fn withdrawal_split_from_a_coin_split_off_the_gas_coin_fails() {
     );
 }
 
-fn split_from_redeemed_coin_tx(withdrawal: FundsWithdrawalArg) -> TransactionData {
+fn split_from_redeemed_coin_tx(withdrawal: FundsWithdrawal) -> Transaction {
     let mut tx = top_up_withdrawal_tx();
     let split_amount = push_pure_input(&mut tx, bcs::to_bytes(&100_000_000u64).unwrap());
     let pt = programmable(&mut tx);
-    pt.inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] = CallArg::FundsWithdrawal(withdrawal);
+    pt.inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] = Input::FundsWithdrawal(withdrawal);
     let redeemed = result(0);
     pt.commands = vec![
         pt.commands[0].clone(),
-        Command::SplitCoins(redeemed, vec![split_amount]),
+        split_coins(redeemed, vec![split_amount]),
         framework_call(
             SUI_FRAMEWORK,
             "coin",
@@ -1250,7 +1312,7 @@ fn withdrawal_split_from_a_coin_redeemed_from_the_sponsor_fails() {
 fn top_up_withdrawal_funded_from_the_sponsor_fails() {
     let mut tx = top_up_withdrawal_tx();
     programmable(&mut tx).inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] =
-        CallArg::FundsWithdrawal(hbtc_from_sponsor(150_000_000));
+        Input::FundsWithdrawal(hbtc_from_sponsor(150_000_000));
 
     expect_error(
         visualize(tx, TOP_UP_WITHDRAWAL_COMMAND),
@@ -1272,9 +1334,9 @@ fn address_balance_withdrawal_shows_the_reserved_amount() {
 fn address_balance_withdrawal_of_a_foreign_coin_type_fails() {
     let mut tx = redeem_withdrawal_tx();
     programmable(&mut tx).inputs[usize::from(FUNDS_WITHDRAWAL_INPUT)] =
-        CallArg::FundsWithdrawal(FundsWithdrawalArg::balance_from_sender(
+        Input::FundsWithdrawal(balance_from_sender(
             10_000_000,
-            sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap(),
+            parse_type_tag("0x2::sui::SUI").unwrap(),
         ));
 
     expect_error(
@@ -1287,9 +1349,9 @@ fn address_balance_withdrawal_of_a_foreign_coin_type_fails() {
 fn address_balance_withdrawal_from_the_sponsor_fails() {
     let mut tx = redeem_withdrawal_tx();
     programmable(&mut tx).inputs[usize::from(FUNDS_WITHDRAWAL_INPUT)] =
-        CallArg::FundsWithdrawal(FundsWithdrawalArg::balance_from_sponsor(
+        Input::FundsWithdrawal(balance_from_sponsor(
             10_000_000,
-            sui_types::parse_sui_type_tag(&hbtc_type()).unwrap(),
+            parse_type_tag(&hbtc_type()).unwrap(),
         ));
 
     expect_error(
@@ -1346,9 +1408,8 @@ fn address_balance_withdrawal_widened_before_redeem_fails() {
 fn address_balance_withdrawal_redeemed_as_a_foreign_type_fails() {
     let mut tx = redeem_withdrawal_tx();
     move_call(&mut tx, REDEEM_COMMAND).type_arguments[0] =
-        sui_types::parse_sui_type_tag("0x2::sui::SUI")
-            .unwrap()
-            .into();
+        parse_type_tag("0x2::sui::SUI")
+            .unwrap();
 
     expect_error(
         visualize(tx, REDEEM_WITHDRAWAL_COMMAND),
@@ -1360,10 +1421,9 @@ fn address_balance_withdrawal_redeemed_as_a_foreign_type_fails() {
 fn withdrawal_balance_from_an_unsupported_framework_call_with_a_foreign_type_fails() {
     let mut tx = withdrawal_tx();
     let call = move_call(&mut tx, INTO_BALANCE_COMMAND);
-    call.function = "into_balance_lossy".to_string();
-    call.type_arguments[0] = sui_types::parse_sui_type_tag("0x2::sui::SUI")
-        .unwrap()
-        .into();
+    call.function = ident("into_balance_lossy");
+    call.type_arguments[0] = parse_type_tag("0x2::sui::SUI")
+        .unwrap();
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1386,7 +1446,7 @@ fn address_balance_withdrawal_redeeming_a_pure_input_fails() {
 #[test]
 fn address_balance_withdrawal_redeemed_through_a_foreign_package_fails() {
     let mut tx = redeem_withdrawal_tx();
-    move_call(&mut tx, REDEEM_COMMAND).package = ObjectID::from_single_byte(0x42);
+    move_call(&mut tx, REDEEM_COMMAND).package = package_id(0x42);
 
     expect_error(
         visualize(tx, REDEEM_WITHDRAWAL_COMMAND),
@@ -1419,7 +1479,7 @@ fn titles_name_both_networks_of_the_deployment() {
 #[test]
 fn withdrawal_balance_not_from_coin_into_balance_fails() {
     let mut tx = withdrawal_tx();
-    move_call(&mut tx, INTO_BALANCE_COMMAND).function = "into_balance_lossy".to_string();
+    move_call(&mut tx, INTO_BALANCE_COMMAND).function = ident("into_balance_lossy");
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1455,10 +1515,10 @@ fn withdrawal_coin_not_produced_by_split_coins_fails() {
     );
 }
 
-fn redeemed_coin_withdrawal_tx(withdrawal: FundsWithdrawalArg) -> TransactionData {
+fn redeemed_coin_withdrawal_tx(withdrawal: FundsWithdrawal) -> Transaction {
     let mut tx = top_up_withdrawal_tx();
     let pt = programmable(&mut tx);
-    pt.inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] = CallArg::FundsWithdrawal(withdrawal);
+    pt.inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] = Input::FundsWithdrawal(withdrawal);
     pt.commands = vec![
         pt.commands[0].clone(),
         framework_call(
@@ -1479,17 +1539,17 @@ fn redeemed_coin_withdrawal_tx(withdrawal: FundsWithdrawalArg) -> TransactionDat
     tx
 }
 
-fn hbtc_from_sender(amount: u64) -> FundsWithdrawalArg {
-    FundsWithdrawalArg::balance_from_sender(
+fn hbtc_from_sender(amount: u64) -> FundsWithdrawal {
+    balance_from_sender(
         amount,
-        sui_types::parse_sui_type_tag(&hbtc_type()).unwrap(),
+        parse_type_tag(&hbtc_type()).unwrap(),
     )
 }
 
-fn hbtc_from_sponsor(amount: u64) -> FundsWithdrawalArg {
-    FundsWithdrawalArg::balance_from_sponsor(
+fn hbtc_from_sponsor(amount: u64) -> FundsWithdrawal {
+    balance_from_sponsor(
         amount,
-        sui_types::parse_sui_type_tag(&hbtc_type()).unwrap(),
+        parse_type_tag(&hbtc_type()).unwrap(),
     )
 }
 
@@ -1513,9 +1573,9 @@ fn withdrawal_of_a_redeemed_coin_shows_the_reserved_amount() {
 
 #[test]
 fn withdrawal_of_a_redeemed_coin_of_a_foreign_type_fails() {
-    let tx = redeemed_coin_withdrawal_tx(FundsWithdrawalArg::balance_from_sender(
+    let tx = redeemed_coin_withdrawal_tx(balance_from_sender(
         25_000_000,
-        sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap(),
+        parse_type_tag("0x2::sui::SUI").unwrap(),
     ));
 
     expect_error(
@@ -1530,7 +1590,7 @@ fn withdrawal_of_a_redeemed_coin_split_before_use_fails() {
     insert_command(
         &mut tx,
         REDEEMED_COIN_INTO_BALANCE_COMMAND,
-        Command::SplitCoins(result(0), vec![Argument::Input(TOP_UP_SPLIT_AMOUNT_INPUT)]),
+        split_coins(result(0), vec![Argument::Input(TOP_UP_SPLIT_AMOUNT_INPUT)]),
     );
 
     expect_error(
@@ -1545,7 +1605,7 @@ fn withdrawal_of_a_redeemed_coin_merged_into_before_use_fails() {
     insert_command(
         &mut tx,
         REDEEMED_COIN_INTO_BALANCE_COMMAND,
-        Command::MergeCoins(result(0), vec![Argument::Input(TOP_UP_HBTC_COIN_INPUT)]),
+        merge_coins(result(0), vec![Argument::Input(TOP_UP_HBTC_COIN_INPUT)]),
     );
 
     expect_error(
@@ -1556,9 +1616,9 @@ fn withdrawal_of_a_redeemed_coin_merged_into_before_use_fails() {
 
 #[test]
 fn withdrawal_of_a_redeemed_coin_from_the_sponsor_fails() {
-    let tx = redeemed_coin_withdrawal_tx(FundsWithdrawalArg::balance_from_sponsor(
+    let tx = redeemed_coin_withdrawal_tx(balance_from_sponsor(
         25_000_000,
-        sui_types::parse_sui_type_tag(&hbtc_type()).unwrap(),
+        parse_type_tag(&hbtc_type()).unwrap(),
     ));
 
     expect_error(
@@ -1583,9 +1643,8 @@ fn withdrawal_with_a_split_amount_index_out_of_range_fails() {
 fn withdrawal_of_a_foreign_coin_type_fails() {
     let mut tx = withdrawal_tx();
     move_call(&mut tx, INTO_BALANCE_COMMAND).type_arguments[0] =
-        sui_types::parse_sui_type_tag("0x2::sui::SUI")
-            .unwrap()
-            .into();
+        parse_type_tag("0x2::sui::SUI")
+            .unwrap();
 
     expect_error(
         visualize(tx, WITHDRAWAL_COMMAND),
@@ -1633,28 +1692,34 @@ const TESTNET_HASHI_OBJECT: &str =
 /// The same transaction against the mainnet deployment. Mainnet runs the same
 /// code as testnet, so only the package, the `Hashi` object and the `BTC` type
 /// differ.
-fn on_mainnet(mut tx: TransactionData) -> TransactionData {
-    let testnet = ObjectID::from_hex_literal(HASHI_PACKAGE).unwrap();
-    let mainnet = ObjectID::from_hex_literal(MAINNET_PACKAGE).unwrap();
-    let to_mainnet_type = |tag: &sui_types::TypeTag| {
-        sui_types::parse_sui_type_tag(
-            &tag.to_canonical_string(true)
-                .replace(&testnet.to_hex(), &mainnet.to_hex()),
+fn on_mainnet(mut tx: Transaction) -> Transaction {
+    let testnet = package_literal(HASHI_PACKAGE);
+    let mainnet = package_literal(MAINNET_PACKAGE);
+    let to_mainnet_type = |tag: &TypeTag| {
+        parse_type_tag(
+            &crate::types::type_tag_to_canonical_string(tag)
+                .replace(&testnet.to_string()[2..], &mainnet.to_string()[2..]),
         )
         .unwrap()
     };
     let pt = programmable(&mut tx);
     for input in &mut pt.inputs {
         match input {
-            CallArg::Object(ObjectArg::SharedObject { id, .. })
-                if *id == ObjectID::from_hex_literal(TESTNET_HASHI_OBJECT).unwrap() =>
+            Input::Shared(shared)
+                if shared.object_id() == package_literal(TESTNET_HASHI_OBJECT) =>
             {
-                *id = ObjectID::from_hex_literal(MAINNET_HASHI_OBJECT).unwrap();
+                *shared = SharedInput::new(
+                    package_literal(MAINNET_HASHI_OBJECT),
+                    shared.version(),
+                    shared.mutability(),
+                );
             }
-            CallArg::FundsWithdrawal(withdrawal) => {
-                let sui_types::transaction::WithdrawalTypeArg::Balance(tag) = &withdrawal.type_arg;
-                withdrawal.type_arg =
-                    sui_types::transaction::WithdrawalTypeArg::Balance(to_mainnet_type(tag));
+            Input::FundsWithdrawal(withdrawal) => {
+                *withdrawal = FundsWithdrawal::new(
+                    withdrawal.amount().unwrap(),
+                    to_mainnet_type(withdrawal.coin_type()),
+                    withdrawal.source(),
+                );
             }
             _ => {}
         }
@@ -1665,19 +1730,16 @@ fn on_mainnet(mut tx: TransactionData) -> TransactionData {
                 call.package = mainnet;
             }
             for type_argument in &mut call.type_arguments {
-                *type_argument = to_mainnet_type(&type_argument.to_type_tag().unwrap()).into();
+                *type_argument = to_mainnet_type(type_argument);
             }
         }
     }
     tx
 }
 
-fn hashi_can_handle(tx: TransactionData, command: usize) -> bool {
-    let block_data = SuiTransactionBlockData::try_from_with_module_cache(
-        tx,
-        &SyncModuleCache::new(SuiModuleResolver),
-    )
-    .unwrap();
+#[allow(clippy::needless_pass_by_value)]
+fn hashi_can_handle(tx: Transaction, command: usize) -> bool {
+    let block_data = block_data(&tx);
     let SuiTransactionBlockKind::ProgrammableTransaction(pt) = block_data.transaction() else {
         panic!("expected a programmable transaction");
     };
@@ -1691,12 +1753,12 @@ fn calls_to_a_configured_package_are_handled_and_others_are_not() {
     assert!(hashi_can_handle(withdrawal_tx(), WITHDRAWAL_COMMAND));
 
     let mut unconfigured = withdrawal_tx();
-    move_call(&mut unconfigured, WITHDRAWAL_COMMAND).package = ObjectID::from_single_byte(0x42);
+    move_call(&mut unconfigured, WITHDRAWAL_COMMAND).package = package_id(0x42);
     assert!(!hashi_can_handle(unconfigured, WITHDRAWAL_COMMAND));
 
     let mut unsupported_function = withdrawal_tx();
     move_call(&mut unsupported_function, WITHDRAWAL_COMMAND).function =
-        "approve_request".to_string();
+        ident("approve_request");
     assert!(!hashi_can_handle(unsupported_function, WITHDRAWAL_COMMAND));
 }
 
@@ -1765,7 +1827,7 @@ fn testnet_hbtc_withdrawn_to_the_mainnet_package_fails() {
     // The mainnet call with the testnet `BTC` type: the networks never mix.
     let mut tx = on_mainnet(redeem_withdrawal_tx());
     programmable(&mut tx).inputs[usize::from(FUNDS_WITHDRAWAL_INPUT)] =
-        CallArg::FundsWithdrawal(hbtc_from_sender(30_000));
+        Input::FundsWithdrawal(hbtc_from_sender(30_000));
     expect_error(
         visualize(tx, REDEEM_WITHDRAWAL_COMMAND),
         &format!("Funds withdrawal is not denominated in {MAINNET_PACKAGE}::btc::BTC"),
@@ -2048,7 +2110,7 @@ fn batched_deposits_keep_the_generic_title_and_one_card_each() {
 fn withdrawal_sending_change_to_another_address_keeps_the_generic_title() {
     let mut tx = top_up_withdrawal_tx();
     programmable(&mut tx).inputs[TOP_UP_CHANGE_RECIPIENT_INPUT] =
-        CallArg::Pure(bcs::to_bytes(&[0x42u8; 32]).unwrap());
+        Input::Pure(bcs::to_bytes(&[0x42u8; 32]).unwrap());
 
     let payload = payload_of(&tx);
 
@@ -2072,28 +2134,28 @@ fn withdrawal_alongside_an_unrelated_call_keeps_the_generic_title() {
     assert_eq!(payload.title, "Programmable Transaction");
 }
 
-fn shared_coin_input(tx: &mut TransactionData) -> Argument {
+fn shared_coin_input(tx: &mut Transaction) -> Argument {
     let inputs = &mut programmable(tx).inputs;
-    inputs.push(CallArg::Object(ObjectArg::SharedObject {
-        id: ObjectID::from_single_byte(0x5c),
-        initial_shared_version: SequenceNumber::from_u64(1),
-        mutability: SharedObjectMutability::Mutable,
-    }));
+    inputs.push(Input::Shared(SharedInput::new(
+        package_id(0x5c),
+        1,
+        Mutability::Mutable,
+    )));
     Argument::Input(u16::try_from(inputs.len() - 1).unwrap())
 }
 
-fn push_input(tx: &mut TransactionData, input: CallArg) -> Argument {
+fn push_input(tx: &mut Transaction, input: Input) -> Argument {
     let inputs = &mut programmable(tx).inputs;
     inputs.push(input);
     Argument::Input(u16::try_from(inputs.len() - 1).unwrap())
 }
 
-fn sui_from(amount: u64, sponsor: bool) -> FundsWithdrawalArg {
-    let sui = sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap();
+fn sui_from(amount: u64, sponsor: bool) -> FundsWithdrawal {
+    let sui = parse_type_tag("0x2::sui::SUI").unwrap();
     if sponsor {
-        FundsWithdrawalArg::balance_from_sponsor(amount, sui)
+        balance_from_sponsor(amount, sui)
     } else {
-        FundsWithdrawalArg::balance_from_sender(amount, sui)
+        balance_from_sender(amount, sui)
     }
 }
 
@@ -2101,9 +2163,9 @@ fn sui_from(amount: u64, sponsor: bool) -> FundsWithdrawalArg {
 fn withdrawal_merging_into_a_coin_the_signer_does_not_own_keeps_the_generic_title() {
     let mut into_shared = withdrawal_tx();
     let shared = shared_coin_input(&mut into_shared);
-    for (mut tx, destination) in [(into_shared, shared), (withdrawal_tx(), Argument::GasCoin)] {
+    for (mut tx, destination) in [(into_shared, shared), (withdrawal_tx(), Argument::Gas)] {
         programmable(&mut tx).commands[0] =
-            Command::MergeCoins(destination, vec![Argument::Input(1)]);
+            merge_coins(destination, vec![Argument::Input(1)]);
         assert_eq!(payload_of(&tx).title, "Programmable Transaction");
     }
 }
@@ -2112,9 +2174,9 @@ fn withdrawal_merging_into_a_coin_the_signer_does_not_own_keeps_the_generic_titl
 fn withdrawal_merging_into_a_coin_redeemed_in_the_transaction_keeps_the_bridge_title() {
     let mut tx = top_up_withdrawal_tx();
     let pt = programmable(&mut tx);
-    pt.commands[1] = Command::MergeCoins(result(0), vec![Argument::Input(TOP_UP_HBTC_COIN_INPUT)]);
+    pt.commands[1] = merge_coins(result(0), vec![Argument::Input(TOP_UP_HBTC_COIN_INPUT)]);
     pt.commands[2] =
-        Command::SplitCoins(result(0), vec![Argument::Input(TOP_UP_SPLIT_AMOUNT_INPUT)]);
+        split_coins(result(0), vec![Argument::Input(TOP_UP_SPLIT_AMOUNT_INPUT)]);
     move_call(&mut tx, 4).arguments[0] = result(0);
 
     assert_eq!(payload_of(&tx).title, WITHDRAWAL_TITLE);
@@ -2123,11 +2185,11 @@ fn withdrawal_merging_into_a_coin_redeemed_in_the_transaction_keeps_the_bridge_t
 #[test]
 fn deposit_alongside_a_split_of_the_gas_coin_keeps_the_generic_title() {
     let mut tx = deposit_tx();
-    let sender = tx.sender();
+    let sender = tx.sender;
     let to_sender = push_pure_input(&mut tx, bcs::to_bytes(&sender).unwrap());
     let amount = push_pure_input(&mut tx, bcs::to_bytes(&1u64).unwrap());
     let commands = &mut programmable(&mut tx).commands;
-    commands.push(Command::SplitCoins(Argument::GasCoin, vec![amount]));
+    commands.push(split_coins(Argument::Gas, vec![amount]));
     commands.push(framework_call(
         SUI_FRAMEWORK,
         "coin",
@@ -2143,9 +2205,9 @@ fn deposit_alongside_a_split_of_the_gas_coin_keeps_the_generic_title() {
 fn deposit_alongside_redeemed_funds_keeps_the_bridge_title_only_when_the_signer_pays() {
     for (sponsor, title) in [(false, DEPOSIT_TITLE), (true, "Programmable Transaction")] {
         let mut tx = deposit_tx();
-        let sender = tx.sender();
+        let sender = tx.sender;
         let to_sender = push_pure_input(&mut tx, bcs::to_bytes(&sender).unwrap());
-        let withdrawal = push_input(&mut tx, CallArg::FundsWithdrawal(sui_from(10, sponsor)));
+        let withdrawal = push_input(&mut tx, Input::FundsWithdrawal(sui_from(10, sponsor)));
         let commands = &mut programmable(&mut tx).commands;
         commands.push(framework_call(
             SUI_FRAMEWORK,
@@ -2169,7 +2231,7 @@ fn deposit_alongside_redeemed_funds_keeps_the_bridge_title_only_when_the_signer_
 #[test]
 fn withdrawal_alongside_other_commands_or_lookalike_calls_keeps_the_generic_title() {
     let extras: [fn(Argument) -> Command; 3] = [
-        |_| Command::MakeMoveVec(None, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
+        |_| make_move_vec(None, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
         |recipient| {
             framework_call(
                 0x42,
@@ -2191,7 +2253,7 @@ fn withdrawal_alongside_other_commands_or_lookalike_calls_keeps_the_generic_titl
     ];
     for extra in extras {
         let mut tx = withdrawal_tx();
-        let sender = tx.sender();
+        let sender = tx.sender;
         let recipient = push_pure_input(&mut tx, bcs::to_bytes(&sender).unwrap());
         programmable(&mut tx).commands.push(extra(recipient));
         assert_eq!(payload_of(&tx).title, "Programmable Transaction");
@@ -2227,7 +2289,7 @@ fn format_btc_trims_trailing_zeros() {
     assert_eq!(format_btc(u64::MAX), "184467440737.09551615");
 }
 
-fn cancel_tx(digest: &str) -> TransactionData {
+fn cancel_tx(digest: &str) -> Transaction {
     fixture_tx("withdraw", "cancel_withdrawal", digest)
 }
 
@@ -2344,8 +2406,8 @@ fn cancellation_refunded_by_another_route_fails() {
 
     // The transfer also moves another object, which the preview would not show.
     let mut tx = cancel_tx(CANCEL_TRANSFER_DIGEST);
-    programmable(&mut tx).commands[REFUND_COMMAND] = Command::TransferObjects(
-        vec![result(FROM_BALANCE_COMMAND), Argument::GasCoin],
+    programmable(&mut tx).commands[REFUND_COMMAND] = transfer_objects(
+        vec![result(FROM_BALANCE_COMMAND), Argument::Gas],
         Argument::Input(REFUND_RECIPIENT_INPUT),
     );
     expect_error(visualize(tx, CANCEL_COMMAND), UNSUPPORTED_REFUND);
@@ -2353,7 +2415,7 @@ fn cancellation_refunded_by_another_route_fails() {
     // The refund is converted to a coin of another type.
     let mut tx = cancel_tx(CANCEL_SEND_FUNDS_DIGEST);
     move_call(&mut tx, FROM_BALANCE_COMMAND).type_arguments =
-        vec![sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap().into()];
+        vec![parse_type_tag("0x2::sui::SUI").unwrap()];
     expect_error(visualize(tx, CANCEL_COMMAND), UNSUPPORTED_REFUND);
 }
 
@@ -2363,7 +2425,7 @@ fn cancellation_whose_refund_is_used_twice_fails() {
     let recipient = Argument::Input(REFUND_RECIPIENT_INPUT);
     programmable(&mut tx)
         .commands
-        .push(Command::TransferObjects(vec![result(FROM_BALANCE_COMMAND)], recipient));
+        .push(transfer_objects(vec![result(FROM_BALANCE_COMMAND)], recipient));
     expect_error(
         visualize(tx, CANCEL_COMMAND),
         "The refund coin from command 1 must be used by exactly one later command",
@@ -2425,9 +2487,9 @@ fn cancellations_transferred_to_one_shared_recipient_input_render() {
     let mut second_from_balance = move_call(&mut tx, FROM_BALANCE_COMMAND).clone();
     second_from_balance.arguments[0] = result(REFUND_COMMAND + 1);
     let commands = &mut programmable(&mut tx).commands;
-    commands.push(Command::MoveCall(Box::new(second_cancel)));
-    commands.push(Command::MoveCall(Box::new(second_from_balance)));
-    commands.push(Command::TransferObjects(
+    commands.push(Command::MoveCall(second_cancel));
+    commands.push(Command::MoveCall(second_from_balance));
+    commands.push(transfer_objects(
         vec![result(REFUND_COMMAND + 2)],
         Argument::Input(REFUND_RECIPIENT_INPUT),
     ));

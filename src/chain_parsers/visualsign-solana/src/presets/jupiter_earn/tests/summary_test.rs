@@ -11,14 +11,16 @@ use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 use crate::intermediate::{RegisteredSource, SolanaIntermediateOutput};
 use crate::test_utils::payload_from_b64;
 use base64::Engine;
-use solana_sdk::{
-    hash::Hash,
-    instruction::Instruction,
-    message::{AddressLookupTableAccount, Message, VersionedMessage, v0},
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{Transaction, VersionedTransaction},
-};
+use solana_hash::Hash;
+use solana_instruction::Instruction;
+use solana_message::AddressLookupTableAccount;
+use solana_message::Message;
+use solana_message::VersionedMessage;
+use solana_message::v0;
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_transaction::Transaction;
+use solana_transaction::versioned::VersionedTransaction;
 use std::str::FromStr;
 use visualsign::vsptrait::{Transaction as _, VisualSignConverter, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
@@ -188,16 +190,16 @@ fn test_infrastructure_legs_keep_the_summary() {
     let payer = deposit.accounts[0].pubkey;
     let f_token_mint = deposit.accounts[6].pubkey;
     let create_ata =
-        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+        crate::presets::associated_token_account::interface::create_associated_token_account_idempotent(
             &payer,
             &payer,
             &f_token_mint,
-            &spl_token::id(),
+            &spl_token_interface::id(),
         );
     let compute_limit =
-        solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
+        solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
     let compute_price =
-        solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_price(50_000);
+        solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_price(50_000);
 
     let payload = payload_for(&[compute_limit, compute_price, create_ata, deposit], &payer);
 
@@ -235,7 +237,9 @@ fn test_uncapped_priority_fee_is_hoisted_as_a_maximum() {
     let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
     let payer = deposit.accounts[0].pubkey;
     let compute_price =
-        solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_price(1_000_000_000);
+        solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_price(
+            1_000_000_000,
+        );
 
     let payload = payload_for(&[compute_price, deposit], &payer);
 
@@ -255,7 +259,7 @@ fn test_summary_without_a_unit_price_has_no_fee_row() {
     let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
     let payer = deposit.accounts[0].pubkey;
     let compute_limit =
-        solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
+        solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
 
     let payload = payload_for(&[compute_limit, deposit], &payer);
 
@@ -277,7 +281,7 @@ fn test_forged_token_program_keeps_default_title() {
     let bogus_token_program = Pubkey::new_unique();
     deposit.accounts[14].pubkey = bogus_token_program; // `token_program`
     deposit.accounts[2].pubkey =
-        spl_associated_token_account::get_associated_token_address_with_program_id(
+        crate::presets::associated_token_account::interface::get_associated_token_address_with_program_id(
             &payer,
             &f_token_mint,
             &bogus_token_program,
@@ -303,11 +307,11 @@ fn test_ata_creation_for_another_wallet_keeps_default_title() {
     let f_token_mint = deposit.accounts[6].pubkey;
     let someone_else = Pubkey::new_unique();
     let create_ata =
-        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+        crate::presets::associated_token_account::interface::create_associated_token_account_idempotent(
             &payer,
             &someone_else,
             &f_token_mint,
-            &spl_token::id(),
+            &spl_token_interface::id(),
         );
 
     let payload = payload_for(&[create_ata, deposit], &payer);
@@ -345,11 +349,11 @@ fn test_ata_creation_funded_by_another_signer_keeps_default_title() {
     let f_token_mint = deposit.accounts[6].pubkey;
     let other_funder = Pubkey::new_unique();
     let create_ata =
-        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+        crate::presets::associated_token_account::interface::create_associated_token_account_idempotent(
             &other_funder,
             &payer,
             &f_token_mint,
-            &spl_token::id(),
+            &spl_token_interface::id(),
         );
 
     let payload = payload_for(&[create_ata, deposit], &payer);
@@ -365,8 +369,8 @@ fn test_deposit_plus_token_transfer_keeps_default_title() {
     let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
     let payer = deposit.accounts[0].pubkey;
     let source_ata = deposit.accounts[1].pubkey;
-    let transfer = spl_token::instruction::transfer(
-        &spl_token::id(),
+    let transfer = spl_token_interface::instruction::transfer(
+        &spl_token_interface::id(),
         &source_ata,
         &Pubkey::new_unique(),
         &payer,
@@ -385,7 +389,8 @@ fn test_deposit_plus_token_transfer_keeps_default_title() {
 fn test_deposit_plus_sol_transfer_keeps_default_title() {
     let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
     let payer = deposit.accounts[0].pubkey;
-    let transfer = solana_sdk::system_instruction::transfer(&payer, &Pubkey::new_unique(), 1_000);
+    let transfer =
+        solana_system_interface::instruction::transfer(&payer, &Pubkey::new_unique(), 1_000);
 
     let payload = payload_for(&[transfer, deposit], &payer);
 
@@ -547,9 +552,9 @@ fn test_v0_deposit_with_unverifiable_recipient_keeps_default_title() {
 #[test]
 fn test_each_user_action_family_proposes_a_summary() {
     let payer = Pubkey::new_unique();
-    let token_program = spl_token::id();
+    let token_program = spl_token_interface::id();
     let own_ata = |mint: &str| {
-        spl_associated_token_account::get_associated_token_address_with_program_id(
+        crate::presets::associated_token_account::interface::get_associated_token_address_with_program_id(
             &payer,
             &Pubkey::from_str(mint).unwrap(),
             &token_program,

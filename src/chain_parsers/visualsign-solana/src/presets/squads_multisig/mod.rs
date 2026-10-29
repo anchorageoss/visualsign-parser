@@ -7,12 +7,12 @@ use crate::core::{
     VisualizerKind, available_visualizers, visualize_with_any,
 };
 use config::SquadsMultisigConfig;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_parser::solana::structs::SolanaAccount;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::instruction::{AccountMeta, Instruction};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use visualsign::errors::VisualSignError;
@@ -562,7 +562,7 @@ fn visualize_inner_instructions(
             )?);
             continue;
         };
-        let compiled = solana_sdk::instruction::CompiledInstruction {
+        let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
             accounts: (1..=num_accounts).collect(),
             data: instruction.data.clone(),
@@ -899,7 +899,7 @@ mod tests {
             writable: false,
         };
         let account_keys = vec![make_pubkey(1)];
-        let compiled = solana_sdk::instruction::CompiledInstruction {
+        let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
             accounts: vec![],
             data: vec![],
@@ -953,7 +953,7 @@ mod tests {
             writable: false,
         };
         let account_keys = vec![make_pubkey(1)];
-        let compiled = solana_sdk::instruction::CompiledInstruction {
+        let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
             accounts: vec![],
             data: vec![],

@@ -3,9 +3,9 @@
 use crate::core::VisualizerContext;
 use crate::utils::pure_bcs_bytes;
 
-use move_core_types::language_storage::TypeTag;
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
-use sui_types::base_types::{ObjectID, SuiAddress};
+use crate::types::{
+    ObjectID, SuiAddress, SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall, TypeTag,
+};
 use visualsign::errors::VisualSignError;
 
 pub(super) fn missing(message: impl Into<String>) -> VisualSignError {
@@ -25,8 +25,8 @@ pub(super) fn is_call(
 
 pub(super) fn type_matches(actual: &str, expected: &str) -> bool {
     match (
-        sui_types::parse_sui_type_tag(actual),
-        sui_types::parse_sui_type_tag(expected),
+        actual.parse::<TypeTag>(),
+        expected.parse::<TypeTag>(),
     ) {
         (Ok(actual), Ok(expected)) => actual == expected,
         _ => false,

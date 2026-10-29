@@ -7,8 +7,8 @@ use crate::utils::{
     decode_number, get_index, parse_numeric_argument, parse_result_command_index, truncate_address,
 };
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
-use sui_types::base_types::SuiAddress;
+use crate::types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
+use crate::types::SuiAddress;
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
