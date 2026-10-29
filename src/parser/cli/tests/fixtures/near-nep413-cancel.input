@@ -1,0 +1,7 @@
+decode
+--chain
+near
+-o
+json
+-t
+{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2100-01-01T00:00:00Z\",\"intents\":[]}","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"intents.near"}

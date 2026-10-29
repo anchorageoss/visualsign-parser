@@ -26,6 +26,15 @@ impl SettlementNetwork {
             Self::Testnet => "NEAR_TESTNET",
         }
     }
+
+    /// The NEAR Intents verifier contract deployed on this network.
+    #[must_use]
+    pub fn verifier(self) -> &'static str {
+        match self {
+            Self::Mainnet => crate::INTENTS_RECEIVER,
+            Self::Testnet => "intents.testnet",
+        }
+    }
 }
 
 /// Detects an account whose top-level suffix contradicts the resolved network

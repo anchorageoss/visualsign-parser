@@ -390,11 +390,6 @@ fn decode_intents(
     .map_err(intents_error)
 }
 
-/// Surface an intents-decode failure, keeping a network mismatch a validation
-/// error. It is the same condition the transaction's own accounts raise at
-/// [`crate::networks::network_mismatch`], so it carries the same error class
-/// rather than becoming a conversion failure because it arrived one layer
-/// deeper.
 /// Render a NEP-413 off-chain message envelope.
 ///
 /// NEP-413 wraps an arbitrary `message`, so the envelope says who the message is
@@ -402,9 +397,13 @@ fn decode_intents(
 /// intents render too: a signer approving a token movement has to see the
 /// movement rather than an escaped JSON string.
 ///
-/// The extracted payload is re-serialized and passed to the intents entry point
-/// rather than rendered by a direct call, so the `defuse-*` types stay confined
-/// to `presets::intents` as that module's own documentation requires.
+/// The extracted payload is re-serialized and passed to the intents crate's
+/// byte-level entry point, the same one every other path renders through, so
+/// the intents render keeps a public API free of `defuse-*` types. (Decoding
+/// the envelope, in `tx.rs`, does use `defuse_core` and `defuse_nep413`
+/// directly.) The re-encoding drops an empty `intents` list, which is fine:
+/// a payload is classified by its envelope keys, so it still renders as the
+/// cancel it is.
 ///
 /// Every row the envelope itself supplies carries a `NEP-413` label prefix.
 /// `extract_defuse_payload` derives `verifying_contract` from `recipient` and
@@ -502,6 +501,11 @@ fn render_nep413_envelope(
     )))
 }
 
+/// Surface an intents-decode failure, keeping a network mismatch a validation
+/// error. It is the same condition the transaction's own accounts raise at
+/// [`crate::networks::network_mismatch`], so it carries the same error class
+/// rather than becoming a conversion failure because it arrived one layer
+/// deeper.
 fn intents_error(e: NearIntentsError) -> VisualSignError {
     match e {
         NearIntentsError::NetworkMismatch(mismatch) => VisualSignError::ValidationError(mismatch),
@@ -1581,28 +1585,96 @@ mod tests {
     }
 
     /// The enum is public, so a NEP-413 envelope built directly reaches the
-    /// converter without string decoding. A message that shares an intents
-    /// request's `signer_id` and `deadline` but names no `intents` renders as
-    /// the text it is, not as an empty intents request and not refused for
-    /// its `action` key.
+    /// converter without string decoding. A message with an intents request's
+    /// `signer_id` and `deadline` but an undeclared `action` key is refused,
+    /// not shown as text: without `intents` it extracts as a cancel, which the
+    /// `action` key would ride along with unseen. JSON without those keys is
+    /// still free text.
     #[test]
-    fn nep413_json_message_without_intents_renders_as_text() {
+    fn nep413_json_message_with_the_intents_keys_and_an_undeclared_key_is_refused() {
         let message =
             r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","action":"login"}"#;
+        let err = NearVisualSignConverter::new()
+            .to_visual_sign_payload(
+                NearTransaction::Nep413(nep413_envelope(message, "intents.near", None)),
+                VisualSignOptions::default(),
+            )
+            .expect_err("an undeclared key in an intents message must be refused");
+        assert!(err.to_string().contains("\"action\""), "{err}");
+
+        let free = r#"{"greeting":"hi","action":"login"}"#;
         let payload = render_nep413(
-            nep413_envelope(message, "app.example.com", None),
+            nep413_envelope(free, "app.example.com", None),
             VisualSignOptions::default(),
         );
         assert_eq!(payload.title, "NEAR Message");
         assert_eq!(
             labeled_text(&payload, "NEP-413 Message"),
-            escape_display_text(message)
+            escape_display_text(free)
         );
-        assert!(
-            payload.fields.iter().all(|f| f.label() != "Intent"),
-            "{:?}",
-            payload.fields
-        );
+    }
+
+    /// A cancel is signable over NEP-413 too. `"intents": []` used to fail
+    /// here: the extracted payload is re-encoded for the intents render, and
+    /// `DefuseIntents` drops an empty list when it serializes, so the re-encoded
+    /// JSON had no `intents` key and was classified as not intents. Both the
+    /// empty and the absent form render as a cancel with the signer,
+    /// verifying contract, deadline and nonce.
+    #[test]
+    fn nep413_message_without_intents_renders_as_a_cancel() {
+        for message in [
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":[]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z"}"#,
+        ] {
+            let envelope = nep413_envelope(message, "intents.near", None);
+            let tx = <NearTransaction as visualsign::vsptrait::Transaction>::from_string(&envelope)
+                .unwrap_or_else(|e| panic!("{message}: {e}"));
+            let payload = NearVisualSignConverter::new()
+                .to_visual_sign_payload(tx, VisualSignOptions::default())
+                .unwrap_or_else(|e| panic!("{message}: {e}"))
+                .payload;
+            assert_eq!(payload.title, "Cancel: invalidate nonce", "{message}");
+            assert_eq!(payload.payload_type, "NearMessage");
+            assert_eq!(labeled_text(&payload, "Signer"), "alice.near");
+            assert_eq!(labeled_text(&payload, "Verifying Contract"), "intents.near");
+            assert_eq!(
+                labeled_text(&payload, "Deadline"),
+                "2999-01-01T00:00:00+00:00"
+            );
+            assert_eq!(
+                labeled_text(&payload, "Nonce"),
+                "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f"
+            );
+            assert!(
+                payload.fields.iter().any(|f| {
+                    crate::presets::intents::test_support::is_warning_diagnostic(f, "empty-intents")
+                }),
+                "{message}: expected the nonce-only warning"
+            );
+        }
+    }
+
+    /// NEP-413 takes the verifying contract from its `recipient`, so intents
+    /// addressed elsewhere render like a normal intent. The verifier rejects
+    /// them, but the signer is told.
+    #[test]
+    fn nep413_intents_for_another_recipient_are_flagged() {
+        let flagged = |recipient: &str| {
+            render_nep413(
+                nep413_envelope(&nep413_intents_message("alice.near"), recipient, None),
+                VisualSignOptions::default(),
+            )
+            .fields
+            .iter()
+            .any(|f| {
+                crate::presets::intents::test_support::is_warning_diagnostic(
+                    f,
+                    "verifying-contract",
+                )
+            })
+        };
+        assert!(flagged("app.example.com"));
+        assert!(!flagged("intents.near"));
     }
 
     /// A NEP-413 envelope whose message carries intents renders the intents.
