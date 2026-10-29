@@ -389,6 +389,7 @@ pub enum Chain {
     Sui = 4,
     Tron = 5,
     Near = 6,
+    Zcash = 7,
     /// Custom for extensibility
     Custom = 999,
 }
@@ -406,6 +407,7 @@ impl Chain {
             Chain::Sui => "CHAIN_SUI",
             Chain::Tron => "CHAIN_TRON",
             Chain::Near => "CHAIN_NEAR",
+            Chain::Zcash => "CHAIN_ZCASH",
             Chain::Custom => "CHAIN_CUSTOM",
         }
     }
@@ -419,6 +421,7 @@ impl Chain {
             "CHAIN_SUI" => Some(Self::Sui),
             "CHAIN_TRON" => Some(Self::Tron),
             "CHAIN_NEAR" => Some(Self::Near),
+            "CHAIN_ZCASH" => Some(Self::Zcash),
             "CHAIN_CUSTOM" => Some(Self::Custom),
             _ => None,
         }

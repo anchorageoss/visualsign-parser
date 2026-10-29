@@ -24,7 +24,7 @@ PARSER_APP_CHAINS := $(sort $(patsubst visualsign-%,%,$(notdir $(wildcard chain_
 # derived from chain_parsers/* -- parser_cli only wires up chains that have a
 # ChainPlugin registered (see parser/cli/src/), which sui and unspecified
 # don't yet, so a subset is the actual rule and a literal list says so.
-PARSER_CLI_CHAINS := bitcoin ethereum near solana tron
+PARSER_CLI_CHAINS := bitcoin ethereum near solana tron zcash
 
 .PHONY: all
 all: generated
@@ -51,6 +51,9 @@ test: build
 	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test --no-fail-fast -p parser_cli --all-targets
+	@# zcash is not a default feature, but visualsign-zcash is consumed as a
+	@# library elsewhere; run the CLI's zcash fixtures with every chain on.
+	cargo test --no-fail-fast -p parser_cli --features zcash --all-targets
 	cargo test --no-fail-fast -p visualsign --features diagnostics --lib
 	cargo test --no-fail-fast -p parser_cli_core --features diagnostics --lib
 	cargo test --no-fail-fast -p visualsign-near --features diagnostics --lib
@@ -100,6 +103,7 @@ lint: fmt-check
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
+	cargo clippy -p parser_cli --features zcash --all-targets -- -D warnings
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
 	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
