@@ -90,7 +90,7 @@ ChainMetadata: &pb.ChainMetadata{
 }
 ```
 
-## Solana: Program IDL
+## Solana: Program IDL and fee cap
 
 For Solana programs, provide the Anchor IDL to decode instructions:
 
@@ -142,6 +142,22 @@ ChainMetadata: &pb.ChainMetadata{
 |------|-------------|
 | `SOLANA_IDL_TYPE_ANCHOR` | Anchor framework IDL |
 | `SOLANA_IDL_TYPE_SHANK` | Shank IDL format |
+
+### Fee cap
+
+Every Solana payload shows the fee cap in force: the most the transaction can pay in base fee plus priority fee. Send `max_fee_lamports` to set it for one transaction, for example to the fee your wallet quoted, and the row is labelled "Max Fee". Without it the parser applies its default cap of 0.1 SOL and labels the row "Max Fee (default)". The parser rejects the request when the transaction commits to more than the cap in force, so the row is always a true upper bound. With `include_intermediate_output`, the cap in force is also the trailing `max_fee_lamports` field of the Solana intermediate output. If you rewrite the compute budget instructions after parsing, for example to re-price at signing time, the fee this cap bounds changes, so re-check the final fee against the cap yourself.
+
+```go
+ChainMetadata: &pb.ChainMetadata{
+    Metadata: &pb.ChainMetadata_Solana{
+        Solana: &pb.SolanaMetadata{
+            MaxFeeLamports: proto.Uint64(5105000), // 0.005105 SOL
+        },
+    },
+}
+```
+
+Over the HTTP gateway the same field is the camelCase key `maxFeeLamports`, as a JSON number or a decimal string.
 
 ## NEAR: Token Metadata
 

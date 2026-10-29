@@ -243,6 +243,15 @@ async fn parser_solana_native_transfer_e2e() {
                     "Type": "text_v2"
                 },
                 {
+                    "AmountV2": {
+                        "Abbreviation": "SOL",
+                        "Amount": "0.1"
+                    },
+                    "FallbackText": "0.1 SOL",
+                    "Label": "Max Fee (default)",
+                    "Type": "amount_v2"
+                },
+                {
                     "FallbackText": "Transfer 1: From HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD To 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73 For 1000000000",
                     "Label": "Transfer 1",
                     "TextV2": {
