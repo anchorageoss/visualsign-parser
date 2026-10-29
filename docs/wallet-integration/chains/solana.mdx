@@ -1,0 +1,42 @@
+---
+title: Solana for Wallets
+description: What a Solana wallet must do when it shows and signs an off-chain message the parser rendered
+---
+
+This page covers signing a Solana off-chain message (`signMessage`) with the parser's help. Transactions need nothing beyond the [chain-agnostic flow](../core-concepts/how-parsing-works). For the envelope format and what the parser refuses, see [Off-chain messages](/chains/solana#off-chain-messages).
+
+## Request
+
+Send the envelope as the transaction string, with the chain set to Solana:
+
+```json
+{"message": "Sign in to app.example.com\nNonce: 42", "signerAddress": "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT"}
+```
+
+`message` is the exact text the dApp asked to sign. `signerAddress` is the account the wallet will sign with.
+
+## Response
+
+`payload_type` is `SolanaMessage`, distinct from `SolanaTx`, so a wallet can tell a message from a transaction without looking at the fields. The title is `Solana Message`, and there are two fields:
+
+| Label | Field type | Value |
+| --- | --- | --- |
+| `Message` | text | The message, escaped (see below) |
+| `Signing Address` | address | `signerAddress`, as given |
+
+## What the wallet must do
+
+The parser's output is only as safe as the wallet's handling of it. Before signing:
+
+1. **Bind the signing address to the selected account.** The parser checks only that `signerAddress` is a well-formed Solana address. It has no key to compare it with, and it accepts an off-curve address (a PDA) that no key can sign for. The wallet must check that the address shown under `Signing Address` is the account it is about to sign with, and refuse otherwise.
+2. **Sign the original bytes of `message`.** Sign exactly the UTF-8 bytes of the `message` string from the request: not the envelope, and not the escaped text the parser displays.
+3. **Show the text exactly as given.** The displayed message is percent-escaped so that distinct messages always look distinct: every byte outside printable ASCII, plus `%` and `\`, appears as `%XX`, and a space at either end or in a run appears as `%20`. Do not URL-decode it. `%0A` looks like URL encoding, and a wallet that decodes it brings back the line break that lets a message forge a second line on the signing screen (for example a fake `To:` row). The same goes for `%E2%80%AE`, a right-to-left override that would reorder the text.
+
+## Refused messages
+
+Some messages are refused with an error instead of a payload, because a signature over their bytes would authorize more than the text:
+
+- **Exactly 32 bytes, not all ASCII letters and digits.** NEP-413, SEP-53 and TON Connect verifiers (NEAR Intents among them) check an ed25519 signature over a 32-byte SHA-256 digest, and a Solana wallet signs message bytes as they are, so such a message may be a digest another protocol accepts.
+- **Bytes that are a serialized Solana transaction message.** A signature over them is a valid signature for that transaction.
+
+A wallet should treat these errors as "do not sign", not fall back to showing the raw text.
