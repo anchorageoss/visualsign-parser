@@ -1,19 +1,33 @@
 name: Release announcement (docs)
 
 # Opens a docs PR that publishes a release on the Mintlify site:
-# - after every Release run: only when the release enables a new chain (blog post,
-#   blog index stub, the chain's changelog page and nav entries);
+# - called from release.yml after it publishes a release (workflow_call): only when
+#   the release enables a new chain (blog post, blog index stub, the chain's
+#   changelog page and nav entries);
 # - on manual dispatch: changelog entries for every chain and core over a tag range
 #   (plus the new-chain pages if the range adds one).
+# release.yml calls this as a job instead of this file listening with workflow_run,
+# so it never runs in a privileged context triggered by another workflow.
 # It never pushes to main; a maintainer reviews and merges the PR.
 # Note: a PR opened with GITHUB_TOKEN doesn't trigger other workflows; push an empty
 # commit or close/reopen it to run checks.
 
 on:
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
-    branches: [main]
+  workflow_call:
+    inputs:
+      to:
+        description: 'Release tag to publish'
+        type: string
+        required: true
+      from:
+        description: 'Previous release tag (default: the tag before "to")'
+        type: string
+        required: false
+      new_chains_only:
+        description: 'Only write pages for chains the release newly enables'
+        type: boolean
+        required: false
+        default: true
   workflow_dispatch:
     inputs:
       to:
@@ -29,22 +43,21 @@ concurrency:
   group: release-announcement
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   docs:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout code
-        # zizmor: ignore[artipacked] the docs-branch push below needs the persisted token
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
@@ -57,7 +70,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TO: ${{ inputs.to }}
           FROM: ${{ inputs.from }}
-          EVENT: ${{ github.event_name }}
+          NEW_CHAINS_ONLY: ${{ inputs.new_chains_only }}
         working-directory: src
         run: |
           set -euo pipefail
@@ -65,7 +78,7 @@ jobs:
           args=(--repo-dir .. --repo "$GITHUB_REPOSITORY" --write-mintlify ../docs)
           [ -n "$TO" ] && args+=(--to "$TO")
           [ -n "$FROM" ] && args+=(--from "$FROM")
-          [ "$EVENT" = workflow_run ] && args+=(--new-chains-only)
+          [ "$NEW_CHAINS_ONLY" = true ] && args+=(--new-chains-only)
           cargo run -q -p release-notes -- "${args[@]}"
           tag="${TO:-$(git describe --tags --abbrev=0 HEAD)}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -92,6 +105,8 @@ jobs:
           git checkout -b "$branch"
           git add docs
           git commit -m "docs: publish $TAG on the changelog and blog"
+          # The checkout keeps no credentials; only this step gets the token.
+          gh auth setup-git
           git push origin "$branch"
           gh pr create \
             --base main \
