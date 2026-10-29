@@ -5,6 +5,10 @@ description: Keyless rendering of Zcash PCZTs across the transparent, Sapling, O
 
 The Zcash module renders a PCZT (Partially Created Zcash Transaction) into a VisualSign payload. A coordinating wallet builds the PCZT and makes the proofs; a signer reviews it and adds spend authorizations. The parser holds no keys, so it shows what can be checked from the PCZT alone and labels the rest.
 
+## Enabling
+
+Zcash is opt-in. The `zcash` feature exists on `parser_app`, `parser_http_server` and `parser_cli`, but it is not in any of their `default` feature sets, and the `parser_app` and `parser_http_server` images do not list it in `CHAIN_FEATURES`. Build with `--features zcash`, or pass `--build-arg CHAIN_FEATURES="... zcash"` to an image build. The `visualsign-zcash` library crate is a workspace member and is built and tested in CI regardless.
+
 ## Input
 
 - **Encoding**: PCZT bytes as hex (optional `0x`) or base64. Both the v1 and v2 PCZT encodings are accepted.
@@ -39,7 +43,7 @@ Zero-value outputs whose memo is empty or does not decrypt are padding (ZIP 326 
 ## Using parser_cli
 
 ```bash
-cargo run --bin parser_cli -- decode --chain zcash -t @path/to/pczt.hex
+cargo run --bin parser_cli --features zcash -- decode --chain zcash -t @path/to/pczt.hex
 ```
 
 ## Dependencies

@@ -9,7 +9,9 @@ publish = false
 # Chain visualizers compiled into the binary. Mirrors parser_app's default
 # set; trim with `--no-default-features --features solana` (or any subset)
 # to shrink the image and attestation surface for chain-specific deploys.
-default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified", "zcash"]
+# zcash is opt-in (`--features zcash`) until its dependency set is curated;
+# see docs/chains/zcash.mdx.
+default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified"]
 bitcoin = ["parser_app/bitcoin"]
 ethereum = ["parser_app/ethereum"]
 near = ["parser_app/near"]
