@@ -248,7 +248,7 @@ async fn parser_solana_native_transfer_e2e() {
                         "Amount": "0.1"
                     },
                     "FallbackText": "0.1 SOL",
-                    "Label": "Max Fee",
+                    "Label": "Max Fee (default)",
                     "Type": "amount_v2"
                 },
                 {

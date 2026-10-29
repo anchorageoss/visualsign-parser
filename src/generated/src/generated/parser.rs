@@ -279,8 +279,11 @@ pub struct SolanaMetadata {
     >,
     /// Maximum total fee (base plus priority) the caller allows for this transaction, in
     /// lamports. Absent, the parser's default cap (0.1 SOL) applies. The cap in force is
-    /// rendered as the top-level "Max Fee" row and carried in `intermediate_output`; the
-    /// parser rejects the request when the fee the transaction commits to exceeds it.
+    /// rendered as the top-level "Max Fee" row ("Max Fee (default)" for the default) and carried
+    /// in `intermediate_output`; the parser rejects the request when the fee the transaction
+    /// commits to exceeds it. A consumer that rewrites the compute budget instructions after
+    /// parsing (re-pricing at sign time) changes the fee this cap bounds, so it must re-check the
+    /// final fee against this value itself.
     #[prost(uint64, optional, tag = "6")]
     #[cfg_attr(
         feature = "serde_derive",

@@ -31,7 +31,8 @@ pub struct SolanaArgs {
     pub simulated_tx_result: Option<String>,
 
     /// Maximum total fee allowed, in lamports; the parser default (0.1 SOL) applies when omitted.
-    /// Rendered as the "Max Fee" row and rejected when the transaction commits to more.
+    /// Rendered as the "Max Fee" row ("Max Fee (default)" when omitted); rejected when the
+    /// transaction commits to more.
     #[arg(long = "max-fee-lamports", value_name = "LAMPORTS")]
     pub max_fee_lamports: Option<u64>,
 }

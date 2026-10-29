@@ -2416,7 +2416,7 @@ mod tests {
         }
 
         // The default fee cap follows Network.
-        assert_eq!(payload.fields[1].label(), "Max Fee");
+        assert_eq!(payload.fields[1].label(), "Max Fee (default)");
         assert_eq!(payload.fields[1].fallback_text(), "0.1 SOL");
 
         // Instruction field

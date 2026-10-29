@@ -171,8 +171,11 @@ message SolanaMetadata {
   optional string simulated_transaction_result = 5;
   // Maximum total fee (base plus priority) the caller allows for this transaction, in
   // lamports. Absent, the parser's default cap (0.1 SOL) applies. The cap in force is
-  // rendered as the top-level "Max Fee" row and carried in `intermediate_output`; the
-  // parser rejects the request when the fee the transaction commits to exceeds it.
+  // rendered as the top-level "Max Fee" row ("Max Fee (default)" for the default) and carried
+  // in `intermediate_output`; the parser rejects the request when the fee the transaction
+  // commits to exceeds it. A consumer that rewrites the compute budget instructions after
+  // parsing (re-pricing at sign time) changes the fee this cap bounds, so it must re-check the
+  // final fee against this value itself.
   optional uint64 max_fee_lamports = 6;
 }
 

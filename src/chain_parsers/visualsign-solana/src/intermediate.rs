@@ -2628,12 +2628,6 @@ mod tests {
             borsh::from_slice(&bytes).expect("borsh deserializes");
         assert_eq!(io, recovered);
     }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-mod capability_tests {
-    use super::*;
 
     #[test]
     fn intermediate_wire_identifies_native_decoder_capability() {

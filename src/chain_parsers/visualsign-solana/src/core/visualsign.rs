@@ -1,6 +1,4 @@
-use crate::core::priority_fee::{
-    CommittedFee, DEFAULT_MAX_FEE_LAMPORTS, committed_fee, max_fee_field,
-};
+use crate::core::priority_fee::{CommittedFee, FeeCap, committed_fee};
 use crate::core::txtypes::{
     create_address_lookup_table_field, decode_v0_instructions, decode_v0_transfers,
 };
@@ -521,7 +519,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                 &message_hex,
                 &idl_registry,
                 raw_simulated_instructions,
-                fee_cap_lamports(&options),
+                fee_cap(&options).lamports,
             ) {
                 Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
                 None => ConversionResult::new(payload),
@@ -614,11 +612,9 @@ fn solana_metadata(options: &VisualSignOptions) -> Option<&generated::parser::So
     }
 }
 
-/// The caller's fee cap, or [`DEFAULT_MAX_FEE_LAMPORTS`] when the request carries none.
-fn fee_cap_lamports(options: &VisualSignOptions) -> u64 {
-    solana_metadata(options)
-        .and_then(|solana| solana.max_fee_lamports)
-        .unwrap_or(DEFAULT_MAX_FEE_LAMPORTS)
+/// The caller's fee cap, or the parser default when the request carries none.
+fn fee_cap(options: &VisualSignOptions) -> FeeCap {
+    FeeCap::resolve(solana_metadata(options).and_then(|solana| solana.max_fee_lamports))
 }
 
 /// A supplied simulation's inner instructions, and why it could not be read.
@@ -703,13 +699,13 @@ fn convert_to_visual_sign_payload(
     let message = &transaction.message;
 
     // Checked before any decoding, so an over-cap or undecodable request is refused early.
-    let fee_cap = fee_cap_lamports(options);
+    let cap = fee_cap(options);
     let committed = committed_fee(
         message.header.num_required_signatures,
         &message.instructions,
         &message.account_keys,
     )?;
-    committed.check_cap(fee_cap)?;
+    committed.check_cap(cap.lamports)?;
 
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
@@ -778,7 +774,7 @@ fn convert_to_visual_sign_payload(
         message.account_keys.first(),
         "Solana Transaction",
     )?;
-    insert_max_fee(&mut fields, header_end, fee_cap)?;
+    insert_max_fee(&mut fields, header_end, cap)?;
     Ok(SignablePayload::new(
         0,
         title,
@@ -837,12 +833,9 @@ fn with_priority_fee(
 fn insert_max_fee(
     fields: &mut Vec<SignablePayloadField>,
     header_end: usize,
-    fee_cap_lamports: u64,
+    cap: FeeCap,
 ) -> Result<(), VisualSignError> {
-    fields.insert(
-        header_end,
-        max_fee_field(fee_cap_lamports)?.signable_payload_field,
-    );
+    fields.insert(header_end, cap.field()?.signable_payload_field);
     Ok(())
 }
 
@@ -906,13 +899,13 @@ fn convert_v0_to_visual_sign_payload(
     // TODO: re-introduce ALT-aware rendering once ALT data is supplied.
 
     // Checked before any decoding, so an over-cap or undecodable request is refused early.
-    let fee_cap = fee_cap_lamports(options);
+    let cap = fee_cap(options);
     let committed = committed_fee(
         v0_message.header.num_required_signatures,
         &v0_message.instructions,
         &v0_message.account_keys,
     )?;
-    committed.check_cap(fee_cap)?;
+    committed.check_cap(cap.lamports)?;
 
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
@@ -1020,7 +1013,7 @@ fn convert_v0_to_visual_sign_payload(
         v0_message.account_keys.first(),
         "Solana V0 Transaction",
     )?;
-    insert_max_fee(&mut fields, header_end, fee_cap)?;
+    insert_max_fee(&mut fields, header_end, cap)?;
     Ok(SignablePayload::new(
         0,
         title,
@@ -1036,7 +1029,7 @@ fn convert_v0_to_visual_sign_payload(
 #[cfg_attr(not(feature = "simulation"), allow(unused_imports))]
 mod tests {
     use super::*;
-    use crate::core::priority_fee::PriorityFee;
+    use crate::core::priority_fee::{DEFAULT_MAX_FEE_LAMPORTS, PriorityFee};
     use crate::intermediate::{
         RegisteredSource, SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput,
     };
@@ -3098,7 +3091,7 @@ mod tests {
             "Default",
         )
         .expect("apply");
-        insert_max_fee(&mut fields, header_end, 5_105_000).expect("insert");
+        insert_max_fee(&mut fields, header_end, FeeCap::resolve(Some(5_105_000))).expect("insert");
         let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
         assert_eq!(labels, ["Network", "From", "Amount", "Max Fee", "Network"]);
         assert_eq!(fields[3].fallback_text(), "0.005105 SOL");
@@ -3107,32 +3100,41 @@ mod tests {
     #[test]
     fn max_fee_row_follows_network_without_a_summary() {
         let mut fields = vec![network_row(), network_row()];
-        insert_max_fee(&mut fields, 1, 5_000).expect("insert");
+        insert_max_fee(&mut fields, 1, FeeCap::resolve(None)).expect("insert");
         let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
-        assert_eq!(labels, ["Network", "Max Fee", "Network"]);
+        assert_eq!(labels, ["Network", "Max Fee (default)", "Network"]);
+        assert_eq!(fields[1].fallback_text(), "0.1 SOL");
     }
 
     /// No caller cap, no metadata at all, or a cap of zero: the value in force is explicit.
     #[test]
     fn max_fee_defaults_when_the_caller_supplies_none() {
-        assert_eq!(
-            fee_cap_lamports(&options_with_max_fee(None)),
-            DEFAULT_MAX_FEE_LAMPORTS
-        );
-        assert_eq!(
-            fee_cap_lamports(&VisualSignOptions::default()),
-            DEFAULT_MAX_FEE_LAMPORTS
-        );
-        assert_eq!(fee_cap_lamports(&options_with_max_fee(Some(5_000))), 5_000);
-        assert_eq!(fee_cap_lamports(&options_with_max_fee(Some(0))), 0);
+        let default = fee_cap(&options_with_max_fee(None));
+        assert_eq!(default.lamports, DEFAULT_MAX_FEE_LAMPORTS);
+        assert!(!default.caller_supplied);
+        assert_eq!(fee_cap(&VisualSignOptions::default()), default);
+        let caller = fee_cap(&options_with_max_fee(Some(5_000)));
+        assert_eq!((caller.lamports, caller.caller_supplied), (5_000, true));
+        assert_eq!(fee_cap(&options_with_max_fee(Some(0))).lamports, 0);
     }
 
+    /// `requests` compiled as compute-budget instructions of a one-signature message.
     fn committed_with(requests: &[ComputeBudgetInstruction]) -> CommittedFee {
-        let mut fee = PriorityFee::default();
-        for request in requests {
-            fee.record(request);
-        }
-        fee.committed(1).expect("no repeated request")
+        let keys = [solana_sdk_ids::compute_budget::id()];
+        let instructions: Vec<_> = requests
+            .iter()
+            .map(
+                |request| solana_message::compiled_instruction::CompiledInstruction {
+                    program_id_index: 0,
+                    accounts: vec![],
+                    data: borsh::to_vec(request).expect("encodes"),
+                },
+            )
+            .collect();
+        PriorityFee::from_instructions(&instructions, &keys)
+            .expect("decodes")
+            .committed(1)
+            .expect("no repeated request")
     }
 
     /// Infrastructure still costs the fee payer the priority fee, so the adopted summary gets
@@ -3157,6 +3159,7 @@ mod tests {
             "0.000015 SOL"
         );
 
+        // One compute budget instruction: 3_000 default units at 1_000 lamports each.
         let bound = committed_with(&[ComputeBudgetInstruction::SetComputeUnitPrice(1_000_000_000)]);
         let summary = with_priority_fee(Some(sample_summary()), bound)
             .expect("renders")
@@ -3167,7 +3170,7 @@ mod tests {
         );
         assert_eq!(
             summary.fields[1].signable_payload_field.fallback_text(),
-            "1.4 SOL"
+            "0.003 SOL"
         );
     }
 
@@ -3205,12 +3208,12 @@ mod tests {
         assert_eq!(&labels[..2], ["Network", "Max Fee"], "layout: {labels:?}");
         assert_eq!(payload.fields[1].fallback_text(), "0.005105 SOL");
 
-        // Without a caller cap the default takes the same place.
+        // Without a caller cap the default takes the same place, and the label says so.
         let without = SolanaVisualSignConverter
             .to_visual_sign_payload(wrapper.clone(), options_with_max_fee(None))
             .expect("converts")
             .payload;
-        assert_eq!(without.fields[1].label(), "Max Fee");
+        assert_eq!(without.fields[1].label(), "Max Fee (default)");
         assert_eq!(without.fields[1].fallback_text(), "0.1 SOL");
 
         // Two required signatures commit to a 10_000 lamport base fee.
@@ -3236,13 +3239,13 @@ mod tests {
         assert_eq!(&labels[..2], ["Network", "Max Fee"], "layout: {labels:?}");
         assert_eq!(payload.fields[1].fallback_text(), "0.005105 SOL");
 
-        // One signature plus a 71_428 micro-lamport unit price with no limit commit to
-        // 5_000 + 100_000 lamports.
+        // One signature plus a 71_428 micro-lamport unit price with no limit: the default
+        // limit is 403_000 units (two program instructions and the request), 28_786 lamports.
         assert!(matches!(
-            to_payload(wrapper.clone(), options_with_max_fee(Some(104_999))),
+            to_payload(wrapper.clone(), options_with_max_fee(Some(33_785))),
             Err(VisualSignError::ValidationError(_))
         ));
-        to_payload(wrapper, options_with_max_fee(Some(105_000)))
+        to_payload(wrapper, options_with_max_fee(Some(33_786)))
             .expect("a cap equal to the bound passes");
     }
 
@@ -3296,12 +3299,12 @@ mod tests {
             &payer,
         ))
         .expect("parses");
-        // One signature plus up to 1_400_000 lamports at 1_000_000 micro-lamports per unit.
+        // One signature plus 3_000 default units at 1_000_000 micro-lamports each: 8_000.
         assert!(matches!(
-            to_payload(wrapper.clone(), options_with_max_fee(Some(1_404_999))),
+            to_payload(wrapper.clone(), options_with_max_fee(Some(7_999))),
             Err(VisualSignError::ValidationError(_))
         ));
-        let payload = to_payload(wrapper, options_with_max_fee(Some(1_405_000)))
+        let payload = to_payload(wrapper, options_with_max_fee(Some(8_000)))
             .expect("a cap at the bound passes");
         assert!(
             payload.fields.iter().any(|f| f.label() == "Instruction 1"),
@@ -3392,15 +3395,16 @@ mod tests {
         let wrapper =
             SolanaTransactionWrapper::from_string(&v0_b64(&instructions, &payer)).expect("parses");
         let payload = to_payload(wrapper.clone(), options_with_max_fee(None)).expect("renders");
-        assert_eq!(payload.fields[1].label(), "Max Fee");
+        assert_eq!(payload.fields[1].label(), "Max Fee (default)");
         assert_eq!(payload.fields[1].fallback_text(), "0.1 SOL");
 
-        // One signature plus up to 1_400 lamports of priority fee with no unit limit.
+        // One signature plus 6_000 default units (two builtin instructions) at 1_000
+        // micro-lamports each: 5_006 lamports.
         assert!(matches!(
-            to_payload(wrapper.clone(), options_with_max_fee(Some(6_399))),
+            to_payload(wrapper.clone(), options_with_max_fee(Some(5_005))),
             Err(VisualSignError::ValidationError(_))
         ));
-        to_payload(wrapper, options_with_max_fee(Some(6_400))).expect("a cap at the bound passes");
+        to_payload(wrapper, options_with_max_fee(Some(5_006))).expect("a cap at the bound passes");
     }
 
     /// A committed fee above the default needs a caller cap that covers it.
@@ -3439,9 +3443,14 @@ mod tests {
         let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
         let transaction = create_transaction_with_empty_signatures(solana_transfer_message);
         let wrapper = SolanaTransactionWrapper::from_string(&transaction).expect("parses");
-        for (caller_cap, expected, rendered) in [
-            (None, DEFAULT_MAX_FEE_LAMPORTS, "0.1 SOL"),
-            (Some(5_105_000), 5_105_000, "0.005105 SOL"),
+        for (caller_cap, expected, label, rendered) in [
+            (
+                None,
+                DEFAULT_MAX_FEE_LAMPORTS,
+                "Max Fee (default)",
+                "0.1 SOL",
+            ),
+            (Some(5_105_000), 5_105_000, "Max Fee", "0.005105 SOL"),
         ] {
             let options = VisualSignOptions {
                 include_intermediate_output: true,
@@ -3454,7 +3463,7 @@ mod tests {
             let decoded: SolanaIntermediateOutput = borsh::from_slice(bytes).expect("decodes");
             assert_eq!(decoded.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
             assert_eq!(decoded.max_fee_lamports, expected);
-            assert_eq!(result.payload.fields[1].label(), "Max Fee");
+            assert_eq!(result.payload.fields[1].label(), label);
             assert_eq!(result.payload.fields[1].fallback_text(), rendered);
         }
     }

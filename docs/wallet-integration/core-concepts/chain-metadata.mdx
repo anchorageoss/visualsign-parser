@@ -145,7 +145,7 @@ ChainMetadata: &pb.ChainMetadata{
 
 ### Fee cap
 
-Every Solana payload shows a "Max Fee" row: the most the transaction can pay in base fee plus priority fee. The parser applies a default cap of 0.1 SOL. Send `max_fee_lamports` to replace it for one transaction, for example with the fee your wallet quoted. The parser rejects the request when the transaction commits to more than the cap in force, so the row is always a true upper bound. With `include_intermediate_output`, the cap in force is also the trailing `max_fee_lamports` field of the Solana intermediate output.
+Every Solana payload shows the fee cap in force: the most the transaction can pay in base fee plus priority fee. Send `max_fee_lamports` to set it for one transaction, for example to the fee your wallet quoted, and the row is labelled "Max Fee". Without it the parser applies its default cap of 0.1 SOL and labels the row "Max Fee (default)". The parser rejects the request when the transaction commits to more than the cap in force, so the row is always a true upper bound. With `include_intermediate_output`, the cap in force is also the trailing `max_fee_lamports` field of the Solana intermediate output. If you rewrite the compute budget instructions after parsing, for example to re-price at signing time, the fee this cap bounds changes, so re-check the final fee against the cap yourself.
 
 ```go
 ChainMetadata: &pb.ChainMetadata{

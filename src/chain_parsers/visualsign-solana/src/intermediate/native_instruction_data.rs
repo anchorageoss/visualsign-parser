@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use borsh::BorshDeserialize;
 use serde_json::{Value, json};
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::AccountKeys;
@@ -126,7 +125,7 @@ fn parse_json(
 
 /// Compute Budget in the `jsonParsed` shape, since Solana's decoder skips it.
 fn decode_compute_budget(data: &[u8]) -> Result<Value, String> {
-    let instruction = ComputeBudgetInstruction::try_from_slice(data)
+    let instruction = crate::core::decode_compute_budget_request(data)
         .map_err(|e| format!("Compute Budget instruction not parsable: {e}"))?;
     let (instruction_type, info) = match instruction {
         ComputeBudgetInstruction::Unused => {
@@ -1651,6 +1650,16 @@ mod tests {
         let decoded = decode_with(COMPUTE_BUDGET_PROGRAM, &[], &[2, 0x40, 0x0d, 0x03, 0x00]);
         assert_eq!(decoded.parsed["type"], "setComputeUnitLimit");
         assert_eq!(decoded.parsed["info"]["units"], 200_000);
+
+        // A trailing byte is ignored, as the runtime ignores it, so this decode agrees with the
+        // fee the payload charges.
+        let decoded = decode_with(
+            COMPUTE_BUDGET_PROGRAM,
+            &[],
+            &[3, 0x40, 0x42, 0x0f, 0, 0, 0, 0, 0, 0xff],
+        );
+        assert_eq!(decoded.parsed["type"], "setComputeUnitPrice");
+        assert_eq!(decoded.parsed["info"]["microLamports"], 1_000_000);
 
         let program_id = Pubkey::from_str(COMPUTE_BUDGET_PROGRAM).unwrap();
         let deprecated = CompiledInstruction {

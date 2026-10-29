@@ -12,7 +12,7 @@ SignablePayload {
         AmountV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: "0.1 SOL",
-                label: "Max Fee",
+                label: "Max Fee (default)",
             },
             amount_v2: SignablePayloadFieldAmountV2 {
                 amount: "0.1",

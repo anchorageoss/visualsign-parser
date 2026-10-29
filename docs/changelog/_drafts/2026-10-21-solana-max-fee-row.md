@@ -4,16 +4,20 @@ label: "Added Solana max fee cap and row"
 description: ""
 tags: ["Wallet API"]
 ---
-Every Solana payload now shows a top-level "Max Fee" row in SOL right after the
+Every Solana payload now shows a top-level fee cap row in SOL right after the
 header rows: the caller's new `SolanaMetadata.max_fee_lamports`
-(`maxFeeLamports` on the HTTP gateway) when set, otherwise the parser's default
-cap of 0.1 SOL. The parser rejects the request when the fee the transaction
-commits to exceeds the cap in force: 5000 lamports per signature, counting the
-ones precompile instructions verify, plus the compute budget's priority fee. A
-compute budget instruction that does not decode leaves that fee unknown and is
-rejected too, as is a transaction that repeats the compute unit price or limit,
-which the runtime rejects. The row is therefore a true upper bound on what the
-transaction pays. The CLI accepts the same value as `--max-fee-lamports`.
+(`maxFeeLamports` on the HTTP gateway) when set, labelled "Max Fee", otherwise
+the parser's default cap of 0.1 SOL, labelled "Max Fee (default)". The parser
+rejects the request when the fee the transaction commits to exceeds the cap in
+force: 5000 lamports per signature, counting the ones precompile instructions
+verify, plus the compute budget's priority fee at the requested unit limit or,
+without one, at the runtime's default limit for the message. Compute budget
+requests decode as the runtime decodes them, and a request the runtime rejects
+(undecodable, repeated, out of range, or unused) is refused too. The row is
+therefore a true upper bound on what the transaction pays. A consumer that
+re-prices the compute budget instructions after parsing must re-check the final
+fee against the cap itself. The CLI accepts the same value as
+`--max-fee-lamports`.
 
 The Solana intermediate output moves to schema version 5 with two additions.
 A `native_instruction_decoder` tag right after the version says which native
