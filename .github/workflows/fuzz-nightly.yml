@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - run: rustup toolchain install stable --profile minimal
       - run: cargo install cargo-fuzz --locked
       - run: scripts/fuzz-nightly.sh check-needed
@@ -30,6 +32,9 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The job pushes the bump branch with this token.
+          persist-credentials: true
       - run: cargo install cargo-fuzz --locked
       - run: scripts/fuzz-nightly.sh bump
       - name: Open or update the bump PR
