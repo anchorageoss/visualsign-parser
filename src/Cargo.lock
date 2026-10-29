@@ -14623,6 +14623,7 @@ dependencies = [
  "bs58 0.5.1",
  "clap",
  "defuse-core",
+ "defuse-nep413",
  "generated",
  "hex",
  "near-crypto",
