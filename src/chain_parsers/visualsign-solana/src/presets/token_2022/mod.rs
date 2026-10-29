@@ -8,8 +8,8 @@ use crate::core::{
 };
 use crate::utils::format_token_amount;
 use config::Token2022Config;
-use spl_token_2022::extension::transfer_fee::instruction::TransferFeeInstruction;
-use spl_token_2022::instruction::TokenInstruction;
+use spl_token_2022_interface::extension::transfer_fee::instruction::TransferFeeInstruction;
+use spl_token_2022_interface::instruction::TokenInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
 use visualsign::{
@@ -227,7 +227,7 @@ fn parse_token_2022_instruction(
                     // Some - pubkey is 32 bytes starting at data[3]
                     if data.len() >= 35 {
                         let pubkey_bytes = &data[3..35];
-                        let pubkey = solana_sdk::pubkey::Pubkey::try_from(pubkey_bytes)
+                        let pubkey = solana_pubkey::Pubkey::try_from(pubkey_bytes)
                             .map_err(|e| format!("Invalid pubkey in setAuthority: {e}"))?;
                         Some(pubkey.to_string())
                     } else {
@@ -1005,7 +1005,7 @@ fn preview_field(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
     mod fixture_test;
 
     fn dummy_account_strings(n: usize) -> Vec<String> {
@@ -1098,9 +1098,11 @@ mod tests {
     /// Like [`visualize`], but returns the condensed rows as well:
     /// `(title, condensed, expanded)`.
     fn visualize_views(data: Vec<u8>, accounts: &[Pubkey]) -> (String, Vec<String>, Vec<String>) {
-        let mut keys = vec![Pubkey::new_from_array(spl_token_2022::id().to_bytes())];
+        let mut keys = vec![Pubkey::new_from_array(
+            spl_token_2022_interface::id().to_bytes(),
+        )];
         keys.extend_from_slice(accounts);
-        let compiled = solana_sdk::instruction::CompiledInstruction {
+        let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
             accounts: (1..=accounts.len() as u8).collect(),
             data,

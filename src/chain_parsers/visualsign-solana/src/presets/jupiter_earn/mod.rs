@@ -8,13 +8,13 @@ use crate::core::{
     InstructionView, InstructionVisualizer, SolanaIntegrationConfig, TransactionSummary,
     VisualizerContext, VisualizerKind, format_arg_value, is_unresolved_placeholder,
 };
+use crate::presets::associated_token_account::interface::get_associated_token_address_with_program_id;
 use crate::utils::{TokenInfo, format_token_amount, lookup_token, truncate_address};
 use config::JupiterEarnConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::pubkey::Pubkey;
-use spl_associated_token_account::get_associated_token_address_with_program_id;
+use solana_pubkey::Pubkey;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -334,12 +334,12 @@ enum RecipientOwnership {
 /// `token_program` is author-controlled; ATA derivation only means anything under the two
 /// real token programs, so any other key must not classify the recipient.
 fn is_known_token_program(token_program: &Pubkey) -> bool {
-    *token_program == spl_token::id() || *token_program == token_2022_program_id()
+    *token_program == spl_token_interface::id() || *token_program == token_2022_program_id()
 }
 
 /// `spl_token_2022` addresses use a different key type; compare through the raw bytes.
 fn token_2022_program_id() -> Pubkey {
-    Pubkey::new_from_array(spl_token_2022::id().to_bytes())
+    Pubkey::new_from_array(spl_token_2022_interface::id().to_bytes())
 }
 
 /// `recipient_token_account`: unconstrained by the IDL, so it decides who ends up with the value.

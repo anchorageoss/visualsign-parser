@@ -8,7 +8,7 @@ pub mod signature;
 
 use crate::idl::builtin_programs::{canonical_name, is_trusted_program};
 use solana_parser::{CustomIdl, CustomIdlConfig, Idl, ProgramType, decode_idl_data};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use std::collections::BTreeMap;
 
 /// Registry for managing program IDLs (program_id -> CustomIdlConfig)

@@ -6,7 +6,7 @@ use crate::core::{
     InstructionVisualizer, SolanaAccount, SummaryAccumulator, VisualizerContext,
     available_visualizers, visualize_with_any,
 };
-use solana_sdk::transaction::VersionedTransaction;
+use solana_transaction::versioned::VersionedTransaction;
 #[cfg(feature = "diagnostics")]
 use visualsign::field_builders::create_diagnostic_field;
 use visualsign::{
@@ -137,7 +137,7 @@ pub fn decode_v0_transfers(
 /// failures are collected in errors.
 #[cfg(feature = "diagnostics")]
 pub fn decode_v0_instructions(
-    v0_message: &solana_sdk::message::v0::Message,
+    v0_message: &solana_message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
     lint_config: &visualsign::lint::LintConfig,
 ) -> DecodeInstructionsResult {
@@ -227,7 +227,7 @@ pub fn decode_v0_instructions(
 /// out-of-bounds indices flow through to the visualizer pipeline.
 #[cfg(not(feature = "diagnostics"))]
 pub fn decode_v0_instructions(
-    v0_message: &solana_sdk::message::v0::Message,
+    v0_message: &solana_message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
 ) -> Result<DecodedInstructions, VisualSignError> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
@@ -280,7 +280,7 @@ pub fn decode_v0_instructions(
 /// Create a rich address lookup table field with detailed information
 /// Reuses the advanced preview layout pattern to avoid top-level ListLayout restriction
 pub fn create_address_lookup_table_field(
-    v0_message: &solana_sdk::message::v0::Message,
+    v0_message: &solana_message::v0::Message,
 ) -> Result<SignablePayloadField, VisualSignError> {
     // Create fallback text with lookup table addresses
     let fallback_text = v0_message
@@ -448,20 +448,20 @@ pub fn create_address_lookup_table_field(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod off_tests {
     use super::*;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
 
     fn v0_message(
         account_keys: Vec<Pubkey>,
-        instructions: Vec<solana_sdk::instruction::CompiledInstruction>,
-    ) -> solana_sdk::message::v0::Message {
-        solana_sdk::message::v0::Message {
-            header: solana_sdk::message::MessageHeader {
+        instructions: Vec<solana_message::compiled_instruction::CompiledInstruction>,
+    ) -> solana_message::v0::Message {
+        solana_message::v0::Message {
+            header: solana_message::MessageHeader {
                 num_required_signatures: 1,
                 num_readonly_signed_accounts: 0,
                 num_readonly_unsigned_accounts: 0,
             },
             account_keys,
-            recent_blockhash: solana_sdk::hash::Hash::default(),
+            recent_blockhash: solana_hash::Hash::default(),
             instructions,
             address_table_lookups: vec![],
         }
@@ -483,7 +483,7 @@ mod off_tests {
         let key0 = Pubkey::new_unique();
         let msg = v0_message(
             vec![key0],
-            vec![solana_sdk::instruction::CompiledInstruction {
+            vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 99,  // OOB
                 accounts: vec![0, 50], // 50 also OOB
                 data: vec![0xDD],
@@ -501,28 +501,28 @@ mod off_tests {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
     use visualsign::SignablePayloadField;
     use visualsign::lint::LintConfig;
 
-    fn v0_message_with_oob_program_id() -> solana_sdk::message::v0::Message {
+    fn v0_message_with_oob_program_id() -> solana_message::v0::Message {
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
-        solana_sdk::message::v0::Message {
-            header: solana_sdk::message::MessageHeader {
+        solana_message::v0::Message {
+            header: solana_message::MessageHeader {
                 num_required_signatures: 1,
                 num_readonly_signed_accounts: 0,
                 num_readonly_unsigned_accounts: 0,
             },
             account_keys: vec![key0, key1],
-            recent_blockhash: solana_sdk::hash::Hash::default(),
+            recent_blockhash: solana_hash::Hash::default(),
             instructions: vec![
-                solana_sdk::instruction::CompiledInstruction {
+                solana_message::compiled_instruction::CompiledInstruction {
                     program_id_index: 1,
                     accounts: vec![0],
                     data: vec![0xAA],
                 },
-                solana_sdk::instruction::CompiledInstruction {
+                solana_message::compiled_instruction::CompiledInstruction {
                     program_id_index: 99, // OOB: only 2 static keys
                     accounts: vec![0],
                     data: vec![0xBB],
@@ -532,18 +532,18 @@ mod tests {
         }
     }
 
-    fn v0_message_with_oob_program_id_and_oob_account() -> solana_sdk::message::v0::Message {
+    fn v0_message_with_oob_program_id_and_oob_account() -> solana_message::v0::Message {
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
-        solana_sdk::message::v0::Message {
-            header: solana_sdk::message::MessageHeader {
+        solana_message::v0::Message {
+            header: solana_message::MessageHeader {
                 num_required_signatures: 1,
                 num_readonly_signed_accounts: 0,
                 num_readonly_unsigned_accounts: 0,
             },
             account_keys: vec![key0, key1],
-            recent_blockhash: solana_sdk::hash::Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+            recent_blockhash: solana_hash::Hash::default(),
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 99,  // OOB
                 accounts: vec![0, 88], // 88 is also OOB
                 data: vec![0xCC],
@@ -645,15 +645,15 @@ mod tests {
     fn test_v0_valid_transaction_emits_two_ok_diagnostics() {
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
-        let msg = solana_sdk::message::v0::Message {
-            header: solana_sdk::message::MessageHeader {
+        let msg = solana_message::v0::Message {
+            header: solana_message::MessageHeader {
                 num_required_signatures: 1,
                 num_readonly_signed_accounts: 0,
                 num_readonly_unsigned_accounts: 0,
             },
             account_keys: vec![key0, key1],
-            recent_blockhash: solana_sdk::hash::Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+            recent_blockhash: solana_hash::Hash::default(),
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 1,
                 accounts: vec![0],
                 data: vec![0xDD],

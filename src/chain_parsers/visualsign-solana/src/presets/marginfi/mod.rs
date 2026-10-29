@@ -231,7 +231,7 @@ mod tests {
     use solana_parser::IdlSource;
 
     fn dummy_account_strings(n: usize) -> Vec<String> {
-        use solana_sdk::pubkey::Pubkey;
+        use solana_pubkey::Pubkey;
         (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
     }
 

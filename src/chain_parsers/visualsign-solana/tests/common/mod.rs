@@ -6,13 +6,13 @@ use std::collections::BTreeMap;
 
 use base64::Engine;
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
+use solana_instruction::{AccountMeta, Instruction};
+use solana_message::Message;
 use solana_parser::decode_idl_data;
 use solana_parser::solana::structs::Idl;
-use solana_sdk::instruction::{AccountMeta, Instruction};
-use solana_sdk::message::Message;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::transaction::Transaction as SolanaTransaction;
+use solana_pubkey::Pubkey;
 use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
+use solana_transaction::Transaction as SolanaTransaction;
 use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,

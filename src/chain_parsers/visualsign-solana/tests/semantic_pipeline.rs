@@ -15,7 +15,7 @@ mod common;
 
 use solana_parser::decode_idl_data;
 use solana_parser::solana::embedded_idls;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use visualsign::SignablePayload;
 use visualsign_solana::transaction_to_visual_sign;
 

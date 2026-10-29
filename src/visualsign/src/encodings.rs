@@ -139,7 +139,10 @@ pub fn decode_hex_array<const N: usize>(value: &str) -> Result<[u8; N], DecodeHe
 ///
 /// Printable ASCII and space pass through. Every other character is replaced by
 /// percent-encoding of its UTF-8 bytes (`%0A` for a line feed, `%C3%A9` for `é`),
-/// and a literal `%` or `\` is encoded as well (`%25`, `%5C`).
+/// and a literal `%` or `\` is encoded as well (`%25`, `%5C`). A space is encoded
+/// as `%20` when it is first, last, or next to another space, so a renderer that
+/// trims or collapses whitespace (HTML does both by default) still shows
+/// `"pay alice "`, `"pay  alice"` and `"pay alice"` differently.
 ///
 /// Dropping characters, or replacing them with one marker, lets two different
 /// signed texts render identically: `a\nb`, `ab`, `a?b` and `aéb` would all be
@@ -152,17 +155,45 @@ pub fn decode_hex_array<const N: usize>(value: &str) -> Result<[u8; N], DecodeHe
 /// refuses.
 ///
 /// Use this for text the signer approves. Structured values with their own
-/// rendering (addresses, amounts, hex) don't need it.
+/// rendering (addresses, amounts, hex) don't need it. For text that arrives as
+/// bytes, use [`escape_display_bytes`] on the bytes themselves: converting them
+/// with `String::from_utf8_lossy` first maps every invalid sequence to U+FFFD,
+/// so distinct inputs would display the same.
+///
+/// The output is plain ASCII. ASCII look-alikes (`l`, `I`, `1`; `O`, `0`) and
+/// percent-encoded non-Latin text stay hard to tell apart or read; presenting
+/// those is the wallet's concern, not this function's.
 pub fn escape_display_text(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut utf8 = [0u8; 4];
-    for c in text.chars() {
-        if c == ' ' || (c.is_ascii_graphic() && c != '%' && c != '\\') {
-            out.push(c);
-        } else {
-            for b in c.encode_utf8(&mut utf8).bytes() {
-                out.push_str(&format!("%{b:02X}"));
+    escape_display_bytes(text.as_bytes())
+}
+
+/// Escape signed bytes for display, whether or not they are UTF-8.
+///
+/// Same output as [`escape_display_text`] for UTF-8 input (its escape works
+/// byte by byte), and every byte that isn't printable ASCII is percent-encoded
+/// the same way, so `[0x61, 0xFF]` shows as `a%FF` and stays distinct from
+/// `[0x61, 0xFE]` and from the UTF-8 encoding of `a\u{FFFD}`.
+/// [`unescape_display_bytes`] inverts it.
+pub fn escape_display_bytes(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(bytes.len());
+    for (i, &b) in bytes.iter().enumerate() {
+        let passes = match b {
+            b' ' => {
+                let edge = i == 0 || i + 1 == bytes.len();
+                let next_to_space =
+                    (i > 0 && bytes[i - 1] == b' ') || bytes.get(i + 1).is_some_and(|&n| n == b' ');
+                !edge && !next_to_space
             }
+            b'%' | b'\\' => false,
+            _ => b.is_ascii_graphic(),
+        };
+        if passes {
+            out.push(char::from(b));
+        } else {
+            out.push('%');
+            out.push(char::from(HEX[usize::from(b >> 4)]));
+            out.push(char::from(HEX[usize::from(b & 0x0F)]));
         }
     }
     out
@@ -173,26 +204,29 @@ pub fn escape_display_text(text: &str) -> String {
 /// character that passes through, a raw character it would have escaped, or
 /// bytes that aren't UTF-8.
 pub fn unescape_display_text(escaped: &str) -> Option<String> {
+    String::from_utf8(unescape_display_bytes(escaped)?).ok()
+}
+
+/// The bytes [`escape_display_bytes`] was given, or `None` when `escaped` is not
+/// something it produces: a malformed or lowercase escape, an escape of a byte
+/// that passes through, or a raw character it would have escaped.
+pub fn unescape_display_bytes(escaped: &str) -> Option<Vec<u8>> {
+    let upper_hex = |d: char| d.is_ascii_digit() || ('A'..='F').contains(&d);
     let mut bytes = Vec::with_capacity(escaped.len());
     let mut chars = escaped.chars();
     while let Some(c) = chars.next() {
         if c == '%' {
-            let hi = chars.next()?;
-            let lo = chars.next()?;
-            let upper_hex = |d: char| d.is_ascii_digit() || ('A'..='F').contains(&d);
-            if !upper_hex(hi) || !upper_hex(lo) {
-                return None;
-            }
-            bytes.push(u8::from_str_radix(&format!("{hi}{lo}"), 16).ok()?);
+            let hi = chars.next().filter(|&d| upper_hex(d))?.to_digit(16)?;
+            let lo = chars.next().filter(|&d| upper_hex(d))?.to_digit(16)?;
+            bytes.push(u8::try_from(hi * 16 + lo).ok()?);
         } else if c == ' ' || (c.is_ascii_graphic() && c != '\\') {
             bytes.push(c as u8);
         } else {
             return None;
         }
     }
-    let text = String::from_utf8(bytes).ok()?;
     // Only the canonical form decodes, so each display has exactly one source.
-    (escape_display_text(&text) == escaped).then_some(text)
+    (escape_display_bytes(&bytes) == escaped).then_some(bytes)
 }
 
 #[cfg(test)]
@@ -282,9 +316,90 @@ mod tests {
     #[test]
     fn unescape_accepts_only_canonical_output() {
         for bad in [
-            "%", "%0", "%0a", "%GG", "%41", "%20", "a\nb", "\u{e9}", "\\", "%FF", "%C3",
+            "%", "%0", "%0a", "%GG", "%41", "a%20b", " ", "a ", " a", "a  b", "a\nb", "\u{e9}",
+            "\\", "%FF", "%C3",
         ] {
             assert_eq!(unescape_display_text(bad), None, "{bad:?}");
+        }
+        // Valid escapes of bytes that aren't UTF-8 are bytes, not text.
+        assert_eq!(unescape_display_bytes("%FF"), Some(vec![0xFF]));
+        assert_eq!(unescape_display_bytes("%41"), None);
+    }
+
+    #[test]
+    fn spaces_that_a_renderer_would_trim_or_collapse_are_escaped() {
+        let shown = |t: &str| escape_display_text(t);
+        assert_eq!(shown("pay alice"), "pay alice");
+        assert_eq!(shown("pay alice "), "pay alice%20");
+        assert_eq!(shown(" pay alice"), "%20pay alice");
+        assert_eq!(shown("pay  alice"), "pay%20%20alice");
+        assert_eq!(shown(" "), "%20");
+        for text in [
+            "pay alice",
+            "pay alice ",
+            " pay alice",
+            "pay  alice",
+            "pay   alice",
+        ] {
+            assert_eq!(unescape_display_text(&shown(text)).as_deref(), Some(text));
+        }
+    }
+
+    #[test]
+    fn bytes_escape_without_a_lossy_utf8_conversion() {
+        let shown = [
+            escape_display_bytes(&[0x61, 0xFF]),
+            escape_display_bytes(&[0x61, 0xFE]),
+            escape_display_bytes(&[0x61, 0xEF, 0xBF, 0xBD]),
+        ];
+        assert_eq!(shown, ["a%FF", "a%FE", "a%EF%BF%BD"]);
+        for (bytes, display) in [
+            (&[0x61u8, 0xFF][..], &shown[0]),
+            (&[0x61, 0xFE], &shown[1]),
+            (&[0x61, 0xEF, 0xBF, 0xBD], &shown[2]),
+        ] {
+            assert_eq!(unescape_display_bytes(display).as_deref(), Some(bytes));
+        }
+        // Not UTF-8, so not a text.
+        assert_eq!(unescape_display_text("a%FF"), None);
+        // UTF-8 bytes escape exactly as the text does.
+        for text in corpus() {
+            assert_eq!(
+                escape_display_bytes(text.as_bytes()),
+                escape_display_text(&text)
+            );
+        }
+    }
+
+    #[test]
+    fn every_byte_round_trips() {
+        for b in 0u8..=255 {
+            for bytes in [vec![b], vec![b'x', b, b'y'], vec![b, b]] {
+                let escaped = escape_display_bytes(&bytes);
+                assert_eq!(unescape_display_bytes(&escaped), Some(bytes), "{escaped}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_unicode_scalar_round_trips() {
+        let mut escaped = String::new();
+        let mut text = String::new();
+        for c in (0u32..=0x10FFFF).filter_map(char::from_u32) {
+            text.clear();
+            text.push('x');
+            text.push(c);
+            text.push('y');
+            escaped.clear();
+            escaped.push_str(&escape_display_text(&text));
+            assert!(
+                escaped.bytes().all(|b| b == b' ' || b.is_ascii_graphic()),
+                "{escaped}"
+            );
+            assert_eq!(
+                unescape_display_text(&escaped).as_deref(),
+                Some(text.as_str())
+            );
         }
     }
 

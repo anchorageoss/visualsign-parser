@@ -63,7 +63,8 @@
           {
             "group": "Chain Guides",
             "pages": [
-              "wallet-integration/chains/ethereum"
+              "wallet-integration/chains/ethereum",
+              "wallet-integration/chains/solana"
             ]
           },
           {
