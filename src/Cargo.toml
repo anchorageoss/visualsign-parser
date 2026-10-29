@@ -24,6 +24,7 @@ members = [
   "chain_parsers/visualsign-unspecified",
   "solana_test_utils",
   "tools/idl-meta",
+  "tools/chain-wiring",
 ]
 
 resolver = "3"

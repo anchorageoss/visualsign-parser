@@ -1,0 +1,4 @@
+[workspace]
+members = [
+  "chain_parsers/visualsign-gappy",
+]

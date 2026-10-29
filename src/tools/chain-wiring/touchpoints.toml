@@ -1,0 +1,350 @@
+# Every place a chain parser must appear, checked by `chain-wiring check <chain>`.
+#
+# Paths are relative to the repo root. Templates take these placeholders, for a
+# chain called `foo`:
+#   {chain}    foo   crate dir suffix, Cargo feature, CLI --chain value
+#   {Variant}  Foo   visualsign::registry::Chain::Foo (override with --variant)
+#   {CHAIN}    FOO   proto CHAIN_FOO
+#   {snake}    foo   Rust crate name suffix (visualsign_foo)
+# A description may also use {path}, the filled-in path of its own entry.
+#
+# Patterns are Rust regexes matched against each line of the file, like `grep -E`.
+# Placeholder values are regex-escaped before they are put into a pattern.
+#
+# Kinds:
+#   file-exists           `path` exists (file or directory)
+#   file-contains         some line of the file at `path` matches `pattern`
+#   glob-exists           some file matches `path`; `*` and `?` in the last segment only
+#   any-file-contains     some line of some file matching one of `paths` matches `pattern`
+#   default-set-equality  the chain features read from `path` (`extract`) equal
+#                         [default_set] `base`'s `default`
+#   info-only             a policy line for the PR, never counted as missing
+#
+# `missing` overrides the text printed when a check fails. Without it, a
+# file-contains or glob-exists failure prints "<description> (<path>)" and a
+# file-exists failure prints the description.
+#
+# Changing this file changes the CI gate (tests/real_repo.rs): a new check that
+# existing chains fail needs entries in known-gaps.toml.
+
+[discovery]
+# Chains are the `visualsign-<chain>` directories here.
+dir = "src/chain_parsers"
+prefix = "visualsign-"
+# `unspecified` backs proto CHAIN_UNSPECIFIED = 0, the proto3 zero value, not a
+# blockchain. Its crate is a pass-through sample with no CLI plugin, docs or
+# labeler entry by design, so the CLI/docs/metadata checks don't apply to it.
+skip = ["unspecified"]
+
+[default_set]
+# Every default-set-equality entry is compared with this file's `default`.
+base = "src/parser/app/Cargo.toml"
+# Features in a Cargo `default` list that aren't chains.
+not_chains = ["diagnostics", "cli-plugin", "vsock"]
+
+# --- Crate -------------------------------------------------------------------
+
+[[touchpoint]]
+id = "crate-dir"
+section = "Crate"
+kind = "file-exists"
+path = "src/chain_parsers/visualsign-{chain}"
+description = "{path} exists"
+
+[[touchpoint]]
+id = "crate-default-cli-plugin"
+section = "Crate"
+kind = "file-contains"
+path = "src/chain_parsers/visualsign-{chain}/Cargo.toml"
+pattern = '^default *= *\["cli-plugin"\]'
+description = 'crate default = ["cli-plugin"]'
+
+[[touchpoint]]
+id = "crate-workspace-lints"
+section = "Crate"
+kind = "file-contains"
+path = "src/chain_parsers/visualsign-{chain}/Cargo.toml"
+pattern = '^workspace *= *true'
+description = "crate [lints] workspace = true"
+
+[[touchpoint]]
+id = "workspace-member"
+section = "Crate"
+kind = "file-contains"
+path = "src/Cargo.toml"
+pattern = '"chain_parsers/visualsign-{chain}"'
+description = "workspace member"
+
+# --- Proto and core enum -----------------------------------------------------
+
+[[touchpoint]]
+id = "proto-slot"
+section = "Proto and core enum"
+kind = "file-contains"
+path = "proto/parser/parser.proto"
+pattern = 'CHAIN_{CHAIN} *= *[0-9]+;'
+description = "proto CHAIN_{CHAIN} slot"
+
+[[touchpoint]]
+id = "generated-code"
+section = "Proto and core enum"
+kind = "file-contains"
+path = "src/generated/src/generated/parser.rs"
+pattern = '"CHAIN_{CHAIN}"'
+description = "generated code regenerated"
+
+[[touchpoint]]
+id = "registry-variant"
+section = "Proto and core enum"
+kind = "file-contains"
+path = "src/visualsign/src/registry.rs"
+pattern = 'Chain::{Variant} => "{Variant}"'
+description = "registry Chain::{Variant}"
+
+[[touchpoint]]
+id = "registry-from-str"
+section = "Proto and core enum"
+kind = "file-contains"
+path = "src/visualsign/src/registry.rs"
+pattern = '"{chain}" => Chain::{Variant}'
+description = 'registry FromStr "{chain}"'
+
+[[touchpoint]]
+id = "chain-conversion"
+section = "Proto and core enum"
+kind = "file-contains"
+path = "src/parser/app/src/chain_conversion.rs"
+pattern = 'ProtoChain::{Variant} => RegistryChain::{Variant}'
+description = "chain_conversion proto->registry"
+
+# --- parser_app / http-server ------------------------------------------------
+
+[[touchpoint]]
+id = "parser-app-feature"
+section = "parser_app / http-server"
+kind = "file-contains"
+path = "src/parser/app/Cargo.toml"
+pattern = '^{chain} *= *\["dep:visualsign-{chain}"\]'
+description = "parser_app feature"
+
+[[touchpoint]]
+id = "parser-app-register"
+section = "parser_app / http-server"
+kind = "file-contains"
+path = "src/parser/app/src/registry.rs"
+pattern = 'feature = "{chain}"'
+description = "parser_app registers converter"
+
+[[touchpoint]]
+id = "parser-app-registry-test"
+section = "parser_app / http-server"
+kind = "file-contains"
+path = "src/parser/app/src/registry.rs"
+pattern = 'convert_transaction\(&(visualsign::registry::)?Chain::{Variant}'
+description = "parser_app registry test"
+
+[[touchpoint]]
+id = "http-server-feature"
+section = "parser_app / http-server"
+kind = "file-contains"
+path = "src/parser/http-server/Cargo.toml"
+pattern = '^{chain} *= *\["parser_app/{chain}"\]'
+description = "http-server feature"
+
+# --- Default set -------------------------------------------------------------
+
+[[touchpoint]]
+id = "default-on"
+section = "Default set: parser_app default == http-server default == every CHAIN_FEATURES"
+kind = "info-only"
+test = "in-default-set"
+description = "default-on or opt-in in parser_app"
+yes = "{chain} is DEFAULT-ON in parser_app (state this in the PR)"
+no = "{chain} is OPT-IN in parser_app (state this in the PR)"
+
+[[touchpoint]]
+id = "default-set-http-server"
+section = "Default set: parser_app default == http-server default == every CHAIN_FEATURES"
+kind = "default-set-equality"
+path = "src/parser/http-server/Cargo.toml"
+extract = "cargo-default"
+description = "http-server default"
+
+[[touchpoint]]
+id = "default-set-parser-app-image"
+section = "Default set: parser_app default == http-server default == every CHAIN_FEATURES"
+kind = "default-set-equality"
+path = "images/parser_app/Containerfile"
+extract = "chain-features-arg"
+description = "{path} CHAIN_FEATURES"
+
+[[touchpoint]]
+id = "default-set-http-server-image"
+section = "Default set: parser_app default == http-server default == every CHAIN_FEATURES"
+kind = "default-set-equality"
+path = "images/parser_http_server/Containerfile"
+extract = "chain-features-arg"
+description = "{path} CHAIN_FEATURES"
+
+[[touchpoint]]
+id = "default-set-oss-scanner"
+section = "Default set: parser_app default == http-server default == every CHAIN_FEATURES"
+kind = "default-set-equality"
+path = ".oss-scanner/Dockerfile"
+extract = "chain-features-arg"
+description = "{path} CHAIN_FEATURES"
+
+# --- parser_cli --------------------------------------------------------------
+
+[[touchpoint]]
+id = "parser-cli-feature"
+section = "parser_cli"
+kind = "file-contains"
+path = "src/parser/cli/Cargo.toml"
+pattern = '^{chain} *= *\["dep:visualsign-{chain}"'
+description = "parser_cli feature"
+
+[[touchpoint]]
+id = "parser-cli-plugin"
+section = "parser_cli"
+kind = "file-contains"
+path = "src/parser/cli/src/main.rs"
+pattern = 'visualsign_{snake}::'
+description = "parser_cli main.rs plugin"
+
+[[touchpoint]]
+id = "cli-core-chains"
+section = "parser_cli"
+kind = "file-contains"
+path = "src/parser/cli-core/src/chains.rs"
+pattern = '"{chain}", *Chain::{Variant}'
+description = "cli-core chains.rs mapping"
+
+[[touchpoint]]
+id = "makefile-parser-cli-chains"
+section = "parser_cli"
+kind = "file-contains"
+path = "src/Makefile"
+pattern = '^PARSER_CLI_CHAINS *:=.*\b{chain}\b'
+description = "Makefile PARSER_CLI_CHAINS"
+
+[[touchpoint]]
+id = "cli-test-feature-list"
+section = "parser_cli"
+kind = "file-contains"
+path = "src/parser/cli/tests/cli_test.rs"
+pattern = 'feature = "{chain}"'
+description = "cli_test.rs feature list"
+
+[[touchpoint]]
+id = "cli-test-disabled-prefix"
+section = "parser_cli"
+kind = "file-contains"
+path = "src/parser/cli/tests/cli_test.rs"
+pattern = '^ *"{chain}",$'
+description = "cli_test.rs disabled prefix"
+
+[[touchpoint]]
+id = "cli-fixture"
+section = "parser_cli"
+kind = "glob-exists"
+path = "src/parser/cli/tests/fixtures/{chain}-*.input"
+description = "parser_cli fixture {chain}-*.input"
+missing = "parser_cli fixture ({path})"
+
+# --- Repo metadata and docs --------------------------------------------------
+
+[[touchpoint]]
+id = "labeler"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = ".github/labeler.yml"
+pattern = '^"chain:{chain}":'
+description = "labeler chain:{chain}"
+
+[[touchpoint]]
+id = "codeowners"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = ".github/CODEOWNERS"
+pattern = '^/src/chain_parsers/visualsign-{chain}/ '
+description = "CODEOWNERS entry"
+
+[[touchpoint]]
+id = "docs-page"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "docs/chains/{chain}.mdx"
+pattern = '.'
+description = "{path}"
+
+[[touchpoint]]
+id = "docs-nav"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "docs/docs.json"
+pattern = '"chains/{chain}"'
+description = "docs.json nav"
+
+[[touchpoint]]
+id = "docs-chain-modules"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "docs/chain-modules.mdx"
+pattern = 'chains/{chain}\)'
+description = "chain-modules.mdx"
+
+[[touchpoint]]
+id = "docs-introduction"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "docs/introduction.mdx"
+pattern = 'chains/{chain}\)'
+description = "introduction.mdx"
+
+[[touchpoint]]
+id = "docs-parser-cli"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "docs/parser-cli.mdx"
+pattern = '`{chain}`'
+description = "parser-cli.mdx --chain list"
+
+[[touchpoint]]
+id = "readme"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "README.md"
+pattern = '^- {Variant}\b'
+description = "README chain list"
+
+[[touchpoint]]
+id = "changelog"
+section = "Repo metadata and docs"
+kind = "any-file-contains"
+paths = ["docs/changelog/_drafts/*.md", "docs/changelog/*.mdx"]
+pattern = '{chain}'
+case_insensitive = true
+description = "changelog entry"
+missing = "changelog entry (docs/changelog/_drafts/<date>-{chain}-*.md)"
+
+[[touchpoint]]
+id = "claude-md"
+section = "Repo metadata and docs"
+kind = "file-contains"
+path = "CLAUDE.md"
+pattern = 'visualsign-\{[^}]*\b{chain}\b'
+description = "CLAUDE.md crate list"
+
+[[touchpoint]]
+id = "apple-no-c"
+section = "Repo metadata and docs"
+kind = "info-only"
+test = "file-contains"
+path = "src/Makefile"
+guard = '^APPLE_NO_C_CRATES'
+pattern = '^APPLE_NO_C_CRATES *:=.*visualsign-{chain}\b'
+description = "C-free crates checked on iOS"
+yes = "visualsign-{chain} is in APPLE_NO_C_CRATES (C-free, checked on iOS)"
+no = "visualsign-{chain} is NOT in APPLE_NO_C_CRATES (state its C deps in the PR)"
+unguarded = "no APPLE_NO_C_CRATES in src/Makefile yet; check C deps by hand (see SKILL.md)"

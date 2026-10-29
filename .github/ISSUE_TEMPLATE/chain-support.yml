@@ -1,0 +1,102 @@
+name: Chain support
+description: Track a chain parser from first PR to production (one issue per chain)
+title: "Chain support: <Variant>"
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One issue per chain. Replace `<Variant>` in the title with the Rust enum
+        variant (e.g. `Near`). Leave the M1 Wiring block empty: the
+        `chain-tracking-sync` workflow fills it from the default branch with
+        `chain-wiring issue-body` and keeps it current. Tick every other box by
+        hand, or strike it through with a reason (`- [x] ~~...~~ n/a: why`).
+        See `.claude/skills/add-chain/SKILL.md`.
+  - type: input
+    id: chain
+    attributes:
+      label: Chain name
+      description: Lowercase name used for the crate dir, Cargo feature and CLI `--chain` value.
+      placeholder: near
+    validations:
+      required: true
+  - type: input
+    id: variant
+    attributes:
+      label: Rust variant
+      description: "`visualsign::registry::Chain::<Variant>`. Leave empty if it's the chain name capitalised."
+      placeholder: Near
+    validations:
+      required: false
+  - type: input
+    id: proto-slot
+    attributes:
+      label: Proto slot
+      description: "`CHAIN_<NAME> = <n>` in `proto/parser/parser.proto`, after checking open PRs (wiring.md step 3)."
+      placeholder: "9"
+    validations:
+      required: true
+  - type: textarea
+    id: milestones
+    attributes:
+      label: Milestones
+      description: Keep the markers around M1; the sync workflow replaces only what's between them.
+      value: |
+        ## M0 Scope and policy
+
+        - [ ] Proto slot claimed (open PRs checked, see wiring.md step 3)
+        - [ ] Default-on or opt-in decided and stated in the PR
+        - [ ] Network-trust convention decided (signed, or "Declared network (unsigned)")
+        - [ ] C dependencies stated, with `cargo tree -p visualsign-<chain> -e normal,build --target aarch64-apple-ios -i cc`
+        - [ ] Reference crate chosen; vector sources listed with immutable pins
+
+        ## M1 Wiring
+
+        _Filled in by the `chain-tracking-sync` workflow from the default branch; edits here are overwritten._
+
+        <!-- add-chain:wiring:start -->
+        <!-- add-chain:wiring:end -->
+
+        ## M2 Parser safety and tests (ship with the chain PR)
+
+        - [ ] Encoded size capped before decoding, with a test
+        - [ ] Structural and recursion caps, with tests
+        - [ ] Amplification ratio measured on the largest allowed input and stated
+        - [ ] Shows only what the signature commits to; refused modes have tests
+        - [ ] Fails closed on unknown types, unknown fields and trailing bytes, with tests
+        - [ ] No panics on input; checked arithmetic for amounts
+        - [ ] Pinned-provenance vectors
+        - [ ] `REGEN_FIXTURES` goldens
+        - [ ] `review_*` regression tests for each behaviour-changing review finding
+        - [ ] Differential oracle as a dev-dependency (or the reason there is none)
+
+        ## M3 Property tests
+
+        - [ ] `src/chain_parsers/visualsign-<chain>/tests/proptest_<chain>.rs`
+        - [ ] Runs in CI under the `test:proptest` label (pattern: `proptest-solana.yml`)
+        - [ ] Regressions file committed
+
+        ## M4 Fuzzing
+
+        - [ ] `src/chain_parsers/visualsign-<chain>/fuzz/` with a `fuzz_transaction_string` target
+        - [ ] Runs in CI under the `test:fuzz` label (pattern: `fuzz-solana.yml`)
+        - [ ] Corpus seeded from the test fixtures
+
+        ## M5 iOS (C-free)
+
+        - [ ] No `cc` in the normal+build graph for `aarch64-apple-ios`, or the C dependency is named and justified
+        - [ ] In `APPLE_NO_C_CRATES` and passing `make -C src apple-silicon-check` (once that target exists)
+
+        ## M6 Production
+
+        - [ ] Downstream integration named and linked (who sends this chain's payloads)
+        - [ ] visualsign-turnkeyclient handles the chain: ChainMetadata arm and intermediate-output decoder if the chain has them, docs and a test (client PR linked, or n/a with the reason)
+        - [ ] `visualsign-turnkeyclient verify --chain CHAIN_<X>` against the deployed enclave returns valid, attestationValid and signatureValid
+        - [ ] Default-on in parser_app, http-server and the images (if it started opt-in)
+        - [ ] Changelog entry published
+
+        ## Links
+
+        - PRs:
+    validations:
+      required: true

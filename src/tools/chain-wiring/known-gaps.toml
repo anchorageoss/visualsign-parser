@@ -1,0 +1,52 @@
+# Wiring gaps that existing chains have on the default branch, so the CI gate
+# (tests/real_repo.rs, and `chain-wiring pr-check`) can pass while they stand.
+#
+#   [<chain>]
+#   <touchpoint id from touchpoints.toml> = "<why it's missing>"
+#
+# This list only shrinks. The gate fails on a missing touch point that isn't
+# listed here, and on an entry whose touch point is now present: fix a gap,
+# delete its line. A PR that adds a line fails `pr-check` unless a maintainer
+# adds the `chain-wiring:allow-gap` label. A new chain gets no entries.
+
+[bitcoin]
+parser-app-registry-test = "no parser_app registry test converts a Bitcoin vector"
+default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES predates bitcoin and was never updated"
+cli-test-feature-list = "cli_test.rs's cfg_attr feature list doesn't name bitcoin"
+cli-test-disabled-prefix = "cli_test.rs's disabled_chain_prefixes doesn't name bitcoin"
+cli-fixture = "no parser_cli end-to-end fixture for bitcoin"
+codeowners = "no CODEOWNERS line for visualsign-bitcoin"
+claude-md = "CLAUDE.md's crate list predates bitcoin"
+
+[ethereum]
+parser-app-registry-test = "the test exists but rustfmt splits convert_transaction( and &Chain::Ethereum across lines, which the line-based check can't see"
+default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES lacks bitcoin, so it differs from parser_app default"
+
+[near]
+parser-app-registry-test = "no parser_app registry test converts a NEAR vector"
+default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES lacks bitcoin, so it differs from parser_app default"
+docs-chain-modules = "docs/chain-modules.mdx doesn't link chains/near"
+docs-introduction = "docs/introduction.mdx doesn't link chains/near"
+readme = "README's Supported Chains list doesn't name NEAR"
+claude-md = "CLAUDE.md's crate list predates near"
+
+[solana]
+parser-app-registry-test = "no parser_app registry test converts a Solana vector"
+default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES lacks bitcoin, so it differs from parser_app default"
+
+[sui]
+crate-default-cli-plugin = "visualsign-sui has no cli-plugin feature; it has no parser_cli plugin yet"
+parser-app-registry-test = "no parser_app registry test converts a Sui vector"
+default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES lacks bitcoin, so it differs from parser_app default"
+parser-cli-feature = "parser_cli doesn't support sui yet"
+parser-cli-plugin = "parser_cli doesn't support sui yet"
+makefile-parser-cli-chains = "parser_cli doesn't support sui yet, so it isn't in PARSER_CLI_CHAINS"
+cli-test-feature-list = "parser_cli doesn't support sui yet"
+cli-test-disabled-prefix = "parser_cli doesn't support sui yet"
+cli-fixture = "parser_cli doesn't support sui yet, so there is no CLI fixture"
+codeowners = "no CODEOWNERS line for visualsign-sui"
+
+[tron]
+parser-app-registry-test = "no parser_app registry test converts a Tron vector"
+default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES lacks bitcoin, so it differs from parser_app default"
+codeowners = "no CODEOWNERS line for visualsign-tron"
