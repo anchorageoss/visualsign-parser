@@ -146,7 +146,6 @@ impl IdlRegistry {
     pub fn get_program_name(&self, program_id: &Pubkey) -> String {
         let program_id_str = program_id.to_string();
 
-
         // Canonical names for trusted built-ins always win. This is the
         // primary defence against caller-controlled mislabeling.
         if let Some(name) = canonical_name(&program_id_str) {

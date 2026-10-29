@@ -135,10 +135,12 @@ fn decode_hex_fixed<const N: usize>(
             kind,
             message: format!("Invalid {what} hex: {e}"),
         })?;
-    bytes.try_into().map_err(|v: Vec<u8>| IdlSignatureError::Validation {
-        kind,
-        message: format!("Invalid {what} length: expected {N} bytes, got {}", v.len()),
-    })
+    bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| IdlSignatureError::Validation {
+            kind,
+            message: format!("Invalid {what} length: expected {N} bytes, got {}", v.len()),
+        })
 }
 
 /// Validate an IDL JSON string against an ed25519 signature, enforcing an
@@ -173,12 +175,14 @@ pub fn validate_idl_signature(
     signature: &SignatureMetadata,
     allowlist: &SignerAllowlist,
 ) -> Result<(), IdlSignatureError> {
-    let algorithm = signature.algorithm.as_deref().ok_or_else(|| {
-        IdlSignatureError::Validation {
-            kind: "signature_rejected_missing_algorithm",
-            message: "Missing algorithm".to_string(),
-        }
-    })?;
+    let algorithm =
+        signature
+            .algorithm
+            .as_deref()
+            .ok_or_else(|| IdlSignatureError::Validation {
+                kind: "signature_rejected_missing_algorithm",
+                message: "Missing algorithm".to_string(),
+            })?;
 
     if algorithm != SUPPORTED_ALGORITHM {
         return Err(IdlSignatureError::Validation {
@@ -189,12 +193,14 @@ pub fn validate_idl_signature(
         });
     }
 
-    let public_key_hex = signature.public_key.as_deref().ok_or_else(|| {
-        IdlSignatureError::Validation {
-            kind: "signature_rejected_missing_public_key",
-            message: "Missing public_key".to_string(),
-        }
-    })?;
+    let public_key_hex =
+        signature
+            .public_key
+            .as_deref()
+            .ok_or_else(|| IdlSignatureError::Validation {
+                kind: "signature_rejected_missing_public_key",
+                message: "Missing public_key".to_string(),
+            })?;
 
     let hash = visualsign::signing::solana_metadata_prehash(program_id, idl_json.as_bytes());
 

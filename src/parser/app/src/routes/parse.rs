@@ -96,12 +96,11 @@ pub(crate) fn parse_with_registry(
     // `SerializationError` if internal JSON serialization fails). Those are
     // server-side bugs, not client input problems, so map them to `Internal`
     // and reserve `InvalidArgument` for genuine validation rejections.
-    signable_payload.validate_charset().map_err(|e| match e {
-        VisualSignError::ValidationError(_) => {
+    signable_payload.validate_charset().map_err(|e| {
+        if let VisualSignError::ValidationError(_) = e {
             oracle::event("reject_charset_violation");
             GrpcError::new(Code::InvalidArgument, &format!("{e}"))
-        }
-        _ => {
+        } else {
             oracle::event("reject_internal_serialization_failure");
             GrpcError::new(Code::Internal, &format!("{e}"))
         }
@@ -408,7 +407,8 @@ mod tests {
     /// still reject payloads containing non-ASCII characters before signing.
     #[test]
     fn parse_rejects_non_ascii_payload_when_converter_skips_validation() {
-        let _t = oracle::start_test("parse_rejects_non_ascii_payload_when_converter_skips_validation");
+        let _t =
+            oracle::start_test("parse_rejects_non_ascii_payload_when_converter_skips_validation");
         // U+202E RIGHT-TO-LEFT OVERRIDE: a bidi control that flips display
         // order and is the canonical spoofing primitive.
         let poisoned = "transfer\u{202E}approve";

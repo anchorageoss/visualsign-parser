@@ -18,21 +18,21 @@ const COMPONENT: &str = "parse-sign-pipeline";
 
 /// The oracle test boundary: one trace per test. Bind it with
 /// `let _t = oracle::start_test("<test name>");` and hold it for the test's scope.
-#[cfg(feature = "oracle")]
+#[cfg(all(feature = "oracle", test))]
 pub(crate) type TestGuard = quint_oracle::TestGuard;
 
 /// Inert stand-in so call sites need no `cfg` of their own.
-#[cfg(not(feature = "oracle"))]
+#[cfg(all(not(feature = "oracle"), test))]
 pub(crate) struct TestGuard;
 
 /// Begin an oracle trace named `name`. No-op (and inert guard) unless the `oracle`
 /// feature is on and the oracle set `QUINT_ORACLE_URL`.
-#[cfg(feature = "oracle")]
+#[cfg(all(feature = "oracle", test))]
 pub(crate) fn start_test(name: &str) -> TestGuard {
     quint_oracle::register_test(name)
 }
 
-#[cfg(not(feature = "oracle"))]
+#[cfg(all(not(feature = "oracle"), test))]
 pub(crate) fn start_test(_name: &str) -> TestGuard {
     TestGuard
 }

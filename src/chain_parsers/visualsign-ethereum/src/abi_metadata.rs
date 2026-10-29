@@ -331,14 +331,11 @@ fn extract_with_provenance(
         let registered = register_embedded_abi(&mut registry, address, &abi.value);
         // Quint Studio: whether the caller's ABI JSON parses is this code's answer.
         if quint_oracle::enabled() {
-            quint_oracle::Event::builder(
-                quint_oracle::current_test(),
-                "report_eth_abi_body_parse",
-            )
-            .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
-            .argument("parses", registered.is_ok(), None)
-            .scope("metadata-signature-trust")
-            .send();
+            quint_oracle::Event::builder(quint_oracle::current_test(), "report_eth_abi_body_parse")
+                .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                .argument("parses", registered.is_ok(), None)
+                .scope("metadata-signature-trust")
+                .send();
         }
         match registered {
             Ok(()) => {
@@ -510,12 +507,14 @@ fn validate_abi_signature(
     allowlist: Option<&SignerAllowlist>,
 ) -> Result<(), AbiSignatureError> {
     // 1. Get algorithm - must be secp256k1
-    let algorithm = signature.algorithm.as_deref().ok_or_else(|| {
-        AbiSignatureError::Validation {
-            kind: "signature_rejected_missing_algorithm",
-            message: "Missing algorithm".to_string(),
-        }
-    })?;
+    let algorithm =
+        signature
+            .algorithm
+            .as_deref()
+            .ok_or_else(|| AbiSignatureError::Validation {
+                kind: "signature_rejected_missing_algorithm",
+                message: "Missing algorithm".to_string(),
+            })?;
 
     if algorithm != SUPPORTED_ALGORITHM {
         return Err(AbiSignatureError::Validation {
@@ -527,12 +526,14 @@ fn validate_abi_signature(
     }
 
     // 2. Get public key
-    let public_key_hex = signature.public_key.as_deref().ok_or_else(|| {
-        AbiSignatureError::Validation {
-            kind: "signature_rejected_missing_public_key",
-            message: "Missing public_key".to_string(),
-        }
-    })?;
+    let public_key_hex =
+        signature
+            .public_key
+            .as_deref()
+            .ok_or_else(|| AbiSignatureError::Validation {
+                kind: "signature_rejected_missing_public_key",
+                message: "Missing public_key".to_string(),
+            })?;
 
     // 3. Compute the domain-separated prehash binding chain id + contract address
     //    to the ABI JSON.
