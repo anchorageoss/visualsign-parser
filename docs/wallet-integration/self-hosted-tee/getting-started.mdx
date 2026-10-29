@@ -205,14 +205,14 @@ Before you deploy an image you didn't build, such as one from a contributor's fo
 
 A rebuild that matches proves the binary was built from that source. It does not prove the source is safe, so read the source before you deploy it. The rebuild also runs the fork's build files on your machine: its `Makefile` (including any `$(shell ...)` call) and its Containerfiles. Review them first, or do the rebuild in a disposable VM.
 
-Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION**, the **SOURCE_URL** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and `SOURCE_URL` is recorded in the image's source label, so pass the same values when you rebuild. The run summary comes from the fork, so check each value before you use it. Save these steps as a script, which stops at the first failure:
+Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION**, the **SOURCE_URL** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and `SOURCE_URL` is recorded in the image's source label, so pass the same values when you rebuild. The run summary comes from the fork, so treat each value as untrusted input. Save these steps as a script, which reads the values as data, checks them, and stops at the first failure. Paste each value at its prompt; don't edit them into the script, where a quote or `;` in a value would run as shell code:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-COMMIT='<commit>'          # from the run summary
-VERSION='<version>'        # from the run summary
-SOURCE_URL='<source-url>'  # from the run summary
+IFS= read -r -p 'COMMIT (from the run summary): ' COMMIT
+IFS= read -r -p 'VERSION (from the run summary): ' VERSION
+IFS= read -r -p 'SOURCE_URL (from the run summary): ' SOURCE_URL
 
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected COMMIT" >&2; exit 1; }
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[A-Za-z0-9-]+)?$ ]] || { echo "unexpected VERSION" >&2; exit 1; }
@@ -228,6 +228,7 @@ The workflow refuses to build with a `VERSION` of any other shape, and the `Make
 ```bash
 git checkout "$COMMIT"
 docker buildx create --driver docker-container --name build --use   # once
+rm -rf out/parser_http_server   # make won't rebuild for a new VERSION or SOURCE_URL alone
 make VERSION="$VERSION" SOURCE_URL="$SOURCE_URL" out/parser_http_server/index.json
 jq -r '.manifests[0].digest' out/parser_http_server/index.json      # compare with the run summary
 ```
