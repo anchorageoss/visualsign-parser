@@ -75,13 +75,17 @@ SignablePayload {
                 ),
             },
         },
-        TextV2 {
+        AddressV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT",
                 label: "Signing Address",
             },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT",
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
             },
         },
     ],
