@@ -9,10 +9,9 @@
 
 use super::*;
 use crate::test_utils::InstructionTestContext;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-};
+use solana_instruction::AccountMeta;
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 use std::str::FromStr;
 use visualsign::SignablePayloadField;
 

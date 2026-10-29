@@ -51,6 +51,8 @@ test: build
 	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test --no-fail-fast -p parser_cli --all-targets
+	@# Solana intents are opt-in (solana-intents); run the CLI fixtures with them.
+	cargo test --no-fail-fast -p parser_cli --features solana-intents --test cli_test
 	cargo test --no-fail-fast -p visualsign --features diagnostics --lib
 	cargo test --no-fail-fast -p parser_cli_core --features diagnostics --lib
 	cargo test --no-fail-fast -p visualsign-near --features diagnostics --lib
@@ -109,10 +111,26 @@ lint: fmt-check
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
+	cargo clippy -p parser_cli --features solana-intents --all-targets -- -D warnings
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
 	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
+
+# Library crates that must build for Apple Silicon (iOS device) with no
+# C/C++/asm in the dependency tree. Add a chain here once its crate passes.
+APPLE_NO_C_CRATES := visualsign visualsign-ethereum visualsign-tron visualsign-unspecified
+
+.PHONY: apple-silicon-check
+apple-silicon-check:
+	@# Any build script that compiles C calls the C compiler; pointing it at
+	@# `false` turns a C dependency into a build failure. Run on an Apple
+	@# Silicon macOS host (CI: macos-latest), which also runs the tests natively.
+	CC=/usr/bin/false CXX=/usr/bin/false cargo build --lib --target aarch64-apple-ios $(addprefix -p ,$(APPLE_NO_C_CRATES))
+	@# visualsign-solana is free of C only without its default features (json-parsed
+	@# pulls zstd-sys) and without `intents` (near-sdk pulls secp256k1-sys).
+	CC=/usr/bin/false CXX=/usr/bin/false cargo build --lib --target aarch64-apple-ios -p visualsign-solana --no-default-features
+	cargo test --no-fail-fast $(addprefix -p ,$(APPLE_NO_C_CRATES))
 
 .PHONY: narrow-build-check
 narrow-build-check:
@@ -143,6 +161,9 @@ narrow-build-check:
 		cargo check -p parser_app --no-default-features --features $$c; \
 		cargo clippy -p parser_app --no-default-features --features $$c --all-targets -- -D warnings; \
 	done
+	@# Opt-in extras that are not a chain of their own.
+	cargo check -p parser_app --no-default-features --features solana-intents
+	cargo clippy -p parser_app --no-default-features --features solana-intents --all-targets -- -D warnings
 	make dev-signing-absent-check
 
 .PHONY: parser-cli-narrow-build-check

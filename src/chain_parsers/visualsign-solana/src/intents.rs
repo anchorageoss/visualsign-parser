@@ -14,17 +14,25 @@
 //! off-chain message, never as an instruction, so they are reached from the
 //! message path instead and would be registered against a program that never
 //! matches.
+//!
+//! Behind the `intents` feature, off by default: `visualsign-intents` depends
+//! on `near-sdk`, which pulls `near-crypto` -> `secp256k1-sys`, a C library
+//! that a `--no-default-features` build of this crate otherwise avoids
+//! entirely. Without the feature, a message shaped
+//! like an intents payload is refused rather than shown as text (see
+//! `message_to_visual_sign_payload`).
+//!
+//! A remaining limitation: a Solana wallet signs message bytes as they are, so
+//! a 32-byte message can be the SHA-256 prehash a NEP-413, SEP-53 or TON
+//! Connect verifier checks. The message path refuses a 32-byte message unless
+//! it is all ASCII letters and digits; that bounds the risk, but only the
+//! wallet, which sees what the dApp asked for, can rule it out.
 
-#[cfg(feature = "intents")]
 use std::sync::Arc;
 
-#[cfg(feature = "intents")]
 use visualsign::errors::VisualSignError;
-#[cfg(feature = "intents")]
 use visualsign::registry::LayeredRegistry;
-#[cfg(feature = "intents")]
 use visualsign::vsptrait::VisualSignOptions;
-#[cfg(feature = "intents")]
 use visualsign_intents::{NearIntentsError, NearTokenRegistry, RenderedEnvelope};
 
 /// Render a message as NEAR Intents, or `Ok(None)` when it is not one.
@@ -39,7 +47,6 @@ use visualsign_intents::{NearIntentsError, NearTokenRegistry, RenderedEnvelope};
 /// oneof, so a Solana request carries `SolanaMetadata` and has no field in which
 /// to send NEAR token mappings; an asset outside the seed table renders as its
 /// asset id, marked unresolved.
-#[cfg(feature = "intents")]
 pub fn try_render(
     message: &[u8],
     options: &VisualSignOptions,

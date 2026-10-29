@@ -70,6 +70,9 @@ fn test_cli_with_fixtures() {
         "near",
         #[cfg(not(feature = "solana"))]
         "solana",
+        // Renders only with the opt-in Solana intents decoder; refused without.
+        #[cfg(not(feature = "solana-intents"))]
+        "solana-message-intents",
         #[cfg(not(feature = "tron"))]
         "tron",
     ];

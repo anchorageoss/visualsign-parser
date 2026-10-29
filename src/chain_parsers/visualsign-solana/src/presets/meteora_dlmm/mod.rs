@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_build_named_accounts_pairs_ordered_accounts() {
-        use solana_sdk::pubkey::Pubkey;
+        use solana_pubkey::Pubkey;
 
         let idl = get_meteora_dlmm_idl().expect("IDL must load");
 

@@ -3,7 +3,10 @@
 //! Content, not an envelope: the same `DefusePayload` arrives through a NEAR
 //! transaction, a NEP-413 message, a Solana raw ed25519 message or an ERC-191
 //! message, so this crate knows how to read one and nothing about how it
-//! travelled. It depends on no chain crate.
+//! travelled. It has no chain-parser dependency: only the NEAR SDK and the
+//! defuse types. Those are not free of C, though: `near-sdk` pulls
+//! `near-crypto` -> `secp256k1` -> `secp256k1-sys`, so a crate depending on this
+//! one is not a no-C build (see `APPLE_NO_C_CRATES` in `src/Makefile`).
 //!
 //! Public API uses only `visualsign` types + plain primitives. The defuse-*
 //! and near-sdk transitive dependencies are confined to this module's
@@ -29,6 +32,7 @@ pub use token_signature::{
 };
 
 pub use render::rejected_metadata_diagnostics;
+pub use tokens::format_tgas;
 
 /// Dev/CLI signing helpers for constructing signed `TokenMetadataEntry` proto
 /// values (e.g. for local test fixtures). Gated the same way as the
@@ -69,7 +73,7 @@ pub enum NearIntentsError {
     /// that would be signed without being shown.
     #[error("{0}")]
     UndeclaredFields(String),
-    /// The input is a JSON object with an `intents` key, so it is meant as a
+    /// The input is [intent-shaped](is_intent_shaped), so it is meant as a
     /// `DefusePayload`, but it does not decode as one this build understands:
     /// an intent kind it does not know (`{"intent":"future_unknown"}`), or an
     /// `intents` value of the wrong shape (`null`). Kept distinct from
@@ -80,18 +84,34 @@ pub enum NearIntentsError {
     MalformedIntentEnvelope(String),
 }
 
-/// Whether `json` is meant as a NEAR Intents payload: a JSON object carrying an
-/// `intents` key, whatever that key holds. Every intents message has one (the
-/// `DefusePayload` and the NEP-413 inner message alike), and ordinary text a
-/// signer approves does not.
+/// The keys every `DefusePayload` must carry. `intents` is not among them:
+/// defuse defaults a missing list to an empty one, and a payload with none is
+/// valid (it spends the nonce, which is how a pending request is cancelled).
+pub const REQUIRED_ENVELOPE_KEYS: [&str; 4] =
+    ["signer_id", "verifying_contract", "deadline", "nonce"];
+
+/// Whether `json` is meant as a NEAR Intents payload: a JSON object carrying
+/// every [required envelope key](REQUIRED_ENVELOPE_KEYS), or an `intents` key,
+/// whatever that key holds.
+///
+/// Classified by the required keys rather than by `intents` alone, because
+/// `intents` is optional: `{"signer_id", "verifying_contract", "deadline",
+/// "nonce"}` with no `intents` is a payload the verifier executes (a cancel).
+/// An `intents` key also counts, so a payload that names intents but lacks an
+/// envelope key is refused as malformed rather than shown as text. JSON with
+/// only some envelope keys cannot decode as a payload, so the verifier would
+/// not accept a signature over it either.
 ///
 /// A chain that renders arbitrary messages uses this to fail closed: an
 /// intent-shaped message that does not decode must be refused, not shown as
 /// text.
 #[must_use]
 pub fn is_intent_shaped(json: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(json)
-        .is_ok_and(|value| value.as_object().is_some_and(|o| o.contains_key("intents")))
+    serde_json::from_slice::<serde_json::Value>(json).is_ok_and(|value| {
+        value.as_object().is_some_and(|o| {
+            o.contains_key("intents") || REQUIRED_ENVELOPE_KEYS.iter().all(|k| o.contains_key(*k))
+        })
+    })
 }
 
 /// Translate a render-layer failure into this module's error.
@@ -255,14 +275,15 @@ pub fn try_render_single_intent(
     _options: &visualsign::vsptrait::VisualSignOptions,
     network: crate::network::SettlementNetwork,
 ) -> Result<RenderedEnvelope, NearIntentsError> {
-    // Classified before the typed decode, which defaults a missing `intents` to
-    // an empty list: ordinary JSON that happens to carry the envelope's other
-    // fields (a sign-in challenge naming a `signer_id` and `deadline`) would
-    // otherwise decode as a request to do nothing, and a caller that shows
-    // non-intents text as text would never get to.
+    // Classified before the typed decode, so JSON that is not a payload (a
+    // sign-in challenge naming a `signer_id` and a `deadline`, say) reaches a
+    // caller's text fallback instead of being refused as malformed. A payload
+    // with every required key and no `intents` is not such JSON: it decodes to
+    // an empty list and renders as a cancel.
     if !is_intent_shaped(payload_json) {
         return Err(NearIntentsError::InputNotJson(
-            "not a NEAR Intents payload: no top-level `intents` key".to_string(),
+            "not a NEAR Intents payload: no top-level `intents` key and not every envelope key"
+                .to_string(),
         ));
     }
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
@@ -579,17 +600,55 @@ mod tests {
         }
     }
 
-    /// `DefusePayload` defaults a missing `intents` to an empty list, so JSON
-    /// that carries the envelope's other fields but no `intents` key decodes as
-    /// one. It is not a NEAR Intents payload and must stay on the text
-    /// fallback: neither rendered as an empty request nor refused for a key
-    /// the envelope does not declare.
+    /// `intents` is optional in a `DefusePayload` (defuse defaults it to an
+    /// empty list), and a payload with none is valid: it spends the nonce,
+    /// which is how a user cancels a pending signed quote or order. Both the
+    /// absent and the empty form must render as a signable cancel showing the
+    /// signer, verifying contract, deadline and nonce.
     #[test]
-    fn single_intent_leaves_json_without_intents_to_the_text_fallback() {
+    fn a_payload_without_intents_renders_as_a_cancel() {
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
         for message in [
             r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
-            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","action":"login"}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[]}"#,
+        ] {
+            assert!(is_intent_shaped(message.as_bytes()), "{message}");
+            let rendered = try_render_single_intent(
+                message.as_bytes(),
+                &reg,
+                &VisualSignOptions::default(),
+                crate::network::SettlementNetwork::Mainnet,
+            )
+            .unwrap_or_else(|e| panic!("{message}: {e}"));
+            assert_eq!(rendered.title, "Cancel: invalidate nonce", "{message}");
+            let labels: Vec<&str> = rendered.fields.iter().filter_map(label_of).collect();
+            for expected in [
+                "Signer",
+                "Verifying Contract",
+                "Deadline",
+                "Nonce",
+                "Intent",
+            ] {
+                assert!(labels.contains(&expected), "{message}: missing {expected}");
+            }
+            assert!(
+                rendered
+                    .fields
+                    .iter()
+                    .any(|f| super::test_support::is_warning_diagnostic(f, "empty-intents")),
+                "{message}: expected the nonce-only warning"
+            );
+        }
+    }
+
+    /// JSON with only some of the envelope keys cannot decode as a payload, so
+    /// no verifier accepts a signature over it: it stays on the text fallback.
+    #[test]
+    fn json_with_only_some_envelope_keys_stays_text() {
+        let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        for message in [
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"signer_id":"alice.near","action":"login"}"#,
         ] {
             let result = try_render_single_intent(
                 message.as_bytes(),
