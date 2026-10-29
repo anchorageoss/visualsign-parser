@@ -228,14 +228,16 @@ fn assert_matches_core(node: &Node, name: &str, psbt: &str) -> Rendered {
 
     let core_fee = core["fee"].as_f64().map(|_| sat(&core["fee"]));
     assert_eq!(rendered.fee.sat(), core_fee, "{name}: fee");
+    // Core leaves non_witness_utxo out for taproot inputs, so its own taproot
+    // spends render as signature-bound rather than verified.
     let sighash_ok = rendered.inputs.iter().all(|i| i.sighash.is_none());
-    let expect_verified = sighash_ok && (all_full || all_taproot);
-    assert_eq!(
-        matches!(rendered.fee, RenderedFee::Verified(_)),
-        expect_verified,
-        "{name}: fee verification ({:?})",
-        rendered.fee
-    );
+    let label_ok = match rendered.fee {
+        RenderedFee::Verified(_) => sighash_ok && all_full,
+        RenderedFee::SignatureBound(_) => sighash_ok && !all_full && all_taproot,
+        RenderedFee::Unverified { .. } => !sighash_ok || (!all_full && !all_taproot),
+        RenderedFee::Unknown => core_fee.is_none(),
+    };
+    assert!(label_ok, "{name}: fee label ({:?})", rendered.fee);
     rendered
 }
 
