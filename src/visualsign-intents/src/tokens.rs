@@ -137,7 +137,7 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
 /// for it even though `mt_token_id` may contain further `:`s.
 fn mt_underlying_nep141(asset_id: &str) -> Option<String> {
     let (contract, mt_token_id) = asset_id.strip_prefix("nep245:")?.split_once(':')?;
-    (contract == crate::convert::INTENTS_RECEIVER
+    (contract == crate::INTENTS_RECEIVER
         && matches!(mt_token_id.parse::<TokenId>(), Ok(TokenId::Nep141(_))))
     .then(|| mt_token_id.to_string())
 }
@@ -184,6 +184,13 @@ pub(crate) fn resolve(
 ///
 /// `decimals` must be within [`MAX_DECIMALS`]; [`resolve`] is the only source
 /// of registry-supplied values and refuses anything larger.
+/// Gas as Tgas (10^12 gas units) with trailing-zero trim. The one formatter
+/// for the unit: the NEAR transaction path renders gas through it too.
+#[must_use]
+pub fn format_tgas(gas: u64) -> String {
+    format_units(u128::from(gas), 12)
+}
+
 pub(crate) fn format_units(units: u128, decimals: u8) -> String {
     let scale = 10u128.pow(u32::from(decimals));
     let whole = units / scale;
@@ -199,7 +206,7 @@ pub(crate) fn format_units(units: u128, decimals: u8) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::presets::intents::TokenProvenance;
+    use crate::TokenProvenance;
     use std::sync::Arc;
     use visualsign::registry::LayeredRegistry;
 

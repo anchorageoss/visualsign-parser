@@ -62,7 +62,7 @@ use serde::Deserialize;
 use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
 
 use super::{NearTokenRegistry, TokenMeta, TokenProvenance, tokens};
-use crate::networks::NearNetwork;
+use crate::network::SettlementNetwork;
 
 /// The only supported ed25519 algorithm tag (Near and Solana origins).
 const ED25519_ALGORITHM: &str = "ed25519";
@@ -584,7 +584,7 @@ pub struct TokenMetadataExtraction {
 #[must_use]
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
-    network: NearNetwork,
+    network: SettlementNetwork,
     allowlist: &SignerAllowlist,
     trust_policy: &MetadataTrustPolicy,
 ) -> TokenMetadataExtraction {
@@ -645,7 +645,7 @@ pub fn try_extract_from_chain_metadata(
         // to prevent. A fixed-width prefix names the entry the signer's wallet
         // supplied -- enough to identify which mapping was dropped -- without
         // reintroducing an unbounded copy, and the reason carries the length.
-        // `rejected_metadata_diagnostics` charset-filters both halves, so the
+        // `rejected_metadata_diagnostics` escapes both halves, so the
         // prefix cannot smuggle control characters onto the signing screen.
         if asset_id.len() > MAX_ASSET_ID_BYTES {
             let preview: String = asset_id.chars().take(ASSET_ID_PREVIEW_CHARS).collect();
@@ -974,7 +974,7 @@ mod tests {
     /// of the signed scope, so signing and verifying must agree on it. The
     /// string and the enum are the same network; `network_ids_agree` gates that.
     const NETWORK_ID: &str = "NEAR_MAINNET";
-    const NETWORK: NearNetwork = NearNetwork::Mainnet;
+    const NETWORK: SettlementNetwork = SettlementNetwork::Mainnet;
 
     #[test]
     fn network_ids_agree() {
@@ -986,7 +986,7 @@ mod tests {
     /// [`try_extract_from_chain_metadata`] directly and read `rejected`.
     fn extract_registry(
         chain_metadata: Option<&ChainMetadata>,
-        network: NearNetwork,
+        network: SettlementNetwork,
         allowlist: &SignerAllowlist,
         trust_policy: &MetadataTrustPolicy,
     ) -> Option<NearTokenRegistry> {
@@ -1681,7 +1681,7 @@ mod tests {
         // registers verified.
         let mainnet = extract_registry(
             Some(&metadata),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
             &near_allowlist(),
             &require_signed_policy(),
         )
@@ -1698,7 +1698,7 @@ mod tests {
 
         let testnet = extract_registry(
             Some(&metadata),
-            NearNetwork::Testnet,
+            SettlementNetwork::Testnet,
             &near_allowlist(),
             &require_signed_policy(),
         );
@@ -1737,7 +1737,7 @@ mod tests {
         };
         let registry = extract_registry(
             Some(&metadata),
-            NearNetwork::Testnet,
+            SettlementNetwork::Testnet,
             &near_allowlist(),
             &require_signed_policy(),
         )
