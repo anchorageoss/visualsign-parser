@@ -1355,7 +1355,8 @@ mod tests {
     use super::*;
     use base64::Engine;
     use serde_json::json;
-    use solana_message::{MessageHeader, v0};
+    use solana_hash::Hash;
+    use solana_message::{MessageHeader, legacy, v0};
     use solana_parser::solana::structs::{IdlRecord, ProgramType};
     use std::collections::HashMap;
 
@@ -2660,5 +2661,78 @@ mod tests {
             borsh::from_slice::<SolanaIntermediateOutput>(&bytes).expect("round trip"),
             output
         );
+    }
+
+    /// System transfers, enough that the instruction count needs a two-byte
+    /// compact-u16 from 128 up.
+    fn system_transfers(count: usize, with_lookup_table: bool) -> VersionedMessage {
+        let header = MessageHeader {
+            num_required_signatures: 1,
+            num_readonly_signed_accounts: 0,
+            num_readonly_unsigned_accounts: 1,
+        };
+        let account_keys = vec![
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::from_str("11111111111111111111111111111111").unwrap(),
+        ];
+        let mut data = vec![2, 0, 0, 0];
+        data.extend_from_slice(&1001u64.to_le_bytes());
+        let instruction = CompiledInstruction {
+            program_id_index: 2,
+            accounts: vec![0, 1],
+            data,
+        };
+        let instructions = vec![instruction; count];
+        if with_lookup_table {
+            VersionedMessage::V0(v0::Message {
+                header,
+                account_keys,
+                recent_blockhash: Hash::default(),
+                instructions,
+                address_table_lookups: vec![v0::MessageAddressTableLookup {
+                    account_key: Pubkey::new_unique(),
+                    writable_indexes: vec![3],
+                    readonly_indexes: vec![],
+                }],
+            })
+        } else {
+            VersionedMessage::Legacy(legacy::Message {
+                header,
+                account_keys,
+                recent_blockhash: Hash::default(),
+                instructions,
+            })
+        }
+    }
+
+    /// At 128 or more instructions every instruction is still the one in the
+    /// message: a one-byte count read misaligned a legacy message (wrong
+    /// program keys) and dropped a v0 message's output.
+    #[test]
+    fn instruction_counts_from_128_keep_every_instruction() {
+        for count in [127, 128, 300] {
+            for with_lookup_table in [false, true] {
+                let message = system_transfers(count, with_lookup_table);
+                let message_hex = hex::encode(bincode::serialize(&message).unwrap());
+                let output = extract_solana_intermediate_output(
+                    &message_hex,
+                    false,
+                    &IdlRegistry::new(),
+                    5_105_000,
+                )
+                .unwrap_or_else(|e| {
+                    panic!("{count} instructions, lookup table {with_lookup_table}: {e:?}")
+                });
+                assert_eq!(output.instructions.len(), count);
+                for instruction in &output.instructions {
+                    assert_eq!(
+                        instruction.program_key, "11111111111111111111111111111111",
+                        "{count} instructions, lookup table {with_lookup_table}"
+                    );
+                    assert_eq!(instruction.instruction_data_hex, "02000000e903000000000000");
+                }
+            }
+        }
     }
 }
