@@ -13,7 +13,7 @@ use crate::idl::signature::{
     authorized_idl_signers, convert_proto_signature, validate_idl_signature,
 };
 use base64::{self, Engine};
-use solana_message::VersionedMessage;
+use solana_message::{Message as LegacyMessage, VersionedMessage};
 use solana_packet::PACKET_DATA_SIZE;
 use solana_pubkey::Pubkey;
 use solana_transaction::Transaction as SolanaTransaction;
@@ -21,7 +21,7 @@ use solana_transaction::versioned::VersionedTransaction;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use visualsign::encodings::escape_display_text;
-use visualsign::field_builders::create_text_field;
+use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::signing::SignerAllowlist;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
@@ -51,6 +51,19 @@ const V1_MAX_TRANSACTION_SIZE: usize = 4096;
 /// `0x`; base64 is shorter. Sized for `v1` so an over-packet `v1` payload is
 /// still classified, not refused blind.
 const MAX_ENCODED_TRANSACTION_LEN: usize = 2 * V1_MAX_TRANSACTION_SIZE + 2;
+
+/// Longest off-chain message envelope (the JSON text, before it is parsed)
+/// worth decoding. Sign-in and similar messages are well under a kilobyte; the
+/// Solana off-chain message standard caps a message at 65515 bytes, so 64 KiB of
+/// envelope leaves room for that and for JSON escaping. Without a bound, the
+/// escape (up to 3x) and the two copies a text field stores turn one request at
+/// the transport limit into hundreds of megabytes of heap.
+const MAX_MESSAGE_ENVELOPE_LEN: usize = 64 * 1024;
+
+/// A message of this many bytes may be a SHA-256 prehash: NEP-413, SEP-53 and
+/// TON Connect verifiers check an ed25519 signature over a 32-byte digest, so a
+/// Solana wallet signing such a message as is produces a signature they accept.
+const PREHASH_LEN: usize = 32;
 
 /// Leading byte of a SIMD-0385 `v1` transaction (`0x80 | 1`).
 ///
@@ -140,7 +153,8 @@ pub struct OffChainMessage {
 /// with the same key twice has no single value to render, so accepting
 /// whichever one a generic parser happened to keep would let a signer approve
 /// a message that was never the one shown. A `signerAddress` that is not a
-/// Solana address is refused, since no key could sign as it.
+/// well-formed Solana address (base58, 32 bytes) is refused. That is a format
+/// check only: an off-curve address (a PDA), which no key can sign for, passes.
 impl<'de> serde::Deserialize<'de> for OffChainMessage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -206,6 +220,14 @@ impl Transaction for SolanaTransactionWrapper {
         // transaction decode failure.
         let trimmed = data.trim();
         if trimmed.starts_with('{') {
+            // Bounded before parsing: the transaction bound below does not
+            // apply to this branch.
+            if trimmed.len() > MAX_MESSAGE_ENVELOPE_LEN {
+                return Err(TransactionParseError::InvalidFormat(format!(
+                    "message envelope too large: {} bytes (max: {MAX_MESSAGE_ENVELOPE_LEN} bytes)",
+                    trimmed.len()
+                )));
+            }
             let envelope = serde_json::from_str::<OffChainMessage>(trimmed).map_err(|e| {
                 TransactionParseError::DecodeError(format!(
                     "input is JSON but not a Solana message envelope: {e}"
@@ -214,8 +236,9 @@ impl Transaction for SolanaTransactionWrapper {
             return Ok(Self::Message(envelope));
         }
 
-        // Cheap bound on the encoded text, so an oversized blob is refused
-        // before base64/hex even allocates for it.
+        // Cheap bound on the encoded transaction text, so an oversized blob is
+        // refused before base64/hex even allocates for it. A message envelope
+        // never gets here; it has its own bound above.
         if data.len() > MAX_ENCODED_TRANSACTION_LEN {
             return Err(TransactionParseError::InvalidFormat(format!(
                 "encoded transaction too large: {} chars (max: {MAX_ENCODED_TRANSACTION_LEN} \
@@ -947,11 +970,53 @@ fn apply_transaction_summary(
     Ok((summary.title, summary.subtitle))
 }
 
+/// Refuse message bytes whose signature means something other than "signed
+/// this text".
+///
+/// A Solana wallet's `signMessage` signs the bytes as they are, with no domain
+/// prefix, so the signature is valid wherever an ed25519 signature over those
+/// exact bytes is checked:
+///
+/// - Bytes that are a serialized legacy or versioned transaction message: the
+///   signature is a transaction signature. (v0 and later start with a byte of
+///   `0x80` or more, which is never the first byte of UTF-8 text, so only a
+///   legacy message can occur in practice. Both are checked.)
+/// - Exactly [`PREHASH_LEN`] bytes: the signature may satisfy a verifier that
+///   checks a 32-byte SHA-256 prehash, such as NEAR Intents' NEP-413, SEP-53 and
+///   TON Connect paths. Such a message is accepted only when every byte is
+///   ASCII alphanumeric: a digest falls in that set with probability about
+///   2^-65, so finding one that does is impractical.
+fn check_message_domain(message: &[u8]) -> Result<(), VisualSignError> {
+    let refuse = |why: String| Err(TransactionParseError::DecodeError(why).into());
+    if message.len() == PREHASH_LEN && !message.iter().all(u8::is_ascii_alphanumeric) {
+        return refuse(format!(
+            "refusing a {PREHASH_LEN}-byte message that is not all ASCII letters and digits: \
+             it may be the hash another protocol verifies a signature over (NEP-413, SEP-53, \
+             TON Connect), so signing it could authorize more than the text shown"
+        ));
+    }
+    let round_trips = |encoded: Result<Vec<u8>, bincode::Error>| {
+        encoded.is_ok_and(|bytes| bytes.as_slice() == message)
+    };
+    let legacy = bincode::deserialize::<LegacyMessage>(message)
+        .is_ok_and(|m| round_trips(bincode::serialize(&m)));
+    let versioned = bincode::deserialize::<VersionedMessage>(message)
+        .is_ok_and(|m| round_trips(bincode::serialize(&m)));
+    if legacy || versioned {
+        return refuse(
+            "refusing a message whose bytes are a serialized Solana transaction message: \
+             signing it would sign that transaction"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Render an off-chain message.
 ///
-/// The text is charset-escaped before it renders: it is caller-supplied and
-/// reaches a signer's screen, where an unescaped line separator could forge a
-/// second field.
+/// The text is escaped before it renders: it is caller-supplied and reaches a
+/// signer's screen, where an unescaped line separator could forge a second
+/// field.
 fn message_to_visual_sign_payload(
     envelope: &OffChainMessage,
 ) -> Result<SignablePayload, VisualSignError> {
@@ -964,6 +1029,8 @@ fn message_to_visual_sign_payload(
         )
         .into());
     }
+    // Here rather than at decode, so a directly built wrapper is held to it too.
+    check_message_domain(envelope.message.as_bytes())?;
     Ok(SignablePayload::new(
         0,
         "Solana Message".to_string(),
@@ -973,7 +1040,15 @@ fn message_to_visual_sign_payload(
                 .signable_payload_field,
             // Not escaped: checked above to be a base58 Solana address, and
             // base58 has no character that needs escaping.
-            create_text_field("Signer", &envelope.signer_address)?.signable_payload_field,
+            create_address_field(
+                SIGNING_ADDRESS_LABEL,
+                &envelope.signer_address,
+                None,
+                None,
+                None,
+                None,
+            )?
+            .signable_payload_field,
         ],
         MESSAGE_PAYLOAD_TYPE.to_string(),
     ))
@@ -984,6 +1059,11 @@ fn message_to_visual_sign_payload(
 /// `"SolanaTx"`. See "payload_type names the chain and what is signed" in
 /// CLAUDE.md.
 const MESSAGE_PAYLOAD_TYPE: &str = "SolanaMessage";
+
+/// Label of the field carrying the Solana address that signs a message. Kept
+/// the same on every message render, so a wallet binding it to the selected
+/// account always finds a Solana address under it.
+pub const SIGNING_ADDRESS_LABEL: &str = "Signing Address";
 
 /// Convert versioned Solana transaction to visual sign payload
 fn convert_versioned_to_visual_sign_payload(
@@ -3351,6 +3431,7 @@ mod tests {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod solana_message_tests {
     use super::*;
+    use visualsign::encodings::unescape_display_text;
 
     fn render(envelope: &str) -> SignablePayload {
         SolanaVisualSignConverter
@@ -3384,6 +3465,9 @@ mod solana_message_tests {
             .find_map(|f| match f {
                 SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
                     Some(text_v2.text.clone())
+                }
+                SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
+                    Some(address_v2.address.clone())
                 }
                 _ => None,
             })
@@ -3567,7 +3651,15 @@ mod solana_message_tests {
     #[test]
     fn the_signer_address_renders() {
         let payload = render_message("Sign in to app.example.com");
-        assert_eq!(field_text(&payload, "Signer"), SIGNER);
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+        assert!(
+            payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::AddressV2 { common, .. }
+                    if common.label == SIGNING_ADDRESS_LABEL
+            )),
+            "the signing address renders as an address field"
+        );
     }
 
     /// The address check holds when an embedder builds the wrapper itself
@@ -3593,7 +3685,7 @@ mod solana_message_tests {
             .to_visual_sign_payload(wrapper, VisualSignOptions::default())
             .expect("a well-formed address renders")
             .payload;
-        assert_eq!(field_text(&payload, "Signer"), SIGNER);
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
     }
 
     /// An envelope naming no signer is refused rather than rendered without
@@ -3628,5 +3720,147 @@ mod solana_message_tests {
                 "the refusal must name the field: {message}"
             );
         }
+    }
+
+    /// The envelope bound applies before the JSON is parsed: the transaction
+    /// size bound does not cover this branch.
+    #[test]
+    fn an_oversized_envelope_is_refused_before_parsing() {
+        let at_limit = envelope(&"a".repeat(MAX_MESSAGE_ENVELOPE_LEN - envelope("").len()));
+        assert_eq!(at_limit.len(), MAX_MESSAGE_ENVELOPE_LEN);
+        SolanaTransactionWrapper::from_string(&at_limit).expect("an envelope at the bound decodes");
+
+        let over = envelope(&"a".repeat(5 * 1024 * 1024));
+        let Err(TransactionParseError::InvalidFormat(message)) =
+            SolanaTransactionWrapper::from_string(&over)
+        else {
+            panic!("expected an InvalidFormat for an oversized envelope");
+        };
+        assert!(message.contains("too large"), "{message}");
+
+        // Not JSON-valid past the bound either: the size is checked first.
+        let malformed = format!("{{{}", "x".repeat(MAX_MESSAGE_ENVELOPE_LEN));
+        assert!(matches!(
+            SolanaTransactionWrapper::from_string(&malformed),
+            Err(TransactionParseError::InvalidFormat(_))
+        ));
+    }
+
+    fn convert_message(message: &str) -> Result<SignablePayload, VisualSignError> {
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::Message(OffChainMessage {
+                    message: message.to_string(),
+                    signer_address: SIGNER.to_string(),
+                }),
+                VisualSignOptions::default(),
+            )
+            .map(|result| result.payload)
+    }
+
+    /// A 32-byte message may be the SHA-256 prehash a NEP-413, SEP-53 or TON
+    /// Connect verifier checks a signature over, so it is refused unless it is
+    /// all ASCII letters and digits, a set a digest essentially never falls in.
+    #[test]
+    fn a_32_byte_message_outside_the_narrow_charset_is_refused() {
+        for message in [
+            "Sign in to app.example.com 12345",
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+            "0123456789abcdef0123456789abcde\u{7f}",
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+        ] {
+            assert_eq!(message.len(), PREHASH_LEN, "{message:?}");
+            let err = convert_message(message).expect_err("a possible prehash must not render");
+            assert!(err.to_string().contains("32-byte"), "{err}");
+        }
+        // Decoded from an envelope, the same rule holds.
+        let tx =
+            SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com 12345"))
+                .expect("the envelope itself is well-formed");
+        assert!(
+            SolanaVisualSignConverter
+                .to_visual_sign_payload(tx, VisualSignOptions::default())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_32_byte_alphanumeric_message_and_other_lengths_render() {
+        for message in [
+            "SignIn0123456789abcdefABCDEF9876",
+            "Sign in to app.example.com 1234",
+            "Sign in to app.example.com 123456",
+        ] {
+            let payload = convert_message(message).expect("renders");
+            assert_eq!(
+                unescape_display_text(&message_text(&payload)).as_deref(),
+                Some(message)
+            );
+        }
+    }
+
+    /// A legacy transaction message whose bytes are all valid UTF-8: a System
+    /// transfer of 0x7f7f7f7f7f lamports between ASCII-only keys, with an
+    /// ASCII blockhash. Its serialized bytes fit in a JSON string, and a
+    /// signature over them is a signature over the transaction.
+    fn utf8_transfer_message() -> LegacyMessage {
+        let mut data = 2u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&0x7f_7f7f_7f7f_u64.to_le_bytes());
+        LegacyMessage {
+            header: solana_message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            account_keys: vec![
+                Pubkey::new_from_array([b'A'; 32]),
+                Pubkey::new_from_array([b'B'; 32]),
+                Pubkey::default(),
+            ],
+            recent_blockhash: solana_hash::Hash::new_from_array([b'H'; 32]),
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
+                program_id_index: 2,
+                accounts: vec![0, 1],
+                data,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_message_that_is_a_serialized_transaction_message_is_refused() {
+        let bytes = bincode::serialize(&utf8_transfer_message()).expect("serialize");
+        let text = String::from_utf8(bytes).expect("the message is built to be UTF-8");
+        let json = serde_json::to_string(&text).expect("a JSON string");
+        let tx = SolanaTransactionWrapper::from_string(&format!(
+            r#"{{"message":{json},"signerAddress":"{SIGNER}"}}"#
+        ))
+        .expect("the envelope itself is well-formed");
+        let err = SolanaVisualSignConverter
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect_err("transaction bytes must not render as a message");
+        assert!(err.to_string().contains("transaction message"), "{err}");
+
+        // The same bytes with anything appended are not that transaction, so
+        // they are only text.
+        convert_message(&format!("{text} ")).expect("not a transaction message");
+    }
+
+    /// A versioned (v0) message starts with 0x80, which no UTF-8 text does, so
+    /// it cannot reach the message path through an envelope; the check still
+    /// refuses it on raw bytes, which is what a directly built caller sees.
+    #[test]
+    fn versioned_transaction_message_bytes_are_refused() {
+        let v0 = VersionedMessage::V0(solana_message::v0::Message {
+            header: utf8_transfer_message().header,
+            account_keys: utf8_transfer_message().account_keys,
+            recent_blockhash: utf8_transfer_message().recent_blockhash,
+            instructions: utf8_transfer_message().instructions,
+            address_table_lookups: vec![],
+        });
+        let bytes = bincode::serialize(&v0).expect("serialize");
+        assert!(check_message_domain(&bytes).is_err());
+        let legacy = bincode::serialize(&utf8_transfer_message()).expect("serialize");
+        assert!(check_message_domain(&legacy).is_err());
+        assert!(check_message_domain(b"Sign in to app.example.com").is_ok());
     }
 }
