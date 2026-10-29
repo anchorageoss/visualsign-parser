@@ -1,0 +1,46 @@
+[package]
+name = "visualsign-zcash"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default    = ["cli-plugin"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core", "dep:generated"]
+
+[dependencies]
+base64 = { workspace = true }
+clap = { version = "4.0", features = ["derive"], optional = true }
+generated = { path = "../../generated", optional = true }
+parser_cli_core = { path = "../../parser/cli-core", optional = true }
+visualsign = { workspace = true }
+
+# librustzcash pre-release line (see docs/chains/zcash.mdx). Exact pins:
+# this is the line with v6 transactions, the Ironwood pool and the v2 PCZT
+# encoding, and the pins match the signing wallet's. No circuits or provers:
+# the parser computes no proofs.
+orchard = { version = "=0.16.0", default-features = false, features = ["std"] }
+pczt = { version = "=0.10.0-pre.2", default-features = false, features = ["std", "orchard", "sapling", "transparent", "signer"] }
+sapling-crypto = { version = "=0.9.0", default-features = false, features = ["std"] }
+zcash_keys = { version = "=0.17.0-pre.2", default-features = false, features = ["std", "orchard", "sapling"] }
+zcash_note_encryption = { version = "=0.5.1", default-features = false }
+zcash_primitives = { version = "=0.31.0-pre.2", default-features = false, features = ["std"] }
+zcash_protocol = { version = "=0.11.0-pre.1", default-features = false, features = ["std"] }
+zcash_script = { version = "=0.6.0", default-features = false, features = ["std"] }
+zcash_transparent = { version = "=0.11.0-pre.2", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# Fixture generation (ignored test) and the ZIP-244 known-answer test only.
+getrandom = { version = "=0.4.3", features = ["sys_rng"] }
+hex = { workspace = true }
+incrementalmerkletree = { version = "=0.9.0", default-features = false }
+pczt = { version = "=0.10.0-pre.2", default-features = false, features = ["std", "orchard", "sapling", "transparent", "signer", "io-finalizer", "zcp-builder"] }
+rand_core = { version = "=0.10.1", default-features = false }
+secp256k1 = { version = "=0.33.1", default-features = false, features = ["std"] }
+zcash_primitives = { version = "=0.31.0-pre.2", default-features = false, features = ["std", "transparent-inputs"] }
+zcash_transparent = { version = "=0.11.0-pre.2", default-features = false, features = ["std", "transparent-inputs"] }
+serde_json = { workspace = true }

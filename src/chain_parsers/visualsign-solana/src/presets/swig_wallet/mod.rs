@@ -2402,8 +2402,8 @@ mod tests {
             .collect();
         assert_eq!(
             display_fields.len(),
-            3,
-            "Expected three display fields (network, instruction, accounts)"
+            4,
+            "Expected four display fields (network, max fee, instruction, accounts)"
         );
 
         // Network field
@@ -2415,8 +2415,12 @@ mod tests {
             other => panic!("Expected network TextV2 field, got {other:?}"),
         }
 
+        // The default fee cap follows Network.
+        assert_eq!(payload.fields[1].label(), "Max Fee (default)");
+        assert_eq!(payload.fields[1].fallback_text(), "0.1 SOL");
+
         // Instruction field
-        let instruction_layout = match &payload.fields[1] {
+        let instruction_layout = match &payload.fields[2] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
@@ -2490,7 +2494,7 @@ mod tests {
         assert_text_field(expanded_fields, "Actions (hex)", "0700000008000000");
 
         // Accounts field (diagnostics are appended after accounts)
-        match &payload.fields[2] {
+        match &payload.fields[3] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
@@ -2540,12 +2544,12 @@ mod tests {
             .collect();
         assert_eq!(
             display_fields.len(),
-            5,
-            "Expected five display fields (network + 3 instructions + accounts)"
+            6,
+            "Expected six display fields (network + max fee + 3 instructions + accounts)"
         );
 
         // Instruction 1 - Compute budget
-        let compute_layout = match &payload.fields[1] {
+        let compute_layout = match &payload.fields[2] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
@@ -2580,7 +2584,7 @@ mod tests {
         assert_text_field(compute_expanded, "Raw Data", "0280969800");
 
         // Instruction 2 - secp256r1 verification
-        let secp_layout = match &payload.fields[2] {
+        let secp_layout = match &payload.fields[3] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
@@ -2609,7 +2613,7 @@ mod tests {
         );
 
         // Instruction 3 - Swig sign v2
-        let swig_layout = match &payload.fields[3] {
+        let swig_layout = match &payload.fields[4] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
@@ -2662,7 +2666,7 @@ mod tests {
         );
 
         // Accounts preview
-        let accounts_layout = match &payload.fields[4] {
+        let accounts_layout = match &payload.fields[5] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,

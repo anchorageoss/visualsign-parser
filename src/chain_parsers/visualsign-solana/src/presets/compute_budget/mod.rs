@@ -4,9 +4,8 @@ mod config;
 
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
-    resolve_program_display,
+    decode_compute_budget_request, resolve_program_display,
 };
-use borsh::de::BorshDeserialize;
 use config::ComputeBudgetConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use visualsign::errors::VisualSignError;
@@ -26,10 +25,12 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let compute_budget_instruction = ComputeBudgetInstruction::try_from_slice(context.data())
-            .map_err(|e| {
-            VisualSignError::DecodeError(format!("Failed to parse compute budget instruction: {e}"))
-        })?;
+        let compute_budget_instruction =
+            decode_compute_budget_request(context.data()).map_err(|e| {
+                VisualSignError::DecodeError(format!(
+                    "Failed to parse compute budget instruction: {e}"
+                ))
+            })?;
 
         create_compute_budget_preview_layout(&compute_budget_instruction, context)
     }
@@ -44,11 +45,7 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
 
     /// Every compute-budget instruction only prices or sizes the transaction.
     fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
-        ComputeBudgetInstruction::try_from_slice(context.data()).is_ok()
-    }
-
-    fn compute_budget(&self, context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
-        ComputeBudgetInstruction::try_from_slice(context.data()).ok()
+        decode_compute_budget_request(context.data()).is_ok()
     }
 }
 

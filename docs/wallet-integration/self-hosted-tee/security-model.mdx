@@ -9,7 +9,7 @@ VisualSign solves a fundamental problem in blockchain security: users cannot ver
 
 When you sign a blockchain transaction, you typically see one of two things:
 
-1. **Raw hex data** — Incomprehensible strings like `0xf86c808504a817c800...`
+1. **Raw hex data** — Incomprehensible strings like `0xec808504a817c800...`
 2. **Application-provided descriptions** — Text that could be manipulated by a compromised app
 
 Both approaches are vulnerable:
@@ -102,7 +102,7 @@ The application submits raw transaction bytes to the parser service. The applica
 
 ```go
 request := &ParseRequest{
-    UnsignedPayload: "0xf86c808504a817c800...", // Raw bytes only
+    UnsignedPayload: "0xec808504a817c800...", // Raw bytes only
     Chain: CHAIN_ETHEREUM,
 }
 ```
