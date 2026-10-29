@@ -2,15 +2,20 @@
 
 mod config;
 
+#[cfg(feature = "stake-pool")]
+use crate::core::resolve_program_display;
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
-    resolve_program_display,
 };
 use config::StakepoolConfig;
+#[cfg(feature = "stake-pool")]
 use spl_stake_pool::instruction::StakePoolInstruction;
+use visualsign::AnnotatedPayloadField;
 use visualsign::errors::VisualSignError;
+#[cfg(feature = "stake-pool")]
 use visualsign::field_builders::create_text_field;
-use visualsign::{AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon};
+#[cfg(feature = "stake-pool")]
+use visualsign::{SignablePayloadField, SignablePayloadFieldCommon};
 
 // Create a static instance that we can reference
 static STAKEPOOL_CONFIG: StakepoolConfig = StakepoolConfig;
@@ -22,12 +27,28 @@ impl InstructionVisualizer for StakepoolVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let stakepool_instruction = parse_stake_pool_instruction(context.data())?;
-        create_stakepool_preview_layout(&stakepool_instruction, context)
+        #[cfg(feature = "stake-pool")]
+        {
+            let stakepool_instruction = parse_stake_pool_instruction(context.data())?;
+            create_stakepool_preview_layout(&stakepool_instruction, context)
+        }
+        #[cfg(not(feature = "stake-pool"))]
+        {
+            let _ = context;
+            Err(VisualSignError::DecodeError(
+                "stake pool decoding needs the `stake-pool` feature".to_string(),
+            ))
+        }
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
-        Some(&STAKEPOOL_CONFIG)
+        // Without `stake-pool` the instruction type is not compiled in: decline,
+        // so the unknown-program visualizer shows the instruction instead.
+        if cfg!(feature = "stake-pool") {
+            Some(&STAKEPOOL_CONFIG)
+        } else {
+            None
+        }
     }
 
     fn kind(&self) -> VisualizerKind {
@@ -35,6 +56,7 @@ impl InstructionVisualizer for StakepoolVisualizer {
     }
 }
 
+#[cfg(feature = "stake-pool")]
 fn create_stakepool_preview_layout(
     instruction: &StakePoolInstruction,
     context: &VisualizerContext,
@@ -84,6 +106,7 @@ fn create_stakepool_preview_layout(
     })
 }
 
+#[cfg(feature = "stake-pool")]
 fn parse_stake_pool_instruction(data: &[u8]) -> Result<StakePoolInstruction, VisualSignError> {
     use borsh::de::BorshDeserialize;
 
@@ -92,6 +115,7 @@ fn parse_stake_pool_instruction(data: &[u8]) -> Result<StakePoolInstruction, Vis
     })
 }
 
+#[cfg(feature = "stake-pool")]
 fn format_stake_pool_instruction(instruction: &StakePoolInstruction) -> String {
     format!(
         "Stake Pool Instruction: {}",
@@ -99,6 +123,7 @@ fn format_stake_pool_instruction(instruction: &StakePoolInstruction) -> String {
     )
 }
 
+#[cfg(feature = "stake-pool")]
 fn get_stake_pool_instruction_name(instruction: &StakePoolInstruction) -> &'static str {
     match instruction {
         StakePoolInstruction::Initialize { .. } => "Initialize",

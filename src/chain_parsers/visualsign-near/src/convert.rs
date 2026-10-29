@@ -456,6 +456,22 @@ mod tests {
     use generated::parser::{ChainMetadata, NearMetadata, chain_metadata};
     use visualsign::vsptrait::DeveloperConfig;
 
+    /// The variant of a [`VisualSignError`], without its text.
+    fn variant_name(err: &VisualSignError) -> &'static str {
+        match err {
+            VisualSignError::ParseError(_) => "ParseError",
+            VisualSignError::DecodeError(_) => "DecodeError",
+            VisualSignError::MissingData(_) => "MissingData",
+            VisualSignError::ConversionError(_) => "ConversionError",
+            VisualSignError::MissingField(_) => "MissingField",
+            VisualSignError::InvalidNumberField(_) => "InvalidNumberField",
+            VisualSignError::EmptyField(_) => "EmptyField",
+            VisualSignError::ValidationError(_) => "ValidationError",
+            VisualSignError::InvariantViolation(_) => "InvariantViolation",
+            VisualSignError::SerializationError(_) => "SerializationError",
+        }
+    }
+
     /// A `"ed25519:<base58>"` key string as a [`PublicKey`].
     fn ed25519_key(s: &str) -> PublicKey {
         let data = s.strip_prefix("ed25519:").expect("ed25519 prefix");
@@ -646,8 +662,11 @@ mod tests {
         let err = converter
             .to_visual_sign_payload(tx, VisualSignOptions::default())
             .expect_err("mainnet network with a .testnet receiver is rejected");
-        let VisualSignError::ValidationError(message) = err else {
-            panic!("expected a ValidationError");
+        let message = match err {
+            VisualSignError::ValidationError(message) => message,
+            // The variant name only: the error text derives from the request,
+            // which CodeQL reads as a cleartext-logging sink in a panic.
+            other => panic!("expected a ValidationError, got {}", variant_name(&other)),
         };
         assert!(
             message.contains("receiver account"),
@@ -985,6 +1004,48 @@ mod tests {
             err.to_string().contains("bob.testnet"),
             "the refusal must name the offending nested account: {err}"
         );
+    }
+
+    /// A payload with no intents only spends its nonce, which is how a user
+    /// cancels a pending signed quote or order. `intents` is optional, so both
+    /// the absent and the empty form must decode and render as a cancel showing
+    /// the signer, verifying contract, deadline and nonce.
+    #[test]
+    fn intent_envelope_without_intents_renders_as_a_cancel() {
+        for envelope in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[]}"#,
+        ] {
+            let tx = <NearTransaction as visualsign::vsptrait::Transaction>::from_string(envelope)
+                .unwrap_or_else(|e| panic!("{envelope}: {e}"));
+            let payload = NearVisualSignConverter::new()
+                .to_visual_sign_payload(tx, VisualSignOptions::default())
+                .unwrap_or_else(|e| panic!("{envelope}: {e}"))
+                .payload;
+            assert_eq!(payload.title, "Cancel: invalidate nonce", "{envelope}");
+            let json = payload.to_json().expect("json");
+            for expected in [
+                "Signer",
+                "alice.near",
+                "Verifying Contract",
+                "intents.near",
+                "Deadline",
+                "2999-01-01",
+                "Nonce",
+                "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+            ] {
+                assert!(
+                    json.contains(expected),
+                    "{envelope}: missing {expected}: {json}"
+                );
+            }
+            assert!(
+                payload.fields.iter().any(|f| {
+                    crate::presets::intents::test_support::is_warning_diagnostic(f, "empty-intents")
+                }),
+                "{envelope}: expected the nonce-only warning"
+            );
+        }
     }
 
     #[test]

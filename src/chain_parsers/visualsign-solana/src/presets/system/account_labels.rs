@@ -1,6 +1,6 @@
 // Handles Solana system account instructions
 
-use solana_program::system_instruction::SystemInstruction;
+use solana_system_interface::instruction::SystemInstruction;
 
 pub fn system_instruction_label(instruction: &SystemInstruction) -> String {
     match instruction {
@@ -29,6 +29,8 @@ pub fn system_instruction_label(instruction: &SystemInstruction) -> String {
             format!("Transfer With Seed (from_owner: {from_owner})")
         }
         SystemInstruction::UpgradeNonceAccount => "Upgrade Nonce Account".to_string(),
+        // Rejected by SystemVisualizer before labels are built.
+        SystemInstruction::CreateAccountAllowPrefund { .. } => String::new(),
     }
 }
 

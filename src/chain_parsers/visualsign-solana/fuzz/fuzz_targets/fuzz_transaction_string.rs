@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use visualsign_solana::transaction_string_to_visual_sign;
 use visualsign::vsptrait::VisualSignOptions;
+use visualsign_solana::transaction_string_to_visual_sign;
 
 // Feed arbitrary bytes as a transaction string into the full visualsign-solana
 // stack. Exercises base64/hex decoding, transaction deserialization, IDL

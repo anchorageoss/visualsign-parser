@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 mod accounts;
 mod arg_rendering;
@@ -82,7 +82,7 @@ pub enum AccountRef<'a> {
 #[derive(Debug, Clone)]
 pub struct VisualizerContext<'a> {
     sender: &'a SolanaAccount,
-    compiled_instruction: &'a solana_sdk::instruction::CompiledInstruction,
+    compiled_instruction: &'a solana_message::compiled_instruction::CompiledInstruction,
     account_keys: &'a [Pubkey],
     idl_registry: &'a crate::idl::IdlRegistry,
     instruction_index: usize,
@@ -98,7 +98,7 @@ pub struct VisualizerContext<'a> {
 impl<'a> VisualizerContext<'a> {
     pub fn new(
         sender: &'a SolanaAccount,
-        compiled_instruction: &'a solana_sdk::instruction::CompiledInstruction,
+        compiled_instruction: &'a solana_message::compiled_instruction::CompiledInstruction,
         account_keys: &'a [Pubkey],
         idl_registry: &'a crate::idl::IdlRegistry,
         instruction_index: usize,
@@ -184,7 +184,9 @@ impl<'a> VisualizerContext<'a> {
     }
 
     /// Reference to the underlying compiled instruction.
-    pub fn compiled_instruction(&self) -> &'a solana_sdk::instruction::CompiledInstruction {
+    pub fn compiled_instruction(
+        &self,
+    ) -> &'a solana_message::compiled_instruction::CompiledInstruction {
         self.compiled_instruction
     }
 
@@ -209,12 +211,12 @@ impl<'a> VisualizerContext<'a> {
     /// not currently surfaced (set to false); IDL-based presets only need pubkeys.
     pub fn resolve_accounts(
         &self,
-    ) -> Result<Vec<solana_sdk::instruction::AccountMeta>, VisualSignError> {
+    ) -> Result<Vec<solana_instruction::AccountMeta>, VisualSignError> {
         (0..self.num_accounts())
             .map(|i| match self.account(i) {
-                Some(AccountRef::Resolved(pk)) => Ok(
-                    solana_sdk::instruction::AccountMeta::new_readonly(*pk, false),
-                ),
+                Some(AccountRef::Resolved(pk)) => {
+                    Ok(solana_instruction::AccountMeta::new_readonly(*pk, false))
+                }
                 Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
                     format!("unresolved account index {raw_index} at position {i}"),
                 )),
@@ -406,7 +408,7 @@ pub fn visualize_with_any(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::instruction::CompiledInstruction;
+    use solana_message::compiled_instruction::CompiledInstruction;
 
     #[test]
     fn test_program_id_resolved() {

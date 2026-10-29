@@ -167,7 +167,7 @@ fn build_visualization(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
 
     fn dummy_account_strings(count: usize) -> Vec<String> {
         (0..count)

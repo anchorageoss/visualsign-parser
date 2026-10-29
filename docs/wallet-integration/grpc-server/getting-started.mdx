@@ -185,7 +185,7 @@ conn, err := grpc.Dial("localhost:44020", grpc.WithInsecure())
 client := pb.NewParserServiceClient(conn)
 
 resp, err := client.Parse(context.Background(), &pb.ParseRequest{
-    UnsignedPayload: "0xf86c80850...",
+    UnsignedPayload: "0xec80850...",
     Chain: pb.Chain_CHAIN_ETHEREUM,
 })
 
