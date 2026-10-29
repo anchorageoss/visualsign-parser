@@ -30,9 +30,31 @@ const NEAR_SYMBOL: &str = "NEAR";
 /// otherwise a multi-action transaction with e.g. two transfers renders two
 /// identically-labelled `"Amount"` fields with no indication which action
 /// each belongs to.
+///
+/// Receiver-agnostic: only standard methods (NEP-141 and the like) decode.
+/// [`render_action_for_receiver`] adds the contract-keyed presets.
 pub fn render_action(
     action: &Action,
     total_actions: usize,
+) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+    render_action_with(action, total_actions, None)
+}
+
+/// [`render_action`] for an action sent to `receiver_id`: a contract this
+/// build recognizes (`wrap.near`) also decodes its own methods' args and names
+/// the action, in the multi-action boundary as in the payload title.
+pub fn render_action_for_receiver(
+    action: &Action,
+    total_actions: usize,
+    receiver_id: &str,
+) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+    render_action_with(action, total_actions, Some(receiver_id))
+}
+
+fn render_action_with(
+    action: &Action,
+    total_actions: usize,
+    receiver_id: Option<&str>,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     match action {
         Action::Transfer(transfer) => {
@@ -43,11 +65,28 @@ pub fn render_action(
             Ok(fields)
         }
         Action::FunctionCall(fc) => {
-            let mut fields = action_boundary_field(action, total_actions)?;
+            let label = receiver_id.map_or_else(
+                || action_label(action),
+                |receiver_id| receiver_action_label(action, receiver_id),
+            );
+            let mut fields = labelled_boundary_field(label, total_actions)?;
             fields.push(
                 create_text_field("Method", &charset_safe(&fc.method_name))?.signable_payload_field,
             );
-            match decode_known_method_args(&fc.method_name, &fc.args)? {
+            // The contract-keyed decoder is tried first: wrap.near names its
+            // own methods, so the receiver decides what they mean, where
+            // ft_transfer and ft_withdraw mean one thing on every token.
+            let preset = match receiver_id {
+                Some(receiver_id) => {
+                    crate::presets::wrap::decode_args(receiver_id, &fc.method_name, &fc.args)?
+                }
+                None => None,
+            };
+            let decoded = match preset {
+                Some(fields) => Some(fields),
+                None => decode_known_method_args(&fc.method_name, &fc.args)?,
+            };
+            match decoded {
                 Some(args_fields) => fields.extend(args_fields),
                 None if !fc.args.is_empty() => {
                     fields.push(create_raw_data_field(&fc.args, None)?.signable_payload_field);
@@ -208,9 +247,17 @@ fn action_boundary_field(
     action: &Action,
     total_actions: usize,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+    labelled_boundary_field(action_label(action), total_actions)
+}
+
+/// [`action_boundary_field`] with the label already chosen.
+fn labelled_boundary_field(
+    label: &str,
+    total_actions: usize,
+) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     if total_actions > 1 {
         Ok(vec![
-            create_text_field("Action", action_label(action))?.signable_payload_field,
+            create_text_field("Action", label)?.signable_payload_field,
         ])
     } else {
         Ok(Vec::new())
@@ -321,6 +368,20 @@ fn push_amount_and_notes(
         fields.push(create_text_field("Message", &charset_safe(msg))?.signable_payload_field);
     }
     Ok(())
+}
+
+/// The label for `action` sent to `receiver_id`: a call a contract preset
+/// fully understands names itself ("Wrap"), anything else takes its generic
+/// [`action_label`]. The preset returns a label only when the args decoded,
+/// so neither the title nor a boundary claims more than the fields show.
+pub(crate) fn receiver_action_label(action: &Action, receiver_id: &str) -> &'static str {
+    match action {
+        Action::FunctionCall(fc) => {
+            crate::presets::wrap::label(receiver_id, &fc.method_name, &fc.args)
+                .unwrap_or_else(|| action_label(action))
+        }
+        _ => action_label(action),
+    }
 }
 
 /// Human-readable label for an action variant.
