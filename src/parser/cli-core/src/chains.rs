@@ -46,6 +46,11 @@ mod tests {
     }
 
     #[test]
+    fn available_chains_lists_zcash() {
+        assert!(available_chains().contains(&"zcash"));
+    }
+
+    #[test]
     fn parse_chain_builtins_are_case_insensitive() {
         assert_eq!(parse_chain("Ethereum"), Chain::Ethereum);
         assert_eq!(parse_chain("SOLANA"), Chain::Solana);
