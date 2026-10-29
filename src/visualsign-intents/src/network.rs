@@ -6,9 +6,11 @@
 
 /// The settlement network. Two variants because `intents.near` and
 /// `intents.testnet` are the only deployments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// No `Default`: a caller must name the network, so a missing one can't
+/// silently become mainnet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettlementNetwork {
-    #[default]
     Mainnet,
     Testnet,
 }
