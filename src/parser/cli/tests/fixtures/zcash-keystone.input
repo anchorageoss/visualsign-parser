@@ -1,0 +1,5 @@
+decode
+--chain
+zcash
+-t
+@tests/fixtures/zcash-keystone.hex
