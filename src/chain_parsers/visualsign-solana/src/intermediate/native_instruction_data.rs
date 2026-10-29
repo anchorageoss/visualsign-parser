@@ -5,10 +5,10 @@ use std::collections::BTreeMap;
 
 use borsh::BorshDeserialize;
 use serde_json::{Value, json};
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
-use solana_sdk::instruction::CompiledInstruction;
-use solana_sdk::message::AccountKeys;
-use solana_sdk::pubkey::Pubkey;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_message::AccountKeys;
+use solana_message::compiled_instruction::CompiledInstruction;
+use solana_pubkey::Pubkey;
 
 use visualsign::canonical_json;
 
@@ -71,23 +71,56 @@ pub(super) fn decode(
     instruction: &CompiledInstruction,
     account_keys: &AccountKeys,
 ) -> Result<NativeDecode, String> {
-    if *program_id == solana_sdk::compute_budget::id() {
+    if *program_id == solana_sdk_ids::compute_budget::id() {
         return Ok(NativeDecode {
             program: "compute-budget".to_string(),
             parsed: canonical_json::canonicalize(&decode_compute_budget(&instruction.data)?),
         });
     }
+    let (program, parsed) = parse_json(program_id, instruction, account_keys)?;
+    Ok(NativeDecode {
+        program,
+        parsed: canonical_json::canonicalize(&parsed),
+    })
+}
+
+/// Solana's `jsonParsed` decoder. solana-transaction-status 2.x takes
+/// solana-sdk 2.x types, so the instruction and keys are rebuilt in those.
+#[cfg(feature = "json-parsed")]
+fn parse_json(
+    program_id: &Pubkey,
+    instruction: &CompiledInstruction,
+    account_keys: &AccountKeys,
+) -> Result<(String, Value), String> {
+    use solana_message_v2::{AccountKeys as AccountKeysV2, compiled_instruction};
+    use solana_pubkey_v2::Pubkey as PubkeyV2;
+
+    let v2 = |key: &Pubkey| PubkeyV2::new_from_array(key.to_bytes());
+    let keys: Vec<PubkeyV2> = account_keys.iter().map(v2).collect();
+    let instruction = compiled_instruction::CompiledInstruction {
+        program_id_index: instruction.program_id_index,
+        accounts: instruction.accounts.clone(),
+        data: instruction.data.clone(),
+    };
     let decoded = solana_transaction_status::parse_instruction::parse(
-        program_id,
-        instruction,
-        account_keys,
+        &v2(program_id),
+        &instruction,
+        &AccountKeysV2::new(&keys, None),
         None,
     )
     .map_err(|e| e.to_string())?;
-    Ok(NativeDecode {
-        program: decoded.program,
-        parsed: canonical_json::canonicalize(&decoded.parsed),
-    })
+    Ok((decoded.program, decoded.parsed))
+}
+
+/// Without `json-parsed` there is no native decoder; the caller records the
+/// error as `solana_json_parse_error`.
+#[cfg(not(feature = "json-parsed"))]
+fn parse_json(
+    _program_id: &Pubkey,
+    _instruction: &CompiledInstruction,
+    _account_keys: &AccountKeys,
+) -> Result<(String, Value), String> {
+    Err("native instruction decoding needs the `json-parsed` feature".to_string())
 }
 
 /// Compute Budget in the `jsonParsed` shape, since Solana's decoder skips it.
@@ -1332,7 +1365,8 @@ const TOKEN_2022_ONLY: &[NativeInstructionSpec] = &[
     ),
 ];
 
-#[cfg(test)]
+// These assert the jsonParsed and simulation decodes.
+#[cfg(all(test, feature = "simulation"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use std::str::FromStr;
@@ -1437,7 +1471,7 @@ mod tests {
             ("emitTokenMetadata", "spl_token_metadata_interface:emitter"),
         ] {
             let spec = find_spec(TOKEN_2022_PROGRAM, instruction_type).expect("mapped");
-            let hash = solana_sdk::hash::hash(hash_input.as_bytes()).to_bytes();
+            let hash = solana_sha256_hasher::hash(hash_input.as_bytes()).to_bytes();
             assert_eq!(spec.discriminator, &hash[..8], "{instruction_type}");
         }
     }

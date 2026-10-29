@@ -8,8 +8,8 @@ use crate::core::{
     VisualizerKind,
 };
 use config::SplTokenConfig;
-use solana_program::program_option::COption;
-use spl_token::instruction::{AuthorityType, TokenInstruction};
+use solana_program_option::COption;
+use spl_token_interface::instruction::{AuthorityType, TokenInstruction};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::*;
 use visualsign::{
@@ -34,6 +34,14 @@ impl InstructionVisualizer for SplTokenVisualizer {
         // data layout instead of returning `Err`, which the non-diagnostics
         // dispatch turns into a whole-transaction failure.
         match TokenInstruction::unpack(context.data()) {
+            // Added in spl-token-interface 3; spl-token 7 could not unpack
+            // them. `Batch` carries nested instructions this preset does not
+            // decode, so all three keep the unparsed layout.
+            Ok(
+                TokenInstruction::WithdrawExcessLamports
+                | TokenInstruction::UnwrapLamports { .. }
+                | TokenInstruction::Batch,
+            ) => create_unparsable_preview_layout(&instruction, context),
             Ok(token_instruction) => {
                 create_token_preview_layout(&token_instruction, &instruction, context)
             }
@@ -89,7 +97,7 @@ fn format_authority_type(authority_type: &AuthorityType) -> &'static str {
     }
 }
 
-fn format_coption_pubkey(coption: &COption<solana_sdk::pubkey::Pubkey>) -> String {
+fn format_coption_pubkey(coption: &COption<solana_pubkey::Pubkey>) -> String {
     match coption {
         COption::Some(pubkey) => pubkey.to_string(),
         COption::None => "None".to_string(),
@@ -814,6 +822,10 @@ fn format_token_instruction(instruction: &TokenInstruction) -> String {
         TokenInstruction::AmountToUiAmount { .. } => "Amount To UI Amount".to_string(),
         TokenInstruction::UiAmountToAmount { .. } => "UI Amount To Amount".to_string(),
         // These cases are handled specially above and should never reach here
+        // Routed to the unparsed layout in `visualize_tx_commands`.
+        TokenInstruction::WithdrawExcessLamports
+        | TokenInstruction::UnwrapLamports { .. }
+        | TokenInstruction::Batch => "SPL Token (unparsed)".to_string(),
         TokenInstruction::MintTo { .. } | TokenInstruction::MintToChecked { .. } => {
             unreachable!("MintTo instructions are handled specially in create_token_preview_layout")
         }

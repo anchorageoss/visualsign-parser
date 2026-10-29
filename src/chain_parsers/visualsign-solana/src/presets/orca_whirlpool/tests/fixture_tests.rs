@@ -4,10 +4,9 @@
 // This file is wired into `mod tests` (mod.rs) via `mod fixture_tests;`.
 
 use super::*;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-};
+use solana_instruction::AccountMeta;
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 use std::str::FromStr;
 use visualsign::{SignablePayload, SignablePayloadField};
 
@@ -98,7 +97,7 @@ fn test_increase_liquidity_by_token_amounts_v2_real_transaction() {
     for meta in &instruction.accounts {
         account_keys.push(meta.pubkey);
     }
-    let compiled = solana_sdk::instruction::CompiledInstruction {
+    let compiled = solana_message::compiled_instruction::CompiledInstruction {
         program_id_index: 0,
         accounts: (1..=instruction.accounts.len() as u8).collect(),
         data: instruction.data.clone(),

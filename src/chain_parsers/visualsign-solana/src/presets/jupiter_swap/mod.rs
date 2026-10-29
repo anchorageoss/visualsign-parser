@@ -661,9 +661,9 @@ fn create_jupiter_swap_expanded_fields(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_message::compiled_instruction::CompiledInstruction;
     use solana_parser::solana::structs::SolanaAccount;
-    use solana_sdk::instruction::CompiledInstruction;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
     mod fixture_test;
 
     /// Test helper: bundles the owned data needed to create a VisualizerContext.

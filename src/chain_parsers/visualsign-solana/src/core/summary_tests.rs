@@ -6,8 +6,8 @@
 
 use super::*;
 use ::visualsign::field_builders::create_text_field;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
-use solana_sdk::instruction::CompiledInstruction;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_message::compiled_instruction::CompiledInstruction;
 
 /// A visualizer for one program that renders a fixed row and reports whatever
 /// summary and infrastructure flag the test configures.

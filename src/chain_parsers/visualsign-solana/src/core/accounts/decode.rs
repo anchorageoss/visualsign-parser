@@ -1,4 +1,4 @@
-use solana_sdk::message::Message;
+use solana_message::Message;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, errors::VisualSignError,
@@ -86,7 +86,7 @@ pub fn decode_accounts(message: &Message) -> Result<Vec<SolanaAccountInfo>, Visu
 
 /// Decode accounts from a V0 message
 pub fn decode_v0_accounts(
-    v0_message: &solana_sdk::message::v0::Message,
+    v0_message: &solana_message::v0::Message,
 ) -> Result<Vec<SolanaAccountInfo>, VisualSignError> {
     let mut accounts: Vec<SolanaAccountInfo> = v0_message
         .account_keys
@@ -322,7 +322,9 @@ pub fn create_accounts_advanced_preview_layout(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::{hash::Hash, message::MessageHeader, pubkey::Pubkey};
+    use solana_hash::Hash;
+    use solana_message::MessageHeader;
+    use solana_pubkey::Pubkey;
 
     fn create_test_message(
         num_required_signatures: u8,
@@ -569,7 +571,7 @@ mod tests {
 
     #[test]
     fn test_decode_v0_accounts() {
-        use solana_sdk::message::{MessageHeader, v0::Message as V0Message};
+        use solana_message::{MessageHeader, v0::Message as V0Message};
 
         let account1 = Pubkey::new_unique();
         let account2 = Pubkey::new_unique();
@@ -831,7 +833,7 @@ mod tests {
     /// Must not panic (saturating_sub prevents underflow).
     #[test]
     fn test_decode_v0_accounts_inconsistent_header_no_panic() {
-        use solana_sdk::message::{MessageHeader, v0::Message as V0Message};
+        use solana_message::{MessageHeader, v0::Message as V0Message};
 
         let account1 = Pubkey::new_unique();
 

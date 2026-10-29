@@ -34,19 +34,22 @@ Replace `ethereum` with your chain (`solana`, `sui`, or `tron`) and `<your_trans
 ### Example: Ethereum Transfer
 
 ```bash
-./target/release/parser_cli decode --chain ethereum -t 0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a0 --output human
+./target/release/parser_cli decode --chain ethereum -t 0xec808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080 --output human
 ```
 
 Output:
 ```
 ┌─ Transaction: Ethereum Transaction
 │  Version: 0
+│  Type: EthereumTx
 │
 └─ Fields:
    ├─ Network: Ethereum Mainnet
    ├─ To: 0x3535353535353535353535353535353535353535
    ├─ Value: 1 ETH
-   └─ Gas Limit: 21000
+   ├─ Gas Limit: 21000
+   ├─ Gas Price: 20 gwei
+   └─ Nonce: 0
 ```
 
 ### Example: Solana Transaction

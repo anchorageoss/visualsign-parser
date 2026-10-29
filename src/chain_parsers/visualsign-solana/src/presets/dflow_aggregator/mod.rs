@@ -308,7 +308,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use solana_parser::IdlSource;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
 
     fn field_label_value(field: &AnnotatedPayloadField) -> (String, String) {
         match &field.signable_payload_field {
