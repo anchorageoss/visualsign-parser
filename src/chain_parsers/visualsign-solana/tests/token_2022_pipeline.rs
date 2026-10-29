@@ -10,13 +10,15 @@ mod common;
 
 use std::str::FromStr;
 
-use solana_sdk::hash::Hash;
-use solana_sdk::instruction::{AccountMeta, CompiledInstruction, Instruction};
-use solana_sdk::message::v0::{Message as V0Message, MessageAddressTableLookup};
-use solana_sdk::message::{Message, MessageHeader, VersionedMessage};
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signature;
-use solana_sdk::transaction::{Transaction as SolanaTransaction, VersionedTransaction};
+use solana_hash::Hash;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_message::compiled_instruction::CompiledInstruction;
+use solana_message::v0::{Message as V0Message, MessageAddressTableLookup};
+use solana_message::{Message, MessageHeader, VersionedMessage};
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_transaction::Transaction as SolanaTransaction;
+use solana_transaction::versioned::VersionedTransaction;
 use visualsign::SignablePayload;
 use visualsign::errors::VisualSignError;
 use visualsign_solana::{

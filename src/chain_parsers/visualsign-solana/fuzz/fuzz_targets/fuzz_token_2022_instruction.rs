@@ -1,12 +1,12 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use solana_sdk::hash::Hash;
-use solana_sdk::instruction::CompiledInstruction;
-use solana_sdk::message::{Message, MessageHeader};
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signature;
-use solana_sdk::transaction::Transaction;
+use solana_hash::Hash;
+use solana_message::compiled_instruction::CompiledInstruction;
+use solana_message::{Message, MessageHeader};
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_transaction::Transaction;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign_solana::transaction_to_visual_sign;
 

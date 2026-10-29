@@ -8,7 +8,7 @@
 // as elsewhere in visualsign-solana). Two oracles are used:
 //
 // - `interface_decode`: `TokenInstruction::unpack` / `TransferFeeInstruction::unpack`
-//   from spl-token-2022 10 (spl-token-2022-interface 2.1). The preset is built
+//   from spl-token-2022 11 (spl-token-2022-interface 3.1). The preset is built
 //   on these, so they say what it *should* decode and with which fields. They
 //   are lenient (they ignore trailing bytes), so they are not ground truth:
 //   `should_decode` adds the program's exact-length rule and its fee <= amount
@@ -26,7 +26,7 @@
 use super::*;
 use proptest::prelude::*;
 use solana_program_error::ProgramError;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use std::collections::BTreeMap;
 use visualsign::encodings::decode_hex;
 
@@ -47,7 +47,7 @@ const MULTISIG_TAGS: [(u8, usize); 6] = [(3, 3), (4, 3), (5, 2), (7, 3), (8, 3),
 // --- Rendering helpers (on top of mod.rs's `visualize`/`visualize_indices`) ---
 
 fn program_key() -> Pubkey {
-    Pubkey::new_from_array(spl_token_2022::id().to_bytes())
+    Pubkey::new_from_array(spl_token_2022_interface::id().to_bytes())
 }
 
 /// An account table: the program id at index 0, then `keys(n)`.

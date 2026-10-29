@@ -79,9 +79,12 @@ serde_json = "1.0"
 jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
 proptest = "1"
-# `ProgramError` of the Token-2022 program (spl-token-2022 10), for the
+# `ProgramError` of the Token-2022 program (spl-token-2022 11), for the
 # adversarial tests' program oracle.
 solana-program-error = "3"
+# The Token-2022 program itself (only `spl-token-2022-interface` is a normal
+# dependency), so the adversarial tests can run its processor as an oracle.
+spl-token-2022 = "11.1.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
