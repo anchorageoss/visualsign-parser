@@ -321,8 +321,11 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - name: Docker setup
-        uses: ./.github/actions/docker-setup
+        # Same-commit local action, as in the `parser` job above.
+        uses: ./.github/actions/docker-setup # zizmor: ignore[self-repository] see the parser job
         with:
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
 
@@ -333,7 +336,10 @@ jobs:
         run: env -C out/nsm_probe tar -cf - . | docker load
 
       - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # GITHUB_ACTOR is the runner's default env var for github.actor.
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Push + print TVC deploy instructions
         run: |
