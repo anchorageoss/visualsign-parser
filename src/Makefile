@@ -127,6 +127,9 @@ apple-silicon-check:
 	@# `false` turns a C dependency into a build failure. Run on an Apple
 	@# Silicon macOS host (CI: macos-latest), which also runs the tests natively.
 	CC=/usr/bin/false CXX=/usr/bin/false cargo build --lib --target aarch64-apple-ios $(addprefix -p ,$(APPLE_NO_C_CRATES))
+	@# visualsign-solana is free of C only without its default features (json-parsed
+	@# pulls zstd-sys) and without `intents` (near-sdk pulls secp256k1-sys).
+	CC=/usr/bin/false CXX=/usr/bin/false cargo build --lib --target aarch64-apple-ios -p visualsign-solana --no-default-features
 	cargo test --no-fail-fast $(addprefix -p ,$(APPLE_NO_C_CRATES))
 
 .PHONY: narrow-build-check
