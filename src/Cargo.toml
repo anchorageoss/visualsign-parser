@@ -25,6 +25,7 @@ members = [
   "chain_parsers/visualsign-zcash",
   "solana_test_utils",
   "tools/idl-meta",
+  "tools/release-notes",
 ]
 
 resolver = "3"

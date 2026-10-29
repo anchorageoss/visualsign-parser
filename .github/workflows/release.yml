@@ -26,14 +26,15 @@ jobs:
     permissions:
       contents: write
       actions: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      published: ${{ steps.check_tag.outputs.release_exists == 'false' && !inputs.dry_run }}
     steps:
       - name: Checkout code
-        # Credentials stay persisted on purpose: the `Create tag` step runs
-        # `git push origin "$TAG"` with this checkout's token.
-        # zizmor: ignore[artipacked] tag push below needs the persisted token
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Compute version
         id: version
@@ -88,7 +89,10 @@ jobs:
         if: steps.check_tag.outputs.tag_exists == 'false' && !inputs.dry_run
         env:
           TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The checkout keeps no credentials; only this step gets the token.
+          gh auth setup-git
           git tag "$TAG"
           git push origin "$TAG" 2>&1 || {
             # Push failed; query the remote directly to distinguish "concurrent
@@ -134,3 +138,18 @@ jobs:
           FULL_VERSION: ${{ steps.version.outputs.full_version }}
         run: |
           echo "DRY RUN: would have created tag ${TAG} (version: ${FULL_VERSION})"
+
+  announce:
+    name: Release announcement
+    # A docs PR for a release that enables a new chain. Called as a job rather than
+    # triggered with workflow_run, so it runs in this run with only the permissions
+    # granted here.
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/release-announcement.yml # zizmor: ignore[self-repository]
+    with:
+      to: ${{ needs.release.outputs.tag }}
+      new_chains_only: true
