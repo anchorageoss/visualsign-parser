@@ -21,7 +21,7 @@ mod common;
 use proptest::prelude::*;
 use solana_parser::decode_idl_data;
 use solana_parser_fuzz_core::proptest as arb;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use visualsign_solana::transaction_to_visual_sign;
 
 use common::{

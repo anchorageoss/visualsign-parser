@@ -4,7 +4,7 @@
 //! Drives the complete stack end-to-end via the public
 //! `transaction_to_visual_sign` API:
 //!
-//!   SolanaTransaction (built with spl_token::instruction::*)
+//!   SolanaTransaction (built with spl_token_interface::instruction::*)
 //!     -> transaction_to_visual_sign
 //!       -> SolanaVisualSignConverter
 //!         -> SplTokenVisualizer  (dispatched by program id)
@@ -18,15 +18,15 @@
 
 mod common;
 
-use solana_sdk::message::Message;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::transaction::Transaction as SolanaTransaction;
-use spl_token::instruction as token_instruction;
+use solana_message::Message;
+use solana_pubkey::Pubkey;
+use solana_transaction::Transaction as SolanaTransaction;
+use spl_token_interface::instruction as token_instruction;
 use visualsign_solana::transaction_to_visual_sign;
 
 use common::{find_text, instruction_fields, options_no_idl};
 
-fn build_tx(instruction: solana_sdk::instruction::Instruction) -> SolanaTransaction {
+fn build_tx(instruction: solana_instruction::Instruction) -> SolanaTransaction {
     let fee_payer = Pubkey::new_unique();
     SolanaTransaction::new_unsigned(Message::new(&[instruction], Some(&fee_payer)))
 }
@@ -38,7 +38,7 @@ fn pipeline_initialize_mint_surfaces_mint_decimals_and_authorities() {
     let freeze_authority = Pubkey::new_unique();
 
     let ix = token_instruction::initialize_mint(
-        &spl_token::id(),
+        &spl_token_interface::id(),
         &mint,
         &mint_authority,
         Some(&freeze_authority),
@@ -71,8 +71,14 @@ fn pipeline_initialize_mint2_surfaces_mint_decimals_and_authorities() {
     let mint = Pubkey::new_unique();
     let mint_authority = Pubkey::new_unique();
 
-    let ix = token_instruction::initialize_mint2(&spl_token::id(), &mint, &mint_authority, None, 6)
-        .unwrap();
+    let ix = token_instruction::initialize_mint2(
+        &spl_token_interface::id(),
+        &mint,
+        &mint_authority,
+        None,
+        6,
+    )
+    .unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let layouts = instruction_fields(&payload);
@@ -100,7 +106,8 @@ fn pipeline_initialize_account_surfaces_account_mint_and_owner() {
     let owner = Pubkey::new_unique();
 
     let ix =
-        token_instruction::initialize_account(&spl_token::id(), &account, &mint, &owner).unwrap();
+        token_instruction::initialize_account(&spl_token_interface::id(), &account, &mint, &owner)
+            .unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let expanded = instruction_fields(&payload)[0].expanded.as_ref().unwrap();
@@ -128,7 +135,8 @@ fn pipeline_initialize_account3_surfaces_mint_and_owner_from_instruction_data() 
     let owner = Pubkey::new_unique();
 
     let ix =
-        token_instruction::initialize_account3(&spl_token::id(), &account, &mint, &owner).unwrap();
+        token_instruction::initialize_account3(&spl_token_interface::id(), &account, &mint, &owner)
+            .unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let expanded = instruction_fields(&payload)[0].expanded.as_ref().unwrap();
@@ -154,7 +162,7 @@ fn pipeline_freeze_account_surfaces_account_mint_and_authority() {
     let freeze_authority = Pubkey::new_unique();
 
     let ix = token_instruction::freeze_account(
-        &spl_token::id(),
+        &spl_token_interface::id(),
         &account,
         &mint,
         &freeze_authority,
@@ -185,9 +193,14 @@ fn pipeline_thaw_account_surfaces_account_mint_and_authority() {
     let mint = Pubkey::new_unique();
     let freeze_authority = Pubkey::new_unique();
 
-    let ix =
-        token_instruction::thaw_account(&spl_token::id(), &account, &mint, &freeze_authority, &[])
-            .unwrap();
+    let ix = token_instruction::thaw_account(
+        &spl_token_interface::id(),
+        &account,
+        &mint,
+        &freeze_authority,
+        &[],
+    )
+    .unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let expanded = instruction_fields(&payload)[0].expanded.as_ref().unwrap();
@@ -216,7 +229,8 @@ fn pipeline_close_account_surfaces_account_destination_and_owner() {
     let owner = Pubkey::new_unique();
 
     let ix =
-        token_instruction::close_account(&spl_token::id(), &account, &dest, &owner, &[]).unwrap();
+        token_instruction::close_account(&spl_token_interface::id(), &account, &dest, &owner, &[])
+            .unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let expanded = instruction_fields(&payload)[0].expanded.as_ref().unwrap();
@@ -246,7 +260,7 @@ fn pipeline_revoke_surfaces_source_and_owner() {
     let source = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
 
-    let ix = token_instruction::revoke(&spl_token::id(), &source, &owner, &[]).unwrap();
+    let ix = token_instruction::revoke(&spl_token_interface::id(), &source, &owner, &[]).unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let expanded = instruction_fields(&payload)[0].expanded.as_ref().unwrap();
@@ -276,8 +290,15 @@ fn pipeline_unchecked_transfer_renders_without_mint_field() {
     let dest = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
 
-    let ix =
-        token_instruction::transfer(&spl_token::id(), &source, &dest, &owner, &[], 1_000).unwrap();
+    let ix = token_instruction::transfer(
+        &spl_token_interface::id(),
+        &source,
+        &dest,
+        &owner,
+        &[],
+        1_000,
+    )
+    .unwrap();
 
     let payload = transaction_to_visual_sign(build_tx(ix), options_no_idl()).unwrap();
     let expanded = instruction_fields(&payload)[0].expanded.as_ref().unwrap();
@@ -311,7 +332,7 @@ fn pipeline_transfer_checked_surfaces_mint_explicitly() {
     let owner = Pubkey::new_unique();
 
     let ix = token_instruction::transfer_checked(
-        &spl_token::id(),
+        &spl_token_interface::id(),
         &source,
         &mint,
         &dest,

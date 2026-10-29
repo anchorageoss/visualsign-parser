@@ -10,11 +10,10 @@
 
 use super::*;
 use crate::core::VisualizerContext;
+use solana_instruction::AccountMeta;
+use solana_instruction::Instruction;
 use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-};
+use solana_pubkey::Pubkey;
 use std::str::FromStr;
 use visualsign::SignablePayloadField;
 
@@ -111,7 +110,7 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
     for meta in &instruction.accounts {
         account_keys.push(meta.pubkey);
     }
-    let compiled = solana_sdk::instruction::CompiledInstruction {
+    let compiled = solana_message::compiled_instruction::CompiledInstruction {
         program_id_index: 0,
         accounts: (1..=instruction.accounts.len() as u8).collect(),
         data: instruction.data.clone(),
@@ -343,7 +342,7 @@ fn test_encode_pause_resume_instructions() {
 fn test_encode_set_authority_instruction() {
     // Helper test to generate correct base58 encoding for SetAuthority
     // Structure: [discriminator (6), authority_type (0 = MintTokens), option_flag (1 = Some), pubkey (32 bytes)]
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
 
     let new_authority = Pubkey::from_str("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM").unwrap();
     let mut set_authority_bytes = vec![6u8, 0u8, 1u8]; // discriminator, authority_type (MintTokens), option_flag (Some)

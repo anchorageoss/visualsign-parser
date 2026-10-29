@@ -17,6 +17,11 @@ use visualsign::field_builders::create_amount_field;
 use crate::fmt::format_near;
 
 /// The wNEAR contract on each network.
+///
+/// Not keyed by network: `wrap.testnet` matches under mainnet too. That is safe
+/// only because `network_mismatch` in `render_on_chain` refuses a `.testnet`
+/// receiver under mainnet (and `.near` under testnet) before any action
+/// renders; keep that guard if this list changes.
 const WRAP_CONTRACTS: [&str; 2] = ["wrap.near", "wrap.testnet"];
 
 const NEAR_DEPOSIT: &str = "near_deposit";
@@ -87,12 +92,16 @@ pub fn decode_args(
 /// JSON string, so a value that deserializes can still fail to be a number, and
 /// a label derived from a weaker check than the fields would let the title claim
 /// an unwrap the body never rendered.
+/// Digits only, as NEP-141's U128 string is: `str::parse::<u128>` alone also
+/// takes a leading `+`.
 fn withdraw_amount(args: &[u8]) -> Option<u128> {
-    serde_json::from_slice::<NearWithdrawArgs>(args)
+    let amount = serde_json::from_slice::<NearWithdrawArgs>(args)
         .ok()?
-        .amount
-        .parse::<u128>()
-        .ok()
+        .amount;
+    if amount.is_empty() || !amount.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    amount.parse::<u128>().ok()
 }
 
 #[cfg(test)]
@@ -148,16 +157,28 @@ mod tests {
     #[test]
     fn another_contract_with_the_same_method_names_is_not_a_wrap() {
         let args = format!(r#"{{"amount":"{ONE_NEAR}"}}"#);
-        assert_eq!(label("token.example.near", "near_deposit", b""), None);
-        assert_eq!(
-            label("token.example.near", "near_withdraw", args.as_bytes()),
-            None
-        );
-        assert!(
-            decode_args("token.example.near", "near_withdraw", args.as_bytes())
-                .expect("decode")
-                .is_none()
-        );
+        // Exact match only: a sub-account, a suffix, a case variant or a
+        // look-alike of wrap.near is a different contract.
+        for receiver in [
+            "token.example.near",
+            "x.wrap.near",
+            "wrap.near.evil",
+            "Wrap.near",
+            "wrap2.near",
+        ] {
+            assert_eq!(label(receiver, "near_deposit", b""), None, "{receiver}");
+            assert_eq!(
+                label(receiver, "near_withdraw", args.as_bytes()),
+                None,
+                "{receiver}"
+            );
+            assert!(
+                decode_args(receiver, "near_withdraw", args.as_bytes())
+                    .expect("decode")
+                    .is_none(),
+                "{receiver}"
+            );
+        }
     }
 
     /// The title may not claim more than the fields show, so args that do not
@@ -172,6 +193,8 @@ mod tests {
             br#"{"amount":"1","receiver_id":"alice.near"}"#,
             // an amount that is not an integer
             br#"{"amount":"lots"}"#,
+            // a sign, which parse::<u128> alone accepts
+            br#"{"amount":"+5"}"#,
         ] {
             assert_eq!(label("wrap.near", "near_withdraw", bad), None, "{bad:?}");
             assert!(

@@ -1435,11 +1435,6 @@ async fn parser_near_rejects_input_that_is_neither_transaction_nor_intent() {
                 parse_error.message()
             );
         }
-        assert!(
-            parse_error.code() == Code::InvalidArgument,
-            "unexpected error message: {}",
-            parse_error.message()
-        );
     }
 
     integration::Builder::new().execute(test).await

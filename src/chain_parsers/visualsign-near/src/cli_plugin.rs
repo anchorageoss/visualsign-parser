@@ -209,6 +209,10 @@ fn create_chain_metadata(
 // A dependency is not compiled with this crate's `cfg(test)`, so only the
 // feature reaches it; src/Makefile runs a pass with it on, as it already does
 // for `diagnostics`.
+/// The tests that sign token metadata with the CLI dev keys are gated on
+/// `dev-signing`, so a bare `cargo test -p visualsign-near` skips them. Run
+/// with `--features dev-signing` (`make -C src test` has a pass for it) for
+/// full coverage.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {

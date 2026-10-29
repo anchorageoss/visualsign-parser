@@ -42,7 +42,12 @@ default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified"
 bitcoin = ["dep:visualsign-bitcoin"]
 ethereum = ["dep:visualsign-ethereum"]
 near = ["dep:visualsign-near"]
-solana = ["dep:visualsign-solana", "visualsign-solana/intents"]
+solana = ["dep:visualsign-solana"]
+# NEAR Intents carried in a Solana message. Opt-in, not in `default`: it links
+# visualsign-intents into the Solana path (near-sdk, near-crypto,
+# secp256k1-sys). Without it, such a message is refused, not shown as text.
+# NEAR's own intents rendering is part of `near` and unaffected.
+solana-intents = ["solana", "visualsign-solana/intents"]
 sui = ["dep:visualsign-sui"]
 tron = ["dep:visualsign-tron"]
 unspecified = ["dep:visualsign-unspecified"]

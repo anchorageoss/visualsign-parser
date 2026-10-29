@@ -257,11 +257,18 @@ pub(crate) fn intent_label(intent: &Intent) -> &'static str {
     }
 }
 
+/// What a payload with no intents does: nothing, except spend its nonce. A user
+/// signs one on purpose to cancel a pending signed request (a quote, an order)
+/// that uses the same nonce, so it is named as a cancel rather than shown as an
+/// envelope with an empty body.
+pub(crate) const CANCEL_LABEL: &str = "Cancel: invalidate nonce";
+
 /// Title for a pre-signature envelope, mirroring `convert::title_for` on the
 /// transaction path: a lone intent names its type, a batch stays generic
 /// because no single name describes it.
 pub(crate) fn title_for_intents(intents: &[Intent]) -> String {
     match intents {
+        [] => CANCEL_LABEL.to_string(),
         [single] => format!("NEAR Intent: {}", intent_label(single)),
         _ => "NEAR Intent".to_string(),
     }
@@ -489,7 +496,7 @@ fn push_min_gas(
     min_gas: Option<near_sdk::Gas>,
 ) -> Result<(), VisualSignError> {
     if let Some(gas) = min_gas {
-        let tgas = tokens::format_units(u128::from(gas.as_gas()), 12);
+        let tgas = tokens::format_tgas(gas.as_gas());
         fields.push(create_text_field("Min Gas", &format!("{tgas} Tgas"))?.signable_payload_field);
     }
     Ok(())
@@ -728,19 +735,37 @@ pub(crate) fn render_single(
         }
     }
     let mut fields = render_envelope(payload)?;
+    // The verifier refuses a payload naming another contract, so this can't
+    // execute; but it renders like a normal intent, and a NEP-413 envelope
+    // takes the verifying contract from its free-text `recipient`.
+    if payload.verifying_contract.as_str() != network.verifier() {
+        fields.push(diagnostic(
+            "verifying-contract",
+            &format!(
+                "the verifying contract is {}, not {}, the NEAR Intents verifier on this \
+                 network; the verifier would reject this signature",
+                payload.verifying_contract,
+                network.verifier()
+            ),
+        )?);
+    }
     if payload.deadline.has_expired() {
         fields.push(diagnostic(
             "deadline",
             "deadline has passed; the intents would be rejected",
         )?);
     }
-    // An empty list is valid and does nothing, but still consumes the nonce
-    // for this signer -- so it renders as an envelope with no body, and a
-    // signer has nothing on screen telling them that is all it does.
+    // An empty or absent list is valid and does nothing, but still consumes
+    // the nonce for this signer: that is how a pending signed request is
+    // cancelled. Named as such, in the body as well as the title (a signed
+    // batch has no per-section title), with the warning saying that spending
+    // the nonce is all it does.
     if payload.intents.is_empty() {
+        fields.push(create_text_field("Intent", CANCEL_LABEL)?.signable_payload_field);
         fields.push(diagnostic(
             "empty-intents",
-            "this envelope carries no intents; signing it moves nothing but spends the nonce",
+            "this envelope carries no intents; signing it moves nothing but spends the nonce, \
+             cancelling any pending signed request that uses it",
         )?);
     }
     let total = payload.intents.len();
@@ -2062,6 +2087,8 @@ mod tests {
             SettlementNetwork::Mainnet,
         )
         .expect("render");
+        assert_eq!(text_at(&fields, "Intent"), CANCEL_LABEL);
+        assert_eq!(title_for_intents(&[]), CANCEL_LABEL);
         assert!(
             fields
                 .iter()

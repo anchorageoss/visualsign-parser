@@ -1,13 +1,14 @@
 //! Associated Token Account preset implementation for Solana
 
 mod config;
+pub(crate) mod interface;
 
 use crate::core::{
     AccountRef, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
     resolve_program_display,
 };
 use config::AssociatedTokenAccountConfig;
-use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;
+use interface::AssociatedTokenAccountInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::create_text_field;
 use visualsign::{

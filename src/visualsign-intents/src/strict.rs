@@ -5,7 +5,9 @@
 //! the bytes the signature covers but never renders, and a misspelled key (a
 //! snake_case `callback_url` for NEP-413's `callbackUrl`) silently drops a field
 //! the wallet does sign. Every chain that renders these payloads decodes the
-//! typed value first, so serde still reports malformed input and repeated keys,
+//! typed value first, so serde still reports malformed input and repeated struct
+//! fields (a repeated key inside a map-valued field keeps its last value, as in
+//! the contract),
 //! then refuses any top-level key outside the type's declared set and, for an
 //! intents payload, any key an intent's own kind does not declare.
 
@@ -163,6 +165,8 @@ pub fn require_declared_keys(json: &[u8], allowed: &[&str]) -> Result<(), String
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use defuse_core::intents::Intent;
+    use std::collections::BTreeSet;
 
     #[test]
     fn declared_keys_pass_and_others_are_named() {
@@ -223,12 +227,14 @@ mod tests {
     /// skipped on serialization) re-encodes with exactly those keys. A listed
     /// key the type does not have, or a field the list misses, fails here.
     /// `account_id`, a deserialize-only alias, is checked separately.
-    #[test]
-    fn every_declared_intent_key_is_a_field_of_its_kind() {
+    /// One intent of every kind, carrying every key its kind declares
+    /// (optional ones set to non-default values, so none is skipped on
+    /// serialization).
+    fn every_kind_with_every_key() -> Vec<String> {
         const STATE_INIT: &str =
             r#"{"V1":{"code":{"hash":"11111111111111111111111111111111"},"data":{}}}"#;
         let withdraw_tail = r#","memo":"m","msg":"x","storage_deposit":"1","min_gas":"1""#;
-        let cases = [
+        vec![
             r#"{"intent":"add_public_key","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"}"#.to_string(),
             r#"{"intent":"remove_public_key","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"}"#.to_string(),
             format!(
@@ -244,7 +250,53 @@ mod tests {
             format!(
                 r#"{{"intent":"auth_call","contract_id":"app.near","state_init":{STATE_INIT},"msg":"x","attached_deposit":"1","min_gas":"1"}}"#
             ),
-        ];
+        ]
+    }
+
+    /// The defuse tag of every `Intent` variant. No wildcard arm: a defuse
+    /// bump that adds a variant fails to compile here until it is named, and
+    /// then [`every_intent_variant_has_a_declared_key_set`] fails until the
+    /// key table and the cases above cover it.
+    fn intent_tag(intent: &Intent) -> &'static str {
+        match intent {
+            Intent::AddPublicKey(_) => "add_public_key",
+            Intent::RemovePublicKey(_) => "remove_public_key",
+            Intent::Transfer(_) => "transfer",
+            Intent::FtWithdraw(_) => "ft_withdraw",
+            Intent::NftWithdraw(_) => "nft_withdraw",
+            Intent::MtWithdraw(_) => "mt_withdraw",
+            Intent::NativeWithdraw(_) => "native_withdraw",
+            Intent::StorageDeposit(_) => "storage_deposit",
+            Intent::TokenDiff(_) => "token_diff",
+            Intent::SetAuthByPredecessorId(_) => "set_auth_by_predecessor_id",
+            Intent::AuthCall(_) => "auth_call",
+        }
+    }
+
+    /// Number of arms in [`intent_tag`].
+    const INTENT_VARIANTS: usize = 11;
+
+    #[test]
+    fn every_intent_variant_has_a_declared_key_set() {
+        let mut seen = BTreeSet::new();
+        for case in every_kind_with_every_key() {
+            let input: serde_json::Value = serde_json::from_str(&case).unwrap();
+            let intent: Intent = serde_json::from_str(&case).unwrap();
+            let tag = intent_tag(&intent);
+            assert_eq!(input["intent"].as_str(), Some(tag));
+            assert!(intent_keys(tag).is_some(), "{tag} has no declared key set");
+            seen.insert(tag);
+        }
+        assert_eq!(
+            seen.len(),
+            INTENT_VARIANTS,
+            "a variant has no case: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn every_declared_intent_key_is_a_field_of_its_kind() {
+        let cases = every_kind_with_every_key();
         for case in &cases {
             let input: serde_json::Value = serde_json::from_str(case).unwrap();
             let kind = input["intent"].as_str().unwrap();

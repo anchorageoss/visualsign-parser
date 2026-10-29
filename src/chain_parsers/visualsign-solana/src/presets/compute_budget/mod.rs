@@ -8,7 +8,7 @@ use crate::core::{
 };
 use borsh::de::BorshDeserialize;
 use config::ComputeBudgetConfig;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
 use visualsign::{
