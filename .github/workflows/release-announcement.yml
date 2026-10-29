@@ -39,6 +39,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
+        # zizmor: ignore[artipacked] the docs-branch push below needs the persisted token
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: main
