@@ -49,6 +49,18 @@ on:
         description: "ABI trust posture: hex secp256k1 signer pubkey to require-signed ABI mappings, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis. No default: workflow_dispatch must state a posture (app_id is free text here, so a blank default could silently deploy the permissive posture to a non-test app)."
         required: false
         default: ""
+      ack_breaking_wallet_integration:
+        description: "Exactly the breaking-wallet-integration PRs this deploy ships, e.g. 625,640 ('none' if there are none). Deploy refuses on a missing or extra number; run once without it to see the list."
+        required: false
+        default: ""
+      since:
+        description: "Git ref (v<semver> tag or commit) the live deployment runs. Only needed when tvc-deploy can't read it from TVC."
+        required: false
+        default: ""
+      dangerous_skip_wallet_gate_reason:
+        description: "DANGEROUS: deploy even if the wallet-integration gate refuses or can't run (e.g. GitHub outage). Give the reason; it is printed and recorded."
+        required: false
+        default: ""
       turnkey_client_version:
         description: "turnkey-client image tag for the smoke check (approved version, not latest)"
         required: false
@@ -67,9 +79,12 @@ concurrency:
   cancel-in-progress: false
 
 # Reads the repo + secrets, and pulls the smoke-test container from GHCR.
+# issues/pull-requests: read lets the wallet-integration gate list labeled PRs.
 permissions:
   contents: read
   packages: read
+  issues: read
+  pull-requests: read
 
 jobs:
   deploy:
@@ -122,6 +137,12 @@ jobs:
           HOST_PORT: ${{ inputs.host_port || '3000' }}
           ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
           TVC_TEST_ABI_SIGNER: ${{ vars.TVC_TEST_ABI_SIGNER }}
+          # Wallet-integration gate: lists breaking-wallet-integration PRs
+          # between the live version and this image (read-only token).
+          GH_TOKEN: ${{ github.token }}
+          ACK_WALLET: ${{ inputs.ack_breaking_wallet_integration || '' }}
+          SINCE_REF: ${{ inputs.since || '' }}
+          SKIP_WALLET_GATE_REASON: ${{ inputs.dangerous_skip_wallet_gate_reason || '' }}
           # Public half of visualsign-ethereum's CLI_DEV_SIGNING_KEY_SEED.
           # Pinned by `dev_abi_signer_pubkey_is_pinned` in that crate.
           DEV_ABI_SIGNER_PUBKEY: 0424653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c119fc5009a032aa9fe47f5e149bb8442f71f884ccb516590686d8ff6ab91c613
@@ -158,6 +179,16 @@ jobs:
             # at a well-known dev key.
             abi_trust_args=(--accept-signatures-from-pubkey "${TVC_TEST_ABI_SIGNER:-$DEV_ABI_SIGNER_PUBKEY}")
           fi
+          gate_args=()
+          [ -n "$ACK_WALLET" ] && gate_args+=(--ack-breaking-wallet-integration "$ACK_WALLET")
+          [ -n "$SINCE_REF" ] && gate_args+=(--since "$SINCE_REF")
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # Validation deploy to the dev TEST app: no integrator reads it.
+            gate_args+=(--dangerous-skip-wallet-gate "PR-label validation deploy to the dev TEST app")
+          elif [ -n "$SKIP_WALLET_GATE_REASON" ]; then
+            echo "::warning::wallet-integration gate skipped: $SKIP_WALLET_GATE_REASON"
+            gate_args+=(--dangerous-skip-wallet-gate "$SKIP_WALLET_GATE_REASON")
+          fi
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
             --image-url "$IMAGE_URL" \
@@ -167,7 +198,8 @@ jobs:
             --qos-version "$QOS_VERSION" \
             --host-ip "$HOST_IP" \
             --host-port "$HOST_PORT" \
-            "${abi_trust_args[@]}"
+            "${abi_trust_args[@]}" \
+            "${gate_args[@]}"
 
       # Post-deploy smoke: against the live dev endpoint (/visualsign-dev), run
       # `turnkey-client verify` on a V0+ALT tx and assert it both RENDERS and
