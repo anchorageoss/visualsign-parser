@@ -34,6 +34,7 @@ use qos_p256::P256Pair;
 use xshell::{cmd, Shell};
 
 mod invite;
+mod wallet_gate;
 
 const POLL_TIMEOUT: Duration = Duration::from_secs(900);
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -137,6 +138,8 @@ struct DeployArgs {
     force: bool,
     #[command(flatten)]
     org: invite::OrgArgs,
+    #[command(flatten)]
+    wallet_gate: wallet_gate::WalletGateArgs,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -290,6 +293,16 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     for key in &args.accept_signatures_from_pubkey {
         validate_signer_pubkey(key)?;
     }
+    // Before anything is created: refuse to ship breaking-wallet-integration
+    // PRs the operator hasn't acknowledged (see wallet_gate.rs).
+    let gate_record = wallet_gate::check(
+        sh,
+        &args.wallet_gate,
+        args.org.as_deref(),
+        &args.app_id,
+        &args.image_url,
+    )?;
+    println!("{gate_record}");
     // gRPC health is mandatory for parser_app.
     let config = serde_json::json!({
         "appId": args.app_id,
@@ -316,7 +329,25 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
             org: args.org.as_deref(),
             config,
         },
-    )
+    )?;
+    record_gate(&gate_record);
+    Ok(())
+}
+
+/// Repeat the gate outcome at the end of the deploy log, and in the job
+/// summary under GitHub Actions, so the ack sits next to the deployment.
+fn record_gate(record: &str) {
+    println!("{record}");
+    if let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY") {
+        let appended = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&path)
+            .and_then(|mut f| writeln!(f, "- {record}"));
+        if let Err(e) = appended {
+            eprintln!("warning: could not write {path}: {e}");
+        }
+    }
 }
 
 fn deploy_pivot(sh: &Shell, args: &DeployPivotArgs) -> Result<()> {
@@ -787,6 +818,35 @@ mod tests {
                 "04aa",
             ]),
             clap::error::ErrorKind::ArgumentConflict
+        );
+    }
+
+    #[test]
+    fn deploy_takes_the_wallet_gate_flags() {
+        let args = deploy_args(&[
+            "--accept-unsigned-abis",
+            "--ack-breaking-wallet-integration",
+            "625,640",
+            "--since",
+            "v0.1058.0",
+            "--dangerous-skip-wallet-gate",
+            "GitHub outage",
+        ]);
+        let gate = &args.wallet_gate;
+        assert_eq!(
+            gate.ack_breaking_wallet_integration.as_deref(),
+            Some("625,640")
+        );
+        assert_eq!(gate.since.as_deref(), Some("v0.1058.0"));
+        assert_eq!(
+            gate.dangerous_skip_wallet_gate.as_deref(),
+            Some("GitHub outage")
+        );
+        assert_eq!(gate.github_repo, "anchorageoss/visualsign-parser");
+        // The reason is mandatory: a bare skip flag doesn't parse.
+        assert_eq!(
+            deploy_error_kind(&["--accept-unsigned-abis", "--dangerous-skip-wallet-gate"]),
+            clap::error::ErrorKind::InvalidValue
         );
     }
 
