@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
-      id-token: write
       contents: write  # `gh release edit` (mirror TVC details onto release notes)
       packages: write
     env:
@@ -96,6 +95,9 @@ jobs:
         env:
           GH_REF_TYPE: ${{ github.ref_type }}
           GH_REF_NAME: ${{ github.ref_name }}
+          # The repository running this workflow, so a fork's images say they came
+          # from the fork. For anchorageoss this equals the Makefile default.
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           if [[ "$GH_REF_TYPE" == "tag" && "$GH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GH_REF_NAME#v}"
@@ -126,6 +128,13 @@ jobs:
             echo "ERROR: VERSION='$VERSION' produced non-semver SEMVER='$SEMVER'" >&2
             exit 1
           fi
+          # The docs tell anyone rebuilding this commit to check VERSION against
+          # this exact shape before pasting it into `make`. Fail here if the
+          # workflow ever emits anything else, so that check stays true.
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[A-Za-z0-9-]+)?$ ]]; then
+            echo "ERROR: VERSION='$VERSION' is not MAJOR.MINOR.PATCH[+build]" >&2
+            exit 1
+          fi
           if [[ "$IS_RELEASE_BUILD" == "1" ]]; then
             echo "semver_tag=v$SEMVER" >> "$GITHUB_OUTPUT"
           else
@@ -138,7 +147,8 @@ jobs:
           # VERSION is compiled into the binary, so anyone rebuilding this
           # commit to compare digests needs the exact string.
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
+          echo "source_url=$SOURCE_URL" >> "$GITHUB_OUTPUT"
+          make VERSION="$VERSION" SOURCE_URL="$SOURCE_URL" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
         run: |
@@ -149,16 +159,30 @@ jobs:
         env:
           TARGET_NAME: ${{ matrix.target.name }}
           VERSION: ${{ steps.build.outputs.version }}
+          SOURCE_URL: ${{ steps.build.outputs.source_url }}
           SHA_TAG: ${{ steps.build.outputs.sha_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Lets a maintainer reproduce this build (`make VERSION=...` at the
-          # same commit) and compare digests without trusting the pushed image.
+          # Lets a maintainer reproduce this build (`make VERSION=... SOURCE_URL=...`
+          # at the same commit) and compare digests without trusting the pushed image.
           manifest_digest=$(jq -r '.manifests[0].digest' "out/${TARGET_NAME}/index.json")
           {
             echo "## Build: ${TARGET_NAME}"
             echo ""
-            echo "- **Commit**: \`${SHA_TAG}\`"
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              # A pull request run checks out GitHub's temporary merge of the head into
+              # the base. That commit isn't in the fork, so it can't be fetched to
+              # rebuild; record the head and base it was made from instead.
+              echo "- **PR head commit**: \`${PR_HEAD_SHA}\`"
+              echo "- **PR base commit**: \`${PR_BASE_SHA}\`"
+              echo "- **Merge commit built** (temporary; can't be fetched, so this build can't be reproduced exactly): \`${SHA_TAG}\`"
+            else
+              echo "- **Commit**: \`${SHA_TAG}\`"
+            fi
             echo "- **VERSION**: \`${VERSION}\`"
+            echo "- **SOURCE_URL**: \`${SOURCE_URL}\`"
             echo "- **OCI manifest digest** (\`out/${TARGET_NAME}/index.json\`): \`${manifest_digest}\`"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"

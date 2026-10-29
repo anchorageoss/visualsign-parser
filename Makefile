@@ -1,3 +1,9 @@
+# Recorded as each image's org.opencontainers.image.source label. CI sets it to the
+# repository that ran the workflow, so a fork's images point at the fork. It is metadata,
+# not an identity claim: an image is identified by its registry path and digest. Changing
+# it changes the image digest, so rebuild with the SOURCE_URL the build summary lists.
+SOURCE_URL ?= https://github.com/anchorageoss/visualsign-parser
+
 out/parser_app/index.json: \
 	$(shell git ls-files images/parser_app src)
 	$(call build,parser_app)
@@ -45,7 +51,7 @@ define build
 		--tag $(REGISTRY)/$(NAME) \
 		--progress=plain \
 		--platform=$(PLATFORM) \
-		--label "org.opencontainers.image.source=https://github.com/anchorageoss/visualsign-parser" \
+		--label "org.opencontainers.image.source=$(SOURCE_URL)" \
 		$(if $(filter common,$(NAME)),,$(call build_context,$(1))) \
 		$(if $(filter 1,$(NOCACHE)),--no-cache) \
 		--output "\
