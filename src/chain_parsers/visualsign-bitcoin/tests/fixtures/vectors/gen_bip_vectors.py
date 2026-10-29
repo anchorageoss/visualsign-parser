@@ -59,7 +59,7 @@ def extract(name, text):
         m = re.match(r"^\*+\s*Case:\s*(.*)$", line)
         if m:
             case = m.group(1).strip()
-        elif line and not line.startswith("*") and not line.startswith("<pre>") and "<pre>" not in line:
+        elif line and not line.startswith("*") and "<pre>" not in line and "</pre>" not in line:
             case = line.strip().rstrip(":")
         for blob in PRE.findall(line):
             raw = decode(blob)

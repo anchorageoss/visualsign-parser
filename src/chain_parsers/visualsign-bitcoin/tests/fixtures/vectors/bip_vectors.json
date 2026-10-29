@@ -564,7 +564,7 @@
     {
       "bip": "bip-0371",
       "status": "invalid",
-      "case": "</pre>",
+      "case": "PSBT With <tt>PSBT_IN_TAP_INTERNAL_KEY</tt> key that is too long (incorrectly serialized as compressed DER)",
       "psbt_base64": "cHNidP8BAHECAAAAASd0Srq/MCf+DWzyOpbu4u+xiO9SMBlUWFiD5ptmJLJCAAAAAAD/////Anh8AQAAAAAAFgAUg6fjS9mf8DpJYu+KGhAbspVGHs5gawQqAQAAABYAFHrDad8bIOAz1hFmI5V7CsSfPFLoAAAAAAABASsA8gUqAQAAACJRIFosLPW1LPMfg60ujaY/8DGD7Nj2CcdRCuikjgORCgdXARchAv40kGTJjW4qhT+jybEr2LMEoZwZXGDvp+4jkwRtP6IyAAAA"
     },
     {
