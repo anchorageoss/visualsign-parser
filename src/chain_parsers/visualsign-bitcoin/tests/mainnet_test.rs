@@ -207,8 +207,10 @@ fn mainnet_full_utxos_match_explorer_and_fee_is_verified() {
     }
 }
 
-/// With witness_utxo only, amounts are claims: the fee must be flagged
-/// unverified unless every input is taproot (BIP-341 commits to all amounts).
+/// With witness_utxo only, amounts are claims: the fee is never verified. If
+/// every input is taproot it is shown as bound by the BIP-341 signature (which
+/// commits to all amounts); otherwise it is flagged unverified. Legacy inputs
+/// still carry their previous transaction, so an all-legacy fee is verified.
 #[test]
 fn mainnet_witness_utxo_only_flags_fee_unless_all_taproot() {
     for f in load() {
@@ -216,9 +218,16 @@ fn mainnet_witness_utxo_only_flags_fee_unless_all_taproot() {
         assert_matches_explorer(&f, &r);
         let all_taproot = f.explorer.inputs.iter().all(|i| i.kind == "v1_p2tr");
         let all_legacy = f.explorer.inputs.iter().all(|i| i.kind == "p2pkh");
-        if all_taproot || all_legacy {
+        if all_legacy {
             assert!(
                 matches!(r.fee, RenderedFee::Verified(_)),
+                "{}: {:?}",
+                f.label,
+                r.fee
+            );
+        } else if all_taproot {
+            assert!(
+                matches!(r.fee, RenderedFee::SignatureBound(_)),
                 "{}: {:?}",
                 f.label,
                 r.fee

@@ -172,6 +172,10 @@ fn build_payload(
 
     match &analysis.fee {
         Fee::Verified(fee) => fields.push(create_amount_field("Fee", &btc(*fee), "BTC")?),
+        Fee::SignatureBound(fee) => fields.push(create_text_field(
+            "Fee",
+            &format!("{} BTC (claimed; enforced by BIP-341 signature)", btc(*fee)),
+        )?),
         Fee::Unverified { fee, reason } => fields.push(create_text_field(
             "Fee",
             &format!("unknown (claimed {} BTC; unverified: {reason})", btc(*fee)),

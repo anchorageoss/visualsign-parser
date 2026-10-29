@@ -29,14 +29,22 @@ pub struct RenderedOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenderedFee {
     Verified(u64),
-    Unverified { sat: u64, reason: String },
+    /// Taproot-only spend with `witness_utxo` amounts: shown, but only enforced
+    /// by the BIP-341 signature.
+    SignatureBound(u64),
+    Unverified {
+        sat: u64,
+        reason: String,
+    },
     Unknown,
 }
 
 impl RenderedFee {
     pub fn sat(&self) -> Option<u64> {
         match self {
-            Self::Verified(s) | Self::Unverified { sat: s, .. } => Some(*s),
+            Self::Verified(s) | Self::SignatureBound(s) | Self::Unverified { sat: s, .. } => {
+                Some(*s)
+            }
             Self::Unknown => None,
         }
     }
@@ -48,6 +56,9 @@ pub struct Rendered {
     pub outputs: Vec<RenderedOutput>,
     pub fee: RenderedFee,
 }
+
+/// Suffix of a taproot-only fee built from `witness_utxo` amounts.
+const SIGNATURE_BOUND_SUFFIX: &str = " (claimed; enforced by BIP-341 signature)";
 
 /// "1.23456789 BTC" (or a leading "1.23456789") to satoshis.
 pub fn btc_to_sat(text: &str) -> u64 {
@@ -105,6 +116,8 @@ pub fn render(psbt: &str, network: Network) -> Result<Rendered, String> {
             let text = fallback(field);
             fee = Some(if field["Type"] == "amount_v2" {
                 RenderedFee::Verified(btc_to_sat(text))
+            } else if let Some(amount) = text.strip_suffix(SIGNATURE_BOUND_SUFFIX) {
+                RenderedFee::SignatureBound(btc_to_sat(amount))
             } else if let Some(rest) = text.strip_prefix("unknown (claimed ") {
                 // "unknown (claimed X BTC; unverified: reason)"
                 let (_, reason) = rest

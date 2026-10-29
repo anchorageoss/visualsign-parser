@@ -39,6 +39,28 @@ const V0_WITH_V2_ONLY_KEYS: &[&str] = &[
     "PSBTv0 but with PSBT_OUT_SCRIPT.",
 ];
 
+/// BIP-174 valid vectors that its Signer section says a signer must refuse,
+/// with the reason the parser gives. A preview of one would describe a spend
+/// the signer cannot sign as shown, so the parser refuses them too.
+const SIGNER_MUST_REFUSE: &[(&str, &str)] = &[
+    (
+        "A Witness UTXO is provided for a non-witness input",
+        "witness_utxo given for a non-witness input",
+    ),
+    (
+        "redeemScript with non-witness UTXO does not match the scriptPubKey",
+        "redeem_script does not match the prevout script",
+    ),
+    (
+        "redeemScript with witness UTXO does not match the scriptPubKey",
+        "redeem_script does not match the prevout script",
+    ),
+    (
+        "witnessScript with witness UTXO does not match the redeemScript",
+        "witness_script does not match the script it spends",
+    ),
+];
+
 #[derive(Deserialize)]
 struct Source {
     repo: String,
@@ -141,6 +163,22 @@ fn zero_input_psbt_parses() {
     assert_eq!(rendered.fee, RenderedFee::Unknown);
 }
 
+/// Each vector a BIP-174 signer must refuse is refused, for its own reason.
+#[test]
+fn signer_must_refuse_vectors_are_refused() {
+    let doc = load();
+    for (case, reason) in SIGNER_MUST_REFUSE {
+        let v = doc
+            .vectors
+            .iter()
+            .find(|v| v.bip == "bip-0174" && v.case == *case)
+            .unwrap_or_else(|| panic!("vector not found: {case}"));
+        let err = render_no_panic(&v.psbt_base64, Network::Bitcoin)
+            .expect_err(&format!("{case}: accepted"));
+        assert!(err.contains(reason), "{case}: unexpected error {err}");
+    }
+}
+
 /// Genuine PSBTv2 vectors (BIP-370 valid set): unsupported, so refused at decode.
 #[test]
 fn psbt_v2_is_refused() {
@@ -170,6 +208,7 @@ fn valid_vectors_match_rust_bitcoin() {
         .vectors
         .iter()
         .filter(|v| v.status == "valid" && v.bip != "bip-0370")
+        .filter(|v| !SIGNER_MUST_REFUSE.iter().any(|(case, _)| *case == v.case))
     {
         let ctx = format!("{}: {}", v.bip, v.case);
         let rendered = match render_no_panic(&v.psbt_base64, Network::Bitcoin) {
@@ -226,13 +265,29 @@ fn valid_vectors_match_rust_bitcoin() {
             Ok(fee) => {
                 checked_fee += 1;
                 assert_eq!(rendered.fee.sat(), Some(fee.to_sat()), "{ctx}: fee");
-                // A fee built only from witness_utxo amounts must never be shown
-                // as verified unless every input is taproot (BIP-341 commits to
-                // all input amounts).
+                // Only a fee built from previous transactions is verified. One
+                // that relies on witness_utxo amounts is at best bound by a
+                // BIP-341 signature (every input taproot), never verified.
                 let all_full = psbt.inputs.iter().all(|i| i.non_witness_utxo.is_some());
                 let all_taproot = (0..tx.input.len())
                     .all(|i| psbt.spend_utxo(i).is_ok_and(|o| o.script_pubkey.is_p2tr()));
-                if !all_full && !all_taproot {
+                // Only ALL|ANYONECANPAY is shown as a `Sighash Type` field.
+                if rendered.inputs.iter().any(|i| i.sighash.is_some()) {
+                    assert!(
+                        matches!(rendered.fee, RenderedFee::Unverified { .. }),
+                        "{ctx}: fee with ANYONECANPAY not flagged"
+                    );
+                } else if all_full {
+                    assert!(
+                        matches!(rendered.fee, RenderedFee::Verified(_)),
+                        "{ctx}: fully verified fee not shown as verified"
+                    );
+                } else if all_taproot {
+                    assert!(
+                        matches!(rendered.fee, RenderedFee::SignatureBound(_)),
+                        "{ctx}: taproot claimed fee not shown as signature-bound"
+                    );
+                } else {
                     assert!(
                         matches!(rendered.fee, RenderedFee::Unverified { .. }),
                         "{ctx}: claimed-only fee shown as verified"

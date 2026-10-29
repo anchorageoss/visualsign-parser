@@ -497,10 +497,12 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
     assert!(!payload.to_lowercase().contains("change"), "{payload}");
     eprintln!("ok: fake change derivation not shown as change");
 
-    // Taproot-only spend with a lying witness_utxo amount. #577 shows this fee
-    // as verified because a BIP-341 ALL/DEFAULT signature commits to every
-    // input amount: a signature made over the wrong amount is invalid, so the
-    // lie cannot produce a spendable transaction. Check that claim on-chain.
+    // Taproot-only spend with a lying witness_utxo amount. The fee is shown,
+    // but as signature-bound, not verified: a BIP-341 ALL/DEFAULT signature
+    // commits to every input amount, so a signature made over the wrong amount
+    // is invalid. That only holds if the signer computes the sighash from the
+    // PSBT's amounts; a signer that takes prevout amounts from its own UTXO
+    // index signs validly while the user saw the wrong fee.
     let tr = create_psbt(node, &[&utxos[3]], outputs);
     let honest_tr = render_no_panic(&tr, Network::Regtest).unwrap();
     let mut p = decode(&tr);
@@ -511,15 +513,16 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
     let r = render_no_panic(&lied, Network::Regtest).unwrap();
     assert_eq!(r.fee.sat(), honest_tr.fee.sat().map(|f| f - 3_000));
     assert!(
-        matches!(r.fee, RenderedFee::Verified(_)),
+        matches!(r.fee, RenderedFee::SignatureBound(_)),
         "taproot-only fee: {:?}",
         r.fee
     );
-    // The fee above is displayed as verified but is wrong. It is still safe to
-    // sign: the BIP-341 sighash commits to every input amount, so a signature
-    // over the lied amount cannot verify against the real prevout. Check that
-    // the two sighashes differ (Core repairs witness_utxo from its wallet when
-    // signing, so it cannot be used to sign the lie).
+    // The fee above is wrong, and labelled as only enforced by the signature.
+    // Check what that label relies on: the BIP-341 sighash over the lied
+    // amount differs from the one over the real prevout, so a signature made
+    // from the PSBT's amounts cannot verify on-chain. (Core repairs
+    // witness_utxo from its wallet when signing, which is exactly the
+    // UTXO-index behaviour the label warns about, so it can't sign the lie.)
     let real_prevouts: Vec<bitcoin::TxOut> = decode(&tr)
         .inputs
         .iter()
@@ -551,7 +554,7 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
         "BIP-341 sighash does not commit to the input amount"
     );
     eprintln!(
-        "ok: taproot lying witness_utxo: fee shown verified but sighash binds the real amount"
+        "ok: taproot lying witness_utxo: fee shown signature-bound and sighash binds the real amount"
     );
 
     // NONE and SINGLE do not commit to every displayed output (and legacy
