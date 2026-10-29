@@ -254,6 +254,22 @@ unless you already have a precomputed hex string to reuse. For a byte-blob arg
 that needs its own encoding beyond what `format_arg_value` gives you, add an
 `append_raw_data` helper — see `kamino_vault` or `drift` for the pattern.
 
+### Surface the discriminator (required convention)
+
+`build_parsed_fields` must include the instruction discriminator in the expanded
+view of every instruction it decodes, not only in a fallback arm:
+```rust
+expanded_fields.push(create_text_field("Discriminator", &parsed.discriminator)?);
+```
+
+`src/chain_parsers/visualsign-solana/src/preset_conventions.rs` enforces this. For
+every preset with an IDL JSON it renders each IDL instruction (discriminator plus
+zeroed args) through the preset's visualizer and fails if any result lacks a
+`"Discriminator"` field, or if an instruction can't be built or rendered. A
+preset without an IDL JSON must be listed in that file's `NON_IDL_PRESETS` with a
+reason. `GRANDFATHERED` holds the two older Anchor presets (`jupiter_swap`,
+`orca_whirlpool`) that don't surface the field yet; do not add a new preset there.
+
 ### Required tests
 
 ```rust
@@ -330,6 +346,11 @@ If the grep finds nothing, the IDL JSON is at the wrong path — `build.rs` look
 for exactly `src/presets/{snake_name}/{snake_name}.json`.
 
 Both feature configurations must pass. Report any failures before marking done.
+
+`cargo test -p visualsign-solana` runs the `preset_conventions` gate. If it lists
+your preset under "decode instructions without a \"Discriminator\" field", add
+the `create_text_field("Discriminator", ...)` line from Step C rather than
+exempting the preset.
 ```
 
 ---
