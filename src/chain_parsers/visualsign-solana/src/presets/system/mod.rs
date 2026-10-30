@@ -7,7 +7,7 @@ use crate::core::{
     resolve_account_display, resolve_program_display,
 };
 use config::SystemConfig;
-use solana_program::system_instruction::SystemInstruction;
+use solana_system_interface::instruction::SystemInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldAmountV2,
@@ -28,6 +28,13 @@ impl InstructionVisualizer for SystemVisualizer {
             .map_err(|e| {
                 VisualSignError::DecodeError(format!("Failed to parse system instruction: {e}"))
             })?;
+        // Added in solana-system-interface 3; 1.0 did not decode it.
+        if let SystemInstruction::CreateAccountAllowPrefund { .. } = system_instruction {
+            return Err(VisualSignError::DecodeError(
+                "Failed to parse system instruction: CreateAccountAllowPrefund is not supported"
+                    .to_string(),
+            ));
+        }
 
         create_system_preview_layout(&system_instruction, context)
     }
@@ -238,9 +245,9 @@ fn create_system_preview_layout(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_message::compiled_instruction::CompiledInstruction;
     use solana_parser::solana::structs::SolanaAccount;
-    use solana_sdk::instruction::CompiledInstruction;
-    use solana_sdk::pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
 
     fn text_field_value(fields: &[AnnotatedPayloadField], label: &str) -> Option<String> {
         fields.iter().find_map(|f| match &f.signable_payload_field {

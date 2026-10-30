@@ -1,9 +1,9 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use visualsign_solana::versioned_transaction_to_visual_sign;
+use solana_transaction::versioned::VersionedTransaction;
 use visualsign::vsptrait::VisualSignOptions;
-use solana_sdk::transaction::VersionedTransaction;
+use visualsign_solana::versioned_transaction_to_visual_sign;
 
 // Try to deserialize arbitrary bytes as a VersionedTransaction then pass it
 // through the full visualsign-solana stack. Exercises the versioned transaction

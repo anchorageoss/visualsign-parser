@@ -21,6 +21,7 @@ pub enum Chain {
     Tron,
     Near,
     Cosmos,
+    Zcash,
     // Add other chains as needed
     Custom(String), // For extensibility without modifying the enum
 }
@@ -38,6 +39,7 @@ impl Chain {
             Chain::Tron => "Tron",
             Chain::Near => "Near",
             Chain::Cosmos => "Cosmos",
+            Chain::Zcash => "Zcash",
             Chain::Custom(name) => name.as_str(),
         }
     }
@@ -58,6 +60,7 @@ impl FromStr for Chain {
             "tron" => Chain::Tron,
             "near" => Chain::Near,
             "cosmos" => Chain::Cosmos,
+            "zcash" => Chain::Zcash,
             _ => Chain::Custom(s.to_string()),
         })
     }
@@ -578,6 +581,7 @@ mod tests {
         assert_eq!(Chain::from_str("tron"), Ok(Chain::Tron));
         assert_eq!(Chain::from_str("near"), Ok(Chain::Near));
         assert_eq!(Chain::from_str("cosmos"), Ok(Chain::Cosmos));
+        assert_eq!(Chain::from_str("zcash"), Ok(Chain::Zcash));
         assert_eq!(
             Chain::from_str("unknown"),
             Ok(Chain::Custom("unknown".to_string()))
@@ -595,6 +599,7 @@ mod tests {
         assert_eq!(Chain::Tron.as_str(), "Tron");
         assert_eq!(Chain::Near.as_str(), "Near");
         assert_eq!(Chain::Cosmos.as_str(), "Cosmos");
+        assert_eq!(Chain::Zcash.as_str(), "Zcash");
         assert_eq!(Chain::Custom("MyChain".to_string()).as_str(), "MyChain");
     }
 

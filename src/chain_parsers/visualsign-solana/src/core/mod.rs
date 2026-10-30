@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
 use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 mod accounts;
 mod arg_rendering;
@@ -19,6 +18,10 @@ mod visualsign;
 pub use accounts::*;
 pub use arg_rendering::format_arg_value;
 pub use instructions::*;
+#[cfg(test)]
+pub(crate) use priority_fee::BASE_FEE_LAMPORTS_PER_SIGNATURE;
+pub use priority_fee::DEFAULT_MAX_FEE_LAMPORTS;
+pub(crate) use priority_fee::decode_compute_budget_request;
 pub use txtypes::*;
 pub use visualsign::*;
 
@@ -82,7 +85,7 @@ pub enum AccountRef<'a> {
 #[derive(Debug, Clone)]
 pub struct VisualizerContext<'a> {
     sender: &'a SolanaAccount,
-    compiled_instruction: &'a solana_sdk::instruction::CompiledInstruction,
+    compiled_instruction: &'a solana_message::compiled_instruction::CompiledInstruction,
     account_keys: &'a [Pubkey],
     idl_registry: &'a crate::idl::IdlRegistry,
     instruction_index: usize,
@@ -98,7 +101,7 @@ pub struct VisualizerContext<'a> {
 impl<'a> VisualizerContext<'a> {
     pub fn new(
         sender: &'a SolanaAccount,
-        compiled_instruction: &'a solana_sdk::instruction::CompiledInstruction,
+        compiled_instruction: &'a solana_message::compiled_instruction::CompiledInstruction,
         account_keys: &'a [Pubkey],
         idl_registry: &'a crate::idl::IdlRegistry,
         instruction_index: usize,
@@ -184,7 +187,9 @@ impl<'a> VisualizerContext<'a> {
     }
 
     /// Reference to the underlying compiled instruction.
-    pub fn compiled_instruction(&self) -> &'a solana_sdk::instruction::CompiledInstruction {
+    pub fn compiled_instruction(
+        &self,
+    ) -> &'a solana_message::compiled_instruction::CompiledInstruction {
         self.compiled_instruction
     }
 
@@ -209,12 +214,12 @@ impl<'a> VisualizerContext<'a> {
     /// not currently surfaced (set to false); IDL-based presets only need pubkeys.
     pub fn resolve_accounts(
         &self,
-    ) -> Result<Vec<solana_sdk::instruction::AccountMeta>, VisualSignError> {
+    ) -> Result<Vec<solana_instruction::AccountMeta>, VisualSignError> {
         (0..self.num_accounts())
             .map(|i| match self.account(i) {
-                Some(AccountRef::Resolved(pk)) => Ok(
-                    solana_sdk::instruction::AccountMeta::new_readonly(*pk, false),
-                ),
+                Some(AccountRef::Resolved(pk)) => {
+                    Ok(solana_instruction::AccountMeta::new_readonly(*pk, false))
+                }
                 Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
                     format!("unresolved account index {raw_index} at position {i}"),
                 )),
@@ -349,11 +354,6 @@ pub trait InstructionVisualizer {
         false
     }
 
-    /// The compute-budget request, if any; the summary gate hoists the resulting priority fee.
-    fn compute_budget(&self, _context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
-        None
-    }
-
     fn can_handle(&self, context: &VisualizerContext) -> bool {
         let Some(config) = self.get_config() else {
             return false;
@@ -375,8 +375,6 @@ pub struct VisualizeResult {
     pub summary: Option<TransactionSummary>,
     /// The handling visualizer's [`InstructionVisualizer::is_infrastructure`].
     pub infrastructure: bool,
-    /// The handling visualizer's [`InstructionVisualizer::compute_budget`].
-    pub compute_budget: Option<ComputeBudgetInstruction>,
 }
 
 /// Tries multiple visualizers in order, returning the first successful visualization.
@@ -396,7 +394,6 @@ pub fn visualize_with_any(
                     kind: v.kind(),
                     summary: v.transaction_summary(context),
                     infrastructure: v.is_infrastructure(context),
-                    compute_budget: v.compute_budget(context),
                 }),
         )
     })
@@ -406,7 +403,7 @@ pub fn visualize_with_any(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::instruction::CompiledInstruction;
+    use solana_message::compiled_instruction::CompiledInstruction;
 
     #[test]
     fn test_program_id_resolved() {

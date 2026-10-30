@@ -57,6 +57,10 @@ pub(crate) struct ChainArgs {
     #[cfg(feature = "cosmos")]
     #[command(flatten)]
     pub(crate) cosmos: visualsign_cosmos::CosmosArgs,
+
+    #[cfg(feature = "zcash")]
+    #[command(flatten)]
+    pub(crate) zcash: visualsign_zcash::ZcashArgs,
 }
 
 impl ChainArgs {
@@ -88,6 +92,10 @@ impl ChainArgs {
         #[cfg(feature = "cosmos")]
         plugins.push(Box::new(visualsign_cosmos::CosmosPlugin::new(
             self.cosmos.clone(),
+        )));
+        #[cfg(feature = "zcash")]
+        plugins.push(Box::new(visualsign_zcash::ZcashPlugin::new(
+            self.zcash.clone(),
         )));
         plugins
     }

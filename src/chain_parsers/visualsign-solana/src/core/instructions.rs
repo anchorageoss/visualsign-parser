@@ -1,4 +1,3 @@
-use crate::core::priority_fee::PriorityFee;
 use crate::core::{
     InstructionVisualizer, TransactionSummary, VisualizeResult, VisualizerContext,
     visualize_with_any,
@@ -6,7 +5,7 @@ use crate::core::{
 use crate::idl::IdlRegistry;
 use solana_parser::solana::parser::parse_transaction;
 use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::transaction::Transaction as SolanaTransaction;
+use solana_transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
 #[cfg(feature = "diagnostics")]
@@ -26,15 +25,11 @@ include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 pub struct SummaryAccumulator {
     proposals: Vec<TransactionSummary>,
     blocked: bool,
-    priority_fee: PriorityFee,
 }
 
 impl SummaryAccumulator {
-    /// Records a rendered instruction, taking its proposal and compute-budget request.
+    /// Records a rendered instruction, taking its proposal.
     pub fn observe(&mut self, result: &mut VisualizeResult) {
-        if let Some(request) = result.compute_budget.take() {
-            self.priority_fee.record(&request);
-        }
         match result.summary.take() {
             Some(summary) => self.proposals.push(summary),
             None if result.infrastructure => {}
@@ -47,16 +42,11 @@ impl SummaryAccumulator {
         self.blocked = true;
     }
 
-    /// A priority fee row that cannot be rendered fails closed: no summary.
     pub fn finish(mut self) -> Option<TransactionSummary> {
-        if self.blocked || self.priority_fee.is_invalid() || self.proposals.len() != 1 {
+        if self.blocked || self.proposals.len() != 1 {
             return None;
         }
-        let mut summary = self.proposals.pop()?;
-        if let Some(estimate) = self.priority_fee.estimate() {
-            summary.fields.push(estimate.field().ok()?);
-        }
-        Some(summary)
+        self.proposals.pop()
     }
 }
 
@@ -69,7 +59,7 @@ pub struct DecodedInstructions {
 
 /// Top-level "From" row naming the fee payer (`account_keys[0]`).
 pub fn create_from_field(
-    fee_payer: &solana_sdk::pubkey::Pubkey,
+    fee_payer: &solana_pubkey::Pubkey,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     visualsign::field_builders::create_address_field(
         "From",
@@ -243,8 +233,8 @@ pub fn decode_instructions(
 /// Does not modify or filter instructions — purely informational.
 #[cfg(feature = "diagnostics")]
 pub fn scan_instruction_diagnostics(
-    instructions: &[solana_sdk::instruction::CompiledInstruction],
-    account_keys: &[solana_sdk::pubkey::Pubkey],
+    instructions: &[solana_message::compiled_instruction::CompiledInstruction],
+    account_keys: &[solana_pubkey::Pubkey],
     lint_config: &LintConfig,
 ) -> Vec<AnnotatedPayloadField> {
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
@@ -339,9 +329,13 @@ pub fn scan_instruction_diagnostics(
 pub fn decode_transfers(
     transaction: &SolanaTransaction,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    let message_clone = transaction.message.clone();
+    let message_bytes = bincode::serialize(&transaction.message).map_err(|e| {
+        VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
+            "Failed to serialize message: {e}"
+        )))
+    })?;
     let parsed_transaction = parse_transaction(
-        hex::encode(message_clone.serialize()),
+        hex::encode(message_bytes),
         false, /* because we're passing the message only */
         None,  // No custom IDLs for transfer parsing
     )
@@ -431,13 +425,13 @@ pub fn decode_transfers(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod off_tests {
     use super::*;
-    use solana_sdk::hash::Hash;
-    use solana_sdk::message::{Message, MessageHeader};
-    use solana_sdk::pubkey::Pubkey;
+    use solana_hash::Hash;
+    use solana_message::{Message, MessageHeader};
+    use solana_pubkey::Pubkey;
 
     fn tx_with(
         account_keys: Vec<Pubkey>,
-        instructions: Vec<solana_sdk::instruction::CompiledInstruction>,
+        instructions: Vec<solana_message::compiled_instruction::CompiledInstruction>,
     ) -> SolanaTransaction {
         SolanaTransaction {
             signatures: vec![],
@@ -473,7 +467,7 @@ mod off_tests {
         let key0 = Pubkey::new_unique();
         let tx = tx_with(
             vec![key0],
-            vec![solana_sdk::instruction::CompiledInstruction {
+            vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 99,
                 accounts: vec![],
                 data: vec![0xAA],
@@ -495,7 +489,7 @@ mod off_tests {
         let key1 = Pubkey::new_unique();
         let tx = tx_with(
             vec![key0, key1],
-            vec![solana_sdk::instruction::CompiledInstruction {
+            vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 1,
                 accounts: vec![0, 50],
                 data: vec![0xCC],
@@ -520,7 +514,7 @@ mod off_tests {
         let sender_pk = Pubkey::new_unique();
         let tx = tx_with(
             vec![sender_pk, jupiter_perps_pk],
-            vec![solana_sdk::instruction::CompiledInstruction {
+            vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 1,
                 accounts: vec![0, 50], // 50 is OOB — simulates an ALT account
                 data: vec![0u8; 8],    // unknown discriminator -> fallback Ok
@@ -548,7 +542,7 @@ mod off_tests {
         let sender_pk = Pubkey::new_unique();
         let tx = tx_with(
             vec![sender_pk, dflow_pk],
-            vec![solana_sdk::instruction::CompiledInstruction {
+            vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 1,
                 // accounts[0]=50 (OOB/ALT) maps to IDL "token_account"
                 accounts: vec![50, 0, 0, 0],
@@ -590,9 +584,9 @@ mod off_tests {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::hash::Hash;
-    use solana_sdk::message::{Message, MessageHeader};
-    use solana_sdk::pubkey::Pubkey;
+    use solana_hash::Hash;
+    use solana_message::{Message, MessageHeader};
+    use solana_pubkey::Pubkey;
     use visualsign::SignablePayloadField;
 
     fn tx_with_oob_program_id() -> SolanaTransaction {
@@ -607,12 +601,12 @@ mod tests {
             account_keys: vec![key0, key1],
             recent_blockhash: Hash::default(),
             instructions: vec![
-                solana_sdk::instruction::CompiledInstruction {
+                solana_message::compiled_instruction::CompiledInstruction {
                     program_id_index: 1,
                     accounts: vec![0],
                     data: vec![0xAA],
                 },
-                solana_sdk::instruction::CompiledInstruction {
+                solana_message::compiled_instruction::CompiledInstruction {
                     program_id_index: 99,
                     accounts: vec![0],
                     data: vec![0xBB],
@@ -636,7 +630,7 @@ mod tests {
             },
             account_keys: vec![key0, key1],
             recent_blockhash: Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 1,
                 accounts: vec![0, 50],
                 data: vec![0xCC],
@@ -747,7 +741,7 @@ mod tests {
             },
             account_keys: vec![key0, key1],
             recent_blockhash: Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 1,
                 accounts: vec![0],
                 data: vec![0xDD],
@@ -815,7 +809,7 @@ mod tests {
             },
             account_keys: vec![key0, key1],
             recent_blockhash: Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
                 program_id_index: 99,  // OOB: only 2 keys
                 accounts: vec![0, 77], // index 77 is also OOB
                 data: vec![0xEE],

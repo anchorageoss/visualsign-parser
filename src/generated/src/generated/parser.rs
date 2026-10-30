@@ -277,6 +277,19 @@ pub struct SolanaMetadata {
     pub simulated_transaction_result: ::core::option::Option<
         ::prost::alloc::string::String,
     >,
+    /// Maximum total fee (base plus priority) the caller allows for this transaction, in
+    /// lamports. Absent, the parser's default cap (0.1 SOL) applies. The cap in force is
+    /// rendered as the top-level "Max Fee" row ("Max Fee (default)" for the default) and carried
+    /// in `intermediate_output`; the parser rejects the request when the fee the transaction
+    /// commits to exceeds it. A consumer that rewrites the compute budget instructions after
+    /// parsing (re-pricing at sign time) changes the fee this cap bounds, so it must re-check the
+    /// final fee against this value itself.
+    #[prost(uint64, optional, tag = "6")]
+    #[cfg_attr(
+        feature = "serde_derive",
+        serde(with = "crate::u64_or_string_serde", default)
+    )]
+    pub max_fee_lamports: ::core::option::Option<u64>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -389,6 +402,7 @@ pub enum Chain {
     Sui = 4,
     Tron = 5,
     Near = 6,
+    Zcash = 7,
     Cosmos = 8,
     /// Custom for extensibility
     Custom = 999,
@@ -407,6 +421,7 @@ impl Chain {
             Chain::Sui => "CHAIN_SUI",
             Chain::Tron => "CHAIN_TRON",
             Chain::Near => "CHAIN_NEAR",
+            Chain::Zcash => "CHAIN_ZCASH",
             Chain::Cosmos => "CHAIN_COSMOS",
             Chain::Custom => "CHAIN_CUSTOM",
         }
@@ -421,6 +436,7 @@ impl Chain {
             "CHAIN_SUI" => Some(Self::Sui),
             "CHAIN_TRON" => Some(Self::Tron),
             "CHAIN_NEAR" => Some(Self::Near),
+            "CHAIN_ZCASH" => Some(Self::Zcash),
             "CHAIN_COSMOS" => Some(Self::Cosmos),
             "CHAIN_CUSTOM" => Some(Self::Custom),
             _ => None,

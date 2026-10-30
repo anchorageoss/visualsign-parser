@@ -24,7 +24,7 @@ PARSER_APP_CHAINS := $(sort $(patsubst visualsign-%,%,$(notdir $(wildcard chain_
 # derived from chain_parsers/* -- parser_cli only wires up chains that have a
 # ChainPlugin registered (see parser/cli/src/), which sui and unspecified
 # don't yet, so a subset is the actual rule and a literal list says so.
-PARSER_CLI_CHAINS := bitcoin cosmos ethereum near solana tron
+PARSER_CLI_CHAINS := bitcoin cosmos ethereum near solana tron zcash
 
 .PHONY: all
 all: generated
@@ -51,6 +51,9 @@ test: build
 	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test --no-fail-fast -p parser_cli --all-targets
+	@# zcash is not a default feature, but visualsign-zcash is consumed as a
+	@# library elsewhere; run the CLI's zcash fixtures with every chain on.
+	cargo test --no-fail-fast -p parser_cli --features zcash --all-targets
 	cargo test --no-fail-fast -p visualsign --features diagnostics --lib
 	cargo test --no-fail-fast -p parser_cli_core --features diagnostics --lib
 	cargo test --no-fail-fast -p visualsign-near --features diagnostics --lib
@@ -100,10 +103,23 @@ lint: fmt-check
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
+	cargo clippy -p parser_cli --features zcash --all-targets -- -D warnings
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
 	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
+
+# Library crates that must build for Apple Silicon (iOS device) with no
+# C/C++/asm in the dependency tree. Add a chain here once its crate passes.
+APPLE_NO_C_CRATES := visualsign visualsign-ethereum visualsign-tron visualsign-unspecified
+
+.PHONY: apple-silicon-check
+apple-silicon-check:
+	@# Any build script that compiles C calls the C compiler; pointing it at
+	@# `false` turns a C dependency into a build failure. Run on an Apple
+	@# Silicon macOS host (CI: macos-latest), which also runs the tests natively.
+	CC=/usr/bin/false CXX=/usr/bin/false cargo build --lib --target aarch64-apple-ios $(addprefix -p ,$(APPLE_NO_C_CRATES))
+	cargo test --no-fail-fast $(addprefix -p ,$(APPLE_NO_C_CRATES))
 
 .PHONY: narrow-build-check
 narrow-build-check:

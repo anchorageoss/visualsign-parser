@@ -91,7 +91,7 @@ fn get_drift_idl() -> Option<&'static Idl> {
 
 fn parse_drift_instruction(
     data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[solana_instruction::AccountMeta],
 ) -> Result<DriftParsedInstruction, Box<dyn std::error::Error>> {
     if data.len() < 8 {
         return Err("Invalid instruction data length".into());
@@ -111,7 +111,7 @@ fn parse_drift_instruction(
 fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[solana_instruction::AccountMeta],
 ) -> BTreeMap<String, String> {
     let mut named_accounts = BTreeMap::new();
 

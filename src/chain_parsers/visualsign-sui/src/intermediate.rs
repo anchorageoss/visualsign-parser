@@ -37,13 +37,13 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde_json::{Map, Value, json};
-use sui_types::base_types::{ObjectID, ObjectRef, SuiAddress};
-use sui_types::move_package::MovePackage;
-use sui_types::transaction::{
-    Argument, CallArg, Command, FundsWithdrawalArg, ObjectArg, Reservation, SharedObjectMutability,
-    TransactionData, TransactionDataAPI, TransactionExpiration, TransactionKind, WithdrawFrom,
+use sui_sdk_types::hash::Hasher;
+use sui_sdk_types::{
+    Address, Argument, Command, FundsWithdrawal, Input, Mutability, ObjectReference, SharedInput,
+    Transaction, TransactionExpiration, TransactionKind, TypeTag, WithdrawFrom,
 };
-use sui_types::type_input::TypeInput;
+
+use crate::types::{SuiAddress, type_tag_to_canonical_string};
 use visualsign::canonical_json;
 use visualsign::errors::VisualSignError;
 
@@ -107,19 +107,19 @@ pub struct SuiGasSummary {
 /// arguments' JSON exceeds [`MAX_CALL_ARGS_JSON_BYTES`], or if the JSON cannot
 /// be serialized. Callers emit no intermediate output on error.
 pub(crate) fn build_intermediate_output(
-    transaction: &TransactionData,
+    transaction: &Transaction,
 ) -> Result<SuiIntermediateOutput, VisualSignError> {
-    let TransactionKind::ProgrammableTransaction(ptb) = transaction.kind() else {
+    let TransactionKind::ProgrammableTransaction(ptb) = &transaction.kind else {
         return Err(decode_error(
             "Sui intermediate output only covers programmable transactions",
         ));
     };
 
     let mut budget = Budget::new(MAX_CALL_ARGS_JSON_BYTES);
-    let gas_data = transaction.gas_data();
+    let gas_data = &transaction.gas_payment;
     Ok(SuiIntermediateOutput {
         schema_version: SUI_INTERMEDIATE_SCHEMA_VERSION,
-        sender: transaction.sender().to_string(),
+        sender: SuiAddress::from(transaction.sender).to_string(),
         commands: ptb
             .commands
             .iter()
@@ -128,14 +128,14 @@ pub(crate) fn build_intermediate_output(
         gas: SuiGasSummary {
             budget: gas_data.budget.to_string(),
             price: gas_data.price.to_string(),
-            owner: gas_data.owner.to_string(),
+            owner: SuiAddress::from(gas_data.owner).to_string(),
             payment_objects: gas_data
-                .payment
+                .objects
                 .iter()
                 .map(|object_ref| to_canonical_string(&object_ref_json(object_ref)))
                 .collect::<Result<_, _>>()?,
         },
-        expiration: expiration_string(transaction.expiration())?,
+        expiration: expiration_string(&transaction.expiration)?,
     })
 }
 
@@ -168,7 +168,7 @@ impl Budget {
 
 fn build_command(
     command: &Command,
-    inputs: &[CallArg],
+    inputs: &[Input],
     budget: &mut Budget,
 ) -> Result<SuiIntermediateCommand, VisualSignError> {
     let (command_kind, type_arguments) = match command {
@@ -176,8 +176,8 @@ fn build_command(
             return Ok(SuiIntermediateCommand {
                 command_kind: "MoveCall".to_string(),
                 package: call.package.to_string(),
-                module_name: call.module.clone(),
-                function: call.function.clone(),
+                module_name: call.module.to_string(),
+                function: call.function.to_string(),
                 type_arguments: call.type_arguments.iter().map(canonical_type).collect(),
                 call_args_json: call_args_json(command, inputs, budget)?,
             });
@@ -187,10 +187,11 @@ fn build_command(
         Command::MergeCoins(..) => ("MergeCoins", vec![]),
         Command::Publish(..) => ("Publish", vec![]),
         Command::Upgrade(..) => ("Upgrade", vec![]),
-        Command::MakeMoveVec(element_type, _) => (
+        Command::MakeMoveVector(make) => (
             "MakeMoveVec",
-            element_type.iter().map(canonical_type).collect(),
+            make.type_.iter().map(canonical_type).collect(),
         ),
+        _ => return Err(decode_error("Unsupported command kind")),
     };
     Ok(SuiIntermediateCommand {
         command_kind: command_kind.to_string(),
@@ -202,8 +203,29 @@ fn build_command(
     })
 }
 
-fn canonical_type(type_input: &TypeInput) -> String {
-    type_input.to_canonical_string(true)
+fn canonical_type(type_tag: &TypeTag) -> String {
+    type_tag_to_canonical_string(type_tag)
+}
+
+/// Sui's package digest: Blake2b-256 over the sorted list of each module's
+/// Blake2b-256 hash and each dependency ID, as
+/// `MovePackage::compute_digest_for_modules_and_deps(.., hash_modules: true)`.
+fn compute_package_digest(modules: &[Vec<u8>], dependencies: &[Address]) -> [u8; 32] {
+    let module_digests: Vec<[u8; 32]> = modules
+        .iter()
+        .map(|module| Hasher::digest(module).into_inner())
+        .collect();
+    let mut components: Vec<&[u8]> = module_digests
+        .iter()
+        .map(<[u8; 32]>::as_slice)
+        .chain(dependencies.iter().map(Address::as_bytes))
+        .collect();
+    components.sort_unstable();
+    let mut hasher = Hasher::new();
+    for component in components {
+        hasher.update(component);
+    }
+    hasher.finalize().into_inner()
 }
 
 /// How a command's signature types an argument slot, which decides how a pure
@@ -217,14 +239,14 @@ enum Slot {
 
 fn call_args_json(
     command: &Command,
-    inputs: &[CallArg],
+    inputs: &[Input],
     budget: &mut Budget,
 ) -> Result<String, VisualSignError> {
-    let ids = |ids: &[ObjectID]| Value::Array(ids.iter().map(|id| id.to_string().into()).collect());
-    let package_digest = |modules: &[Vec<u8>], dependencies: &[ObjectID]| -> Value {
+    let ids = |ids: &[Address]| Value::Array(ids.iter().map(|id| id.to_string().into()).collect());
+    let package_digest = |modules: &[Vec<u8>], dependencies: &[Address]| -> Value {
         // Sui's own package digest (module hashes and dependency IDs, sorted),
         // so two publishes of different bytecode never encode the same.
-        let digest = MovePackage::compute_digest_for_modules_and_deps(modules, dependencies, true);
+        let digest = compute_package_digest(modules, dependencies);
         format!("0x{}", hex::encode(digest)).into()
     };
 
@@ -233,50 +255,60 @@ fn call_args_json(
             "arguments",
             arguments_json(&call.arguments, inputs, Slot::Untyped, budget)?,
         )],
-        Command::TransferObjects(objects, recipient) => vec![
+        Command::TransferObjects(transfer) => vec![
             (
                 "objects",
-                arguments_json(objects, inputs, Slot::Untyped, budget)?,
+                arguments_json(&transfer.objects, inputs, Slot::Untyped, budget)?,
             ),
             (
                 "recipient",
-                argument_json(*recipient, inputs, Slot::Address, budget)?,
+                argument_json(transfer.address, inputs, Slot::Address, budget)?,
             ),
         ],
-        Command::SplitCoins(coin, amounts) => vec![
+        Command::SplitCoins(split) => vec![
             (
                 "amounts",
-                arguments_json(amounts, inputs, Slot::U64, budget)?,
+                arguments_json(&split.amounts, inputs, Slot::U64, budget)?,
             ),
-            ("coin", argument_json(*coin, inputs, Slot::Untyped, budget)?),
+            (
+                "coin",
+                argument_json(split.coin, inputs, Slot::Untyped, budget)?,
+            ),
         ],
-        Command::MergeCoins(destination, sources) => vec![
+        Command::MergeCoins(merge) => vec![
             (
                 "destination",
-                argument_json(*destination, inputs, Slot::Untyped, budget)?,
+                argument_json(merge.coin, inputs, Slot::Untyped, budget)?,
             ),
             (
                 "sources",
-                arguments_json(sources, inputs, Slot::Untyped, budget)?,
+                arguments_json(&merge.coins_to_merge, inputs, Slot::Untyped, budget)?,
             ),
         ],
-        Command::Publish(modules, dependencies) => vec![
-            ("dependencies", ids(dependencies)),
-            ("package_digest", package_digest(modules, dependencies)),
+        Command::Publish(publish) => vec![
+            ("dependencies", ids(&publish.dependencies)),
+            (
+                "package_digest",
+                package_digest(&publish.modules, &publish.dependencies),
+            ),
         ],
-        Command::Upgrade(modules, dependencies, package, ticket) => vec![
-            ("dependencies", ids(dependencies)),
-            ("package", package.to_string().into()),
-            ("package_digest", package_digest(modules, dependencies)),
+        Command::Upgrade(upgrade) => vec![
+            ("dependencies", ids(&upgrade.dependencies)),
+            ("package", upgrade.package.to_string().into()),
+            (
+                "package_digest",
+                package_digest(&upgrade.modules, &upgrade.dependencies),
+            ),
             (
                 "ticket",
-                argument_json(*ticket, inputs, Slot::Untyped, budget)?,
+                argument_json(upgrade.ticket, inputs, Slot::Untyped, budget)?,
             ),
         ],
-        Command::MakeMoveVec(_, elements) => vec![(
+        Command::MakeMoveVector(make) => vec![(
             "elements",
-            arguments_json(elements, inputs, Slot::Untyped, budget)?,
+            arguments_json(&make.elements, inputs, Slot::Untyped, budget)?,
         )],
+        _ => return Err(decode_error("Unsupported command kind")),
     };
 
     let map: Map<String, Value> = entries
@@ -288,7 +320,7 @@ fn call_args_json(
 
 fn arguments_json(
     arguments: &[Argument],
-    inputs: &[CallArg],
+    inputs: &[Input],
     slot: Slot,
     budget: &mut Budget,
 ) -> Result<Value, VisualSignError> {
@@ -301,14 +333,14 @@ fn arguments_json(
 
 fn argument_json(
     argument: Argument,
-    inputs: &[CallArg],
+    inputs: &[Input],
     slot: Slot,
     budget: &mut Budget,
 ) -> Result<Value, VisualSignError> {
     let value = match argument {
         Argument::Result(command) => json!({ "result": command }),
         Argument::NestedResult(command, index) => json!({ "nested_result": [command, index] }),
-        Argument::GasCoin => match slot {
+        Argument::Gas => match slot {
             Slot::Untyped => json!({ "gas_coin": true }),
             Slot::Address | Slot::U64 => {
                 return Err(decode_error("Gas coin in an address or u64 slot"));
@@ -325,79 +357,95 @@ fn argument_json(
     Ok(value)
 }
 
-fn input_json(input: &CallArg, slot: Slot, budget: &mut Budget) -> Result<Value, VisualSignError> {
+fn input_json(input: &Input, slot: Slot, budget: &mut Budget) -> Result<Value, VisualSignError> {
     let value = match (input, slot) {
-        (CallArg::Pure(bytes), Slot::Untyped) => {
+        (Input::Pure(bytes), Slot::Untyped) => {
             // Charged before the hex is allocated: `{"pure":"0x` + hex + `"}`.
             budget.charge(13 + 2 * bytes.len())?;
             return Ok(json!({ "pure": format!("0x{}", hex::encode(bytes)) }));
         }
-        (CallArg::Pure(bytes), Slot::Address) => SuiAddress::from_bytes(bytes)
+        (Input::Pure(bytes), Slot::Address) => SuiAddress::from_bytes(bytes)
             .map(|address| Value::from(address.to_string()))
             .map_err(|_| decode_error("Address argument is not 32 bytes"))?,
-        (CallArg::Pure(bytes), Slot::U64) => <[u8; 8]>::try_from(bytes.as_slice())
+        (Input::Pure(bytes), Slot::U64) => <[u8; 8]>::try_from(bytes.as_slice())
             .map(|le| Value::from(u64::from_le_bytes(le).to_string()))
             .map_err(|_| decode_error("u64 argument is not 8 bytes"))?,
-        (CallArg::Object(object), Slot::Untyped) => json!({ "object": object_json(object) }),
-        (CallArg::FundsWithdrawal(withdrawal), Slot::Untyped) => {
-            json!({ "funds_withdrawal": funds_withdrawal_json(withdrawal) })
+        (Input::ImmutableOrOwned(object_ref), Slot::Untyped) => {
+            json!({ "object": object_ref_with_kind("imm_or_owned", object_ref) })
         }
-        (CallArg::Object(_) | CallArg::FundsWithdrawal(_), Slot::Address | Slot::U64) => {
+        (Input::Receiving(object_ref), Slot::Untyped) => {
+            json!({ "object": object_ref_with_kind("receiving", object_ref) })
+        }
+        (Input::Shared(shared), Slot::Untyped) => json!({ "object": shared_object_json(shared) }),
+        (Input::FundsWithdrawal(withdrawal), Slot::Untyped) => {
+            json!({ "funds_withdrawal": funds_withdrawal_json(withdrawal)? })
+        }
+        (
+            Input::ImmutableOrOwned(_)
+            | Input::Receiving(_)
+            | Input::Shared(_)
+            | Input::FundsWithdrawal(_),
+            Slot::Address | Slot::U64,
+        ) => {
             return Err(decode_error(
                 "Object or funds withdrawal in an address or u64 slot",
             ));
         }
+        _ => return Err(decode_error("Unsupported input kind")),
     };
     budget.charge_value(&value)?;
     Ok(value)
 }
 
-fn object_ref_json((id, version, digest): &ObjectRef) -> Value {
+fn object_ref_json(object_ref: &ObjectReference) -> Value {
     json!({
-        "digest": format!("0x{}", hex::encode(digest.inner())),
-        "id": id.to_string(),
-        "version": version.value().to_string(),
+        "digest": format!("0x{}", hex::encode(object_ref.digest().inner())),
+        "id": object_ref.object_id().to_string(),
+        "version": object_ref.version().to_string(),
     })
 }
 
-fn object_json(object: &ObjectArg) -> Value {
-    let by_ref = |kind: &str, object_ref: &ObjectRef| {
-        let mut value = object_ref_json(object_ref);
-        if let Value::Object(map) = &mut value {
-            map.insert("kind".to_string(), kind.into());
-        }
-        value
-    };
-    match object {
-        ObjectArg::ImmOrOwnedObject(object_ref) => by_ref("imm_or_owned", object_ref),
-        ObjectArg::Receiving(object_ref) => by_ref("receiving", object_ref),
-        ObjectArg::SharedObject {
-            id,
-            initial_shared_version,
-            mutability,
-        } => json!({
-            "id": id.to_string(),
-            "initial_shared_version": initial_shared_version.value().to_string(),
-            "kind": "shared",
-            "mutability": match mutability {
-                SharedObjectMutability::Immutable => "immutable",
-                SharedObjectMutability::Mutable => "mutable",
-                SharedObjectMutability::NonExclusiveWrite => "non_exclusive_write",
-            },
-        }),
+fn object_ref_with_kind(kind: &str, object_ref: &ObjectReference) -> Value {
+    let mut value = object_ref_json(object_ref);
+    if let Value::Object(map) = &mut value {
+        map.insert("kind".to_string(), kind.into());
     }
+    value
 }
 
-fn funds_withdrawal_json(withdrawal: &FundsWithdrawalArg) -> Value {
-    let Reservation::MaxAmountU64(max_amount) = withdrawal.reservation;
+fn shared_object_json(shared: &SharedInput) -> Value {
     json!({
-        "max_amount": max_amount.to_string(),
-        "type": withdrawal.type_arg.to_type_tag().to_canonical_string(true),
-        "withdraw_from": match withdrawal.withdraw_from {
-            WithdrawFrom::Sender => "sender",
-            WithdrawFrom::Sponsor => "sponsor",
+        "id": shared.object_id().to_string(),
+        "initial_shared_version": shared.version().to_string(),
+        "kind": "shared",
+        "mutability": match shared.mutability() {
+            Mutability::Immutable => "immutable",
+            Mutability::Mutable => "mutable",
+            Mutability::NonExclusiveWrite => "non_exclusive_write",
         },
     })
+}
+
+/// Schema v1 covers a `MaxAmountU64` reservation of a `Balance<T>` withdrawn
+/// from the sender or sponsor; anything newer drops the output.
+fn funds_withdrawal_json(withdrawal: &FundsWithdrawal) -> Result<Value, VisualSignError> {
+    let max_amount = withdrawal
+        .amount()
+        .ok_or_else(|| decode_error("Unsupported funds withdrawal reservation"))?;
+    let withdraw_from = match withdrawal.source() {
+        WithdrawFrom::Sender => "sender",
+        WithdrawFrom::Sponsor => "sponsor",
+        _ => return Err(decode_error("Unsupported funds withdrawal source")),
+    };
+    Ok(json!({
+        "max_amount": max_amount.to_string(),
+        "type": format!(
+            "{}::balance::Balance<{}>",
+            Address::TWO,
+            type_tag_to_canonical_string(withdrawal.coin_type())
+        ),
+        "withdraw_from": withdraw_from,
+    }))
 }
 
 fn expiration_string(expiration: &TransactionExpiration) -> Result<String, VisualSignError> {
@@ -419,13 +467,15 @@ fn expiration_string(expiration: &TransactionExpiration) -> Result<String, Visua
         } => json!({
             // Sui's short chain identifier: the first 4 bytes of the genesis
             // checkpoint digest, as hex.
-            "chain": format!("0x{chain}"),
+            "chain": format!("0x{}", hex::encode(&chain.inner()[..4])),
             "max_epoch": optional(*max_epoch),
             "max_timestamp": optional(*max_timestamp),
             "min_epoch": optional(*min_epoch),
             "min_timestamp": optional(*min_timestamp),
             "nonce": nonce.to_string(),
         }),
+        // `Validity` (allowed proposers) and anything newer is not in schema v1.
+        _ => return Err(decode_error("Unsupported transaction expiration")),
     };
     to_canonical_string(&value)
 }
@@ -446,12 +496,12 @@ mod tests {
     use crate::SuiVisualSignConverter;
     use crate::core::SuiTransactionWrapper;
 
-    use move_core_types::language_storage::TypeTag;
-    use sui_types::base_types::SequenceNumber;
-    use sui_types::digests::{ChainIdentifier, CheckpointDigest, ObjectDigest};
-    use sui_types::transaction::{ProgrammableMoveCall, ProgrammableTransaction};
+    use sui_sdk_types::{
+        Digest, Identifier, MakeMoveVector, MergeCoins, MoveCall, ProgrammableTransaction, Publish,
+        SplitCoins, TransferObjects, Upgrade,
+    };
     use visualsign::vsptrait::{
-        ConversionResult, Transaction, VisualSignConverter, VisualSignOptions,
+        ConversionResult, Transaction as _, VisualSignConverter, VisualSignOptions,
     };
 
     const HASHI_FIXTURE: &str = include_str!("integrations/hashi/aggregated_test_data.json");
@@ -490,14 +540,14 @@ mod tests {
         hashi_b64("withdraw", "request_withdrawal", digest)
     }
 
-    fn tx_from_b64(b64: &str) -> TransactionData {
+    fn tx_from_b64(b64: &str) -> Transaction {
         SuiTransactionWrapper::from_string(b64)
             .unwrap()
             .inner()
             .clone()
     }
 
-    fn convert(tx: TransactionData, include_intermediate_output: bool) -> ConversionResult {
+    fn convert(tx: Transaction, include_intermediate_output: bool) -> ConversionResult {
         let options = VisualSignOptions {
             include_intermediate_output,
             ..VisualSignOptions::default()
@@ -514,7 +564,7 @@ mod tests {
             .expect("intermediate output emitted")
     }
 
-    fn output_for(tx: &TransactionData) -> SuiIntermediateOutput {
+    fn output_for(tx: &Transaction) -> SuiIntermediateOutput {
         build_intermediate_output(tx).unwrap()
     }
 
@@ -522,8 +572,8 @@ mod tests {
         serde_json::from_str(&output.commands[command].call_args_json).unwrap()
     }
 
-    fn programmable(tx: &mut TransactionData) -> &mut ProgrammableTransaction {
-        match tx.kind_mut() {
+    fn programmable(tx: &mut Transaction) -> &mut ProgrammableTransaction {
+        match &mut tx.kind {
             TransactionKind::ProgrammableTransaction(programmable_transaction) => {
                 programmable_transaction
             }
@@ -532,7 +582,7 @@ mod tests {
     }
 
     /// The plain PTB with its inputs and commands replaced.
-    fn ptb_with(inputs: Vec<CallArg>, commands: Vec<Command>) -> TransactionData {
+    fn ptb_with(inputs: Vec<Input>, commands: Vec<Command>) -> Transaction {
         let mut tx = tx_from_b64(PLAIN_PTB);
         let programmable_transaction = programmable(&mut tx);
         programmable_transaction.inputs = inputs;
@@ -540,16 +590,36 @@ mod tests {
         tx
     }
 
-    fn pure<T: serde::Serialize>(value: &T) -> CallArg {
-        CallArg::Pure(bcs::to_bytes(value).unwrap())
+    fn pure<T: serde::Serialize>(value: &T) -> Input {
+        Input::Pure(bcs::to_bytes(value).unwrap())
     }
 
-    fn owned_object(byte: u8) -> CallArg {
-        CallArg::Object(ObjectArg::ImmOrOwnedObject((
-            ObjectID::new([byte; 32]),
-            SequenceNumber::from_u64(1),
-            ObjectDigest::new([0; 32]),
-        )))
+    fn id(byte: u8) -> Address {
+        Address::new([byte; 32])
+    }
+
+    fn owned_object(byte: u8) -> Input {
+        Input::ImmutableOrOwned(ObjectReference::new(id(byte), 1, Digest::new([0; 32])))
+    }
+
+    fn shared(byte: u8, version: u64, mutability: Mutability) -> Input {
+        Input::Shared(SharedInput::new(id(byte), version, mutability))
+    }
+
+    fn ident(name: &str) -> Identifier {
+        Identifier::new(name).unwrap()
+    }
+
+    fn transfer(objects: Vec<Argument>, address: Argument) -> Command {
+        Command::TransferObjects(TransferObjects { objects, address })
+    }
+
+    fn split(coin: Argument, amounts: Vec<Argument>) -> Command {
+        Command::SplitCoins(SplitCoins { coin, amounts })
+    }
+
+    fn make_move_vec(type_: Option<TypeTag>, elements: Vec<Argument>) -> Command {
+        Command::MakeMoveVector(MakeMoveVector { type_, elements })
     }
 
     fn owned_object_json(byte: u8) -> String {
@@ -560,14 +630,14 @@ mod tests {
         )
     }
 
-    fn move_call(package: ObjectID, arguments: Vec<Argument>) -> Command {
-        Command::MoveCall(Box::new(ProgrammableMoveCall {
+    fn move_call(package: Address, arguments: Vec<Argument>) -> Command {
+        Command::MoveCall(MoveCall {
             package,
-            module: "pool".to_string(),
-            function: "swap".to_string(),
+            module: ident("pool"),
+            function: ident("swap"),
             type_arguments: vec![],
             arguments,
-        }))
+        })
     }
 
     fn hex_id(byte: u8) -> String {
@@ -687,7 +757,12 @@ mod tests {
                 ),
             ]
         );
-        let (id, version, digest) = tx_from_b64(PLAIN_PTB).gas_data().payment[0];
+        let gas_object = tx_from_b64(PLAIN_PTB).gas_payment.objects[0].clone();
+        let (id, version, digest) = (
+            gas_object.object_id(),
+            gas_object.version(),
+            gas_object.digest(),
+        );
         assert_eq!(
             id.to_string(),
             "0xcb485ef80a0baf9079a621c42c8b0cb65ce9986e1c81fd16ee88038f004a5aed"
@@ -701,7 +776,7 @@ mod tests {
                 payment_objects: vec![format!(
                     r#"{{"digest":"0x{}","id":"{id}","version":"{}"}}"#,
                     hex::encode(digest.inner()),
-                    version.value()
+                    version
                 )],
             }
         );
@@ -812,9 +887,9 @@ mod tests {
 
     /// One command of every kind, over pure, object, gas-coin and result
     /// arguments.
-    fn all_kinds_tx() -> TransactionData {
+    fn all_kinds_tx() -> Transaction {
         let recipient = SuiAddress::from_bytes([0xab; 32]).unwrap();
-        let package = ObjectID::new([0xca; 32]);
+        let package = id(0xca);
         let sui: TypeTag = "0x2::sui::SUI".parse().unwrap();
         ptb_with(
             vec![
@@ -824,34 +899,34 @@ mod tests {
                 owned_object(0x22),
             ],
             vec![
-                Command::MoveCall(Box::new(ProgrammableMoveCall {
+                Command::MoveCall(MoveCall {
                     package,
-                    module: "pool".to_string(),
-                    function: "swap".to_string(),
-                    type_arguments: vec![TypeInput::from(sui), TypeInput::from(TypeTag::U64)],
+                    module: ident("pool"),
+                    function: ident("swap"),
+                    type_arguments: vec![sui, TypeTag::U64],
                     arguments: vec![Argument::Input(2), Argument::Input(0)],
-                })),
-                Command::TransferObjects(
+                }),
+                transfer(
                     vec![Argument::NestedResult(0, 1), Argument::Input(2)],
                     Argument::Input(1),
                 ),
-                Command::SplitCoins(
-                    Argument::GasCoin,
-                    vec![Argument::Input(0), Argument::Result(0)],
-                ),
-                Command::MergeCoins(Argument::Input(2), vec![Argument::Input(3)]),
-                Command::Publish(vec![vec![0xde, 0xad]], vec![ObjectID::new([0x02; 32])]),
-                Command::MakeMoveVec(
-                    Some(TypeInput::from(TypeTag::U64)),
-                    vec![Argument::Input(0)],
-                ),
-                Command::MakeMoveVec(None, vec![Argument::Input(2)]),
-                Command::Upgrade(
-                    vec![vec![0xbe, 0xef]],
-                    vec![ObjectID::new([0x01; 32])],
+                split(Argument::Gas, vec![Argument::Input(0), Argument::Result(0)]),
+                Command::MergeCoins(MergeCoins {
+                    coin: Argument::Input(2),
+                    coins_to_merge: vec![Argument::Input(3)],
+                }),
+                Command::Publish(Publish {
+                    modules: vec![vec![0xde, 0xad]],
+                    dependencies: vec![id(0x02)],
+                }),
+                make_move_vec(Some(TypeTag::U64), vec![Argument::Input(0)]),
+                make_move_vec(None, vec![Argument::Input(2)]),
+                Command::Upgrade(Upgrade {
+                    modules: vec![vec![0xbe, 0xef]],
+                    dependencies: vec![id(0x01)],
                     package,
-                    Argument::Result(0),
-                ),
+                    ticket: Argument::Result(0),
+                }),
             ],
         )
     }
@@ -957,7 +1032,10 @@ mod tests {
         let digest_of = |modules: Vec<Vec<u8>>| {
             let tx = ptb_with(
                 vec![],
-                vec![Command::Publish(modules, vec![ObjectID::new([0x02; 32])])],
+                vec![Command::Publish(Publish {
+                    modules,
+                    dependencies: vec![id(0x02)],
+                })],
             );
             call_args(&output_for(&tx), 0)["package_digest"].clone()
         };
@@ -969,26 +1047,14 @@ mod tests {
 
     #[test]
     fn object_kinds_are_encoded() {
-        let id = ObjectID::new([0x33; 32]);
-        let shared = |mutability| {
-            CallArg::Object(ObjectArg::SharedObject {
-                id,
-                initial_shared_version: SequenceNumber::from_u64(9),
-                mutability,
-            })
-        };
         let tx = ptb_with(
             vec![
-                shared(SharedObjectMutability::Mutable),
-                shared(SharedObjectMutability::Immutable),
-                CallArg::Object(ObjectArg::Receiving((
-                    id,
-                    SequenceNumber::from_u64(4),
-                    ObjectDigest::new([0x44; 32]),
-                ))),
+                shared(0x33, 9, Mutability::Mutable),
+                shared(0x33, 9, Mutability::Immutable),
+                Input::Receiving(ObjectReference::new(id(0x33), 4, Digest::new([0x44; 32]))),
             ],
             vec![move_call(
-                ObjectID::new([0xca; 32]),
+                id(0xca),
                 vec![Argument::Input(0), Argument::Input(1), Argument::Input(2)],
             )],
         );
@@ -1019,8 +1085,8 @@ mod tests {
     fn encoding_does_not_depend_on_command_order() {
         // An input used as a SplitCoins amount and as a MakeMoveVec element
         // encodes the same whether or not a MoveCall comes first.
-        let make_move_vec = Command::MakeMoveVec(None, vec![Argument::Input(0)]);
-        let split = Command::SplitCoins(Argument::GasCoin, vec![Argument::Input(0)]);
+        let make_move_vec = make_move_vec(None, vec![Argument::Input(0)]);
+        let split = split(Argument::Gas, vec![Argument::Input(0)]);
         let first = ptb_with(
             vec![pure(&1_000u64)],
             vec![split.clone(), make_move_vec.clone()],
@@ -1028,7 +1094,7 @@ mod tests {
         let second = ptb_with(
             vec![pure(&1_000u64)],
             vec![
-                move_call(ObjectID::new([0xca; 32]), vec![Argument::Input(0)]),
+                move_call(id(0xca), vec![Argument::Input(0)]),
                 split,
                 make_move_vec,
             ],
@@ -1047,18 +1113,18 @@ mod tests {
     fn any_unreadable_argument_drops_the_whole_output() {
         let unreadable = [
             // Recipient is an 8-byte pure value, not an address.
-            Command::TransferObjects(vec![Argument::Input(1)], Argument::Input(0)),
+            transfer(vec![Argument::Input(1)], Argument::Input(0)),
             // Amount is a single byte, not a u64.
-            Command::SplitCoins(Argument::GasCoin, vec![Argument::Input(2)]),
+            split(Argument::Gas, vec![Argument::Input(2)]),
             // Input index out of range, here in a MoveCall.
-            move_call(ObjectID::new([0xca; 32]), vec![Argument::Input(9)]),
+            move_call(id(0xca), vec![Argument::Input(9)]),
         ];
         for command in unreadable {
             // A readable command first: no partial output survives.
             let tx = ptb_with(
                 vec![pure(&1_000u64), owned_object(0x11), pure(&7u8)],
                 vec![
-                    Command::SplitCoins(Argument::GasCoin, vec![Argument::Input(0)]),
+                    split(Argument::Gas, vec![Argument::Input(0)]),
                     command.clone(),
                 ],
             );
@@ -1081,7 +1147,7 @@ mod tests {
             max_epoch: None,
             min_timestamp: None,
             max_timestamp: Some(9),
-            chain: ChainIdentifier::from(CheckpointDigest::new([0x0f; 32])),
+            chain: Digest::new([0x0f; 32]),
             nonce: 3,
         };
         assert_eq!(
@@ -1098,8 +1164,8 @@ mod tests {
 
     /// A large pure input referenced many times: `count` `MakeMoveVec`
     /// commands, each with `per_command` references to input 0.
-    fn amplified_tx(input: CallArg, count: usize, per_command: usize) -> TransactionData {
-        let command = Command::MakeMoveVec(None, vec![Argument::Input(0); per_command]);
+    fn amplified_tx(input: Input, count: usize, per_command: usize) -> Transaction {
+        let command = make_move_vec(None, vec![Argument::Input(0); per_command]);
         ptb_with(vec![input], vec![command; count])
     }
 
@@ -1108,7 +1174,7 @@ mod tests {
         // A 16 KiB pure input referenced 38,400 times across 75 commands
         // (Sui's per-command argument limit is 512). The transaction is about
         // 131 KB, but its unbounded argument JSON would exceed 1 GB.
-        let tx = amplified_tx(CallArg::Pure(vec![0xab; 16 * 1024]), 75, 512);
+        let tx = amplified_tx(Input::Pure(vec![0xab; 16 * 1024]), 75, 512);
         assert!(bcs::to_bytes(&tx).unwrap().len() < 132 * 1024);
         assert!(build_intermediate_output(&tx).is_err());
         assert!(convert(tx, true).intermediate_output.is_none());
@@ -1116,11 +1182,7 @@ mod tests {
 
     #[test]
     fn amplified_object_references_drop_the_output() {
-        let shared = CallArg::Object(ObjectArg::SharedObject {
-            id: ObjectID::new([0x33; 32]),
-            initial_shared_version: SequenceNumber::from_u64(9),
-            mutability: SharedObjectMutability::Mutable,
-        });
+        let shared = shared(0x33, 9, Mutability::Mutable);
         assert!(build_intermediate_output(&amplified_tx(shared, 75, 512)).is_err());
     }
 
@@ -1129,7 +1191,7 @@ mod tests {
         // Each reference to a 16 KiB input emits 13 + 32,768 bytes, so 31 fit
         // under the 1 MiB cap and 32 do not, whether in one command or split
         // across several.
-        let input = || CallArg::Pure(vec![0xab; 16 * 1024]);
+        let input = || Input::Pure(vec![0xab; 16 * 1024]);
         assert!(build_intermediate_output(&amplified_tx(input(), 1, 31)).is_ok());
         assert!(build_intermediate_output(&amplified_tx(input(), 1, 32)).is_err());
         assert!(build_intermediate_output(&amplified_tx(input(), 4, 8)).is_err());
@@ -1139,10 +1201,10 @@ mod tests {
     fn typed_slots_accept_only_literals_and_results() {
         let inputs = || vec![pure(&1_000u64), owned_object(0x11), pure(&[0xab_u8; 32])];
         let rejected = [
-            Command::TransferObjects(vec![Argument::Input(1)], Argument::Input(1)),
-            Command::TransferObjects(vec![Argument::Input(1)], Argument::GasCoin),
-            Command::SplitCoins(Argument::GasCoin, vec![Argument::Input(1)]),
-            Command::SplitCoins(Argument::GasCoin, vec![Argument::GasCoin]),
+            transfer(vec![Argument::Input(1)], Argument::Input(1)),
+            transfer(vec![Argument::Input(1)], Argument::Gas),
+            split(Argument::Gas, vec![Argument::Input(1)]),
+            split(Argument::Gas, vec![Argument::Gas]),
         ];
         for command in rejected {
             let tx = ptb_with(inputs(), vec![command.clone()]);
@@ -1155,8 +1217,8 @@ mod tests {
         let tx = ptb_with(
             inputs(),
             vec![
-                Command::SplitCoins(Argument::GasCoin, vec![Argument::NestedResult(0, 0)]),
-                Command::TransferObjects(vec![Argument::Input(1)], Argument::Result(0)),
+                split(Argument::Gas, vec![Argument::NestedResult(0, 0)]),
+                transfer(vec![Argument::Input(1)], Argument::Result(0)),
             ],
         );
         let output = output_for(&tx);
@@ -1170,7 +1232,7 @@ mod tests {
     #[test]
     fn non_programmable_transaction_falls_back_without_intermediate_output() {
         let mut tx = tx_from_b64(PLAIN_PTB);
-        *tx.kind_mut() = TransactionKind::EndOfEpochTransaction(vec![]);
+        tx.kind = TransactionKind::EndOfEpoch(vec![]);
         let result = convert(tx, true);
         assert!(result.intermediate_output.is_none());
         assert_eq!(result.payload.payload_type, "Sui");

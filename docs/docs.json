@@ -107,7 +107,8 @@
               "chains/tron",
               "chains/bitcoin",
               "chains/cosmos",
-              "chains/near"
+              "chains/near",
+              "chains/zcash"
             ]
           },
           {

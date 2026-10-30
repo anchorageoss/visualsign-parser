@@ -69,8 +69,8 @@ macro_rules! __gen_module {
           ///
           /// Fails if the argument is missing, not `Pure`, or cannot be decoded as `$param_ty`.
           pub fn $getter_name (
-            inputs: &[sui_json_rpc_types::SuiCallArg],
-            args: &[sui_json_rpc_types::SuiArgument],
+            inputs: &[$crate::types::SuiCallArg],
+            args: &[$crate::types::SuiArgument],
           ) -> Result<$param_ty, visualsign::errors::VisualSignError> {
             let idx = $crate::utils::get_index(
               args,

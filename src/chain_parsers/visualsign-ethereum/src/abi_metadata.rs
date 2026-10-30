@@ -1078,6 +1078,7 @@ mod tests {
                 idl: None,
                 idl_mappings: Default::default(),
                 simulated_transaction_result: None,
+                max_fee_lamports: None,
             })),
         };
         assert!(

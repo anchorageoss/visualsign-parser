@@ -10,7 +10,8 @@
         feature = "solana",
         feature = "near",
         feature = "tron",
-        feature = "cosmos"
+        feature = "cosmos",
+        feature = "zcash"
     )),
     allow(dead_code, unused_imports)
 )]
@@ -75,6 +76,8 @@ fn test_cli_with_fixtures() {
         "solana",
         #[cfg(not(feature = "tron"))]
         "tron",
+        #[cfg(not(feature = "zcash"))]
+        "zcash",
     ];
 
     for input_file in test_cases {

@@ -3,7 +3,7 @@ use crate::core::{SuiIntegrationConfig, SuiIntegrationConfigData};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use sui_types::base_types::ObjectID;
+use crate::types::ObjectID;
 use visualsign::errors::VisualSignError;
 
 const USER_MODULE: &str = "user";
