@@ -2225,6 +2225,9 @@ mod tests {
         let field =
             UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
 
+        let rendered = serde_json::to_string(&field).unwrap();
+        assert!(rendered.contains("Unlimited Amount"), "{rendered}");
+
         // Verify the field has the correct label
         match field {
             SignablePayloadField::TextV2 { common, .. } => {

@@ -123,7 +123,9 @@ registry.register_token(1, token_metadata)?;
 // Get token symbol
 let symbol = registry.get_token_symbol(1, address);
 
-// Format token amount with proper decimals
+// Format token amount with proper decimals. Here `raw_amount` is a `u128`:
+// uint160/uint256 fields need the u256 variant, `format_token_amount_u256`
+// (see "Formatting token amounts" below).
 let formatted = registry.format_token_amount(1, address, raw_amount);
 
 // Load from wallet metadata
@@ -204,13 +206,20 @@ let mut fields = vec![
 ### Formatting token amounts
 
 ```rust
+use alloy_primitives::U256;
 use crate::registry::ContractRegistry;
 
-if let Some((formatted, symbol)) = registry.format_token_amount(chain_id, token_address, raw_amount) {
+if let Some((formatted, symbol)) = registry.format_token_amount_u256(
+    chain_id,
+    token_address,
+    U256::from(raw_amount),
+) {
     let field = create_amount_field("Amount", &formatted, &symbol)?;
     // Use field...
 }
 ```
+
+uint160/uint256 fields need the u256 variant; `format_token_amount` takes a `u128`. The `u128` version is still fine for a field that is at most 128 bits wide.
 
 ### Loading wallet metadata
 
