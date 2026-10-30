@@ -47,7 +47,7 @@ It holds one task list per milestone, so GitHub shows progress on the issue and 
 | M3 Property tests | proptest file, CI label run, regressions file | hand |
 | M4 Fuzzing | cargo-fuzz target, CI label run, seeded corpus | hand |
 | M5 iOS (C-free) | no `cc` for `aarch64-apple-ios`, `APPLE_NO_C_CRATES` | hand |
-| M6 Production | downstream integration, default-on, changelog published | hand |
+| M6 Production | downstream integration, visualsign-turnkeyclient support ([wiring.md](wiring.md) step 21), default-on, changelog published | hand |
 
 M1 sits between `<!-- add-chain:wiring:start -->` and `<!-- add-chain:wiring:end -->`. The
 `chain-tracking-sync` workflow rewrites only that block, on every push to main that touches

@@ -90,6 +90,8 @@ body:
         ## M6 Production
 
         - [ ] Downstream integration named and linked (who sends this chain's payloads)
+        - [ ] visualsign-turnkeyclient handles the chain: ChainMetadata arm and intermediate-output decoder if the chain has them, docs and a test (client PR linked, or n/a with the reason)
+        - [ ] `visualsign-turnkeyclient verify --chain CHAIN_<X>` against the deployed enclave returns valid, attestationValid and signatureValid
         - [ ] Default-on in parser_app, http-server and the images (if it started opt-in)
         - [ ] Changelog entry published
 

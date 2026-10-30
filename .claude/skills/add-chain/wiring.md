@@ -184,3 +184,27 @@ list in the order the file already uses. `cargo run -q -p chain-wiring -- check 
       Use `category: core` until the chain has its own stream; say so in a comment.
 20. (c) **Agent docs** `CLAUDE.md` (AGENTS.md is a symlink): add `foo` to the
     `chain_parsers/visualsign-{...}` list under Workspace Layout.
+
+## Downstream: visualsign-turnkeyclient
+
+`chain-wiring` can't see this repo, so this step is by hand. It belongs to M6 on the tracking issue.
+
+21. **[visualsign-turnkeyclient](https://github.com/anchorageoss/visualsign-turnkeyclient)**,
+    the Go client callers use to parse through Turnkey and verify the attestation. It passes
+    `--chain` / `VerifyRequest.Chain` through as a string, so a chain with no metadata and no
+    intermediate output works without client changes (Bitcoin did, at v0.1046.0). Open a client
+    PR when the parser PR adds either of these:
+    - **A `<Variant>Metadata` arm on `ChainMetadata`.** Mirror it in `api/types.go`
+      (`RequestChainMetadata` and its oneof-shaped `MarshalJSON`/`UnmarshalJSON`) and
+      `api/borsh.go` (`BorshBytes`, which `metadataDigest` is checked against), and add the
+      chain-must-match check in `verify/service.go` next to the Ethereum/Solana/NEAR ones.
+      Add a Borsh cross-check vector produced by this repo's encoder.
+    - **Intermediate output.** Add a decoder and a `CHAIN_FOO` case to the
+      intermediate-output switch in `verify/service.go`, mirroring the schema version.
+
+    Either way, update the `--chain` usage in `cmd/verify.go`, the README and
+    `WALLET_INTEGRATION_GUIDE.md`, and add a `CHAIN_FOO` request test. Once the chain is
+    deployed, smoke it end to end:
+    `visualsign-turnkeyclient verify --dev-path --chain CHAIN_FOO --unsigned-payload <fixture>`
+    must return `valid`, `attestationValid` and `signatureValid` all true. A `CHAIN_*` value that
+    isn't in the proto yet also needs Turnkey's gateway rebuilt from the new proto first.
