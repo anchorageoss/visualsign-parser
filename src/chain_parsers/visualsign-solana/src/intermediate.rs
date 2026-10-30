@@ -1781,6 +1781,7 @@ mod tests {
             program_type: None,
             custom_idl: Some(serde_json::from_str(idl_json).unwrap()),
             custom_idl_json: Some(idl_json.to_string()),
+            custom_idl_hash: None,
             override_builtin: true,
             is_preset: false,
         };
