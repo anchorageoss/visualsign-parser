@@ -12,8 +12,8 @@ use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_amount_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
 
-use crate::fmt::charset_safe;
-use crate::networks::NearNetwork;
+use crate::network::SettlementNetwork;
+use visualsign::encodings::escape_display_text;
 
 use super::tokens;
 use super::verify::SignatureCheck;
@@ -28,7 +28,7 @@ type Fields = Vec<SignablePayloadField>;
 /// the same information as a `Warning`-labelled text field, keeping the
 /// production payload shape unchanged.
 ///
-/// `message` is charset-filtered here rather than at each call site. Every
+/// `message` is escaped here rather than at each call site. Every
 /// rule on this path quotes untrusted input -- an asset id, a decode error
 /// that echoes the offending value -- so filtering at this choke point is what
 /// makes a newly added rule safe by construction. `rule` is a literal at every
@@ -39,7 +39,7 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
         rule,
         "near-intents",
         visualsign::lint::Severity::Warn,
-        &charset_safe(message),
+        &escape_display_text(message),
         None,
     )
     .signable_payload_field)
@@ -48,10 +48,11 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// See the `diagnostics`-enabled twin above.
 #[cfg(not(feature = "diagnostics"))]
 fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualSignError> {
-    Ok(
-        create_text_field("Warning", &format!("{rule}: {}", charset_safe(message)))?
-            .signable_payload_field,
-    )
+    Ok(create_text_field(
+        "Warning",
+        &format!("{rule}: {}", escape_display_text(message)),
+    )?
+    .signable_payload_field)
 }
 
 /// Report each caller-supplied token-metadata entry the parser refused.
@@ -63,15 +64,15 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// render, since the refusal protects them rather than invalidating them.
 ///
 /// `asset_id` is a caller-controlled map key and `reason` can quote it back (a
-/// JSON parse error, a length); [`diagnostic`] charset-filters the assembled
+/// JSON parse error, a length); [`diagnostic`] escapes the assembled
 /// message, so neither half can render as extra apparent fields on the signing
 /// screen.
-pub(crate) fn rejected_metadata_diagnostics(
+pub fn rejected_metadata_diagnostics(
     rejected: &[super::token_signature::RejectedTokenMetadata],
 ) -> Fields {
     // Infallible by construction: reporting a refusal must never be able to
     // withhold the transaction. A field that fails to build (an empty message
-    // after charset filtering, say) is logged and dropped, leaving the signer
+    // after escaping, say) is logged and dropped, leaving the signer
     // a payload minus one caveat rather than no payload at all.
     rejected
         .iter()
@@ -105,9 +106,9 @@ pub(crate) fn rejected_metadata_diagnostics(
 /// half as an `AccountId` and takes the remainder verbatim into a plain
 /// `String` (`Nep245TokenId::mt_token_id`, `Nep171TokenId::nft_token_id`), and
 /// `Display` round-trips it. So an asset id echoed into field text carries
-/// whatever bytes the sender chose and must be filtered.
+/// whatever bytes the sender chose and must be escaped.
 ///
-/// The filtered form is for display only. Resolution runs against the raw id,
+/// The escaped form is for display only. Resolution runs against the raw id,
 /// because stripping first would let a crafted id collapse onto a seeded one
 /// (`nep141:wrap\u{7f}.near` -> `nep141:wrap.near`) and borrow that token's
 /// symbol and decimals.
@@ -118,7 +119,7 @@ fn token_amount_field(
     registry: &Reg,
 ) -> Result<Fields, VisualSignError> {
     let resolved = tokens::resolve(asset_id, registry);
-    let asset_id = charset_safe(asset_id);
+    let asset_id = escape_display_text(asset_id);
     match resolved {
         Some(meta) => {
             let mut fields = vec![
@@ -148,13 +149,12 @@ fn token_amount_field(
 /// being present is itself what the signer needs to see.
 ///
 /// Ends in a literal backslash so no attacker-controlled string can ever
-/// equal it: [`charset_safe`] elides every backslash a caller's text
-/// contains, so this marker can be produced only here, never by a real `msg`
-/// that happens to spell out the same words.
+/// equal it: [`escape_display_text`] encodes every backslash a caller's text
+/// contains as `%5C`, so this marker can be produced only here, never by a real
+/// `msg` that happens to spell out the same words.
 const EMPTY_VALUE: &str = "(empty)\\";
 
-/// Charset-filter an optional field string, dropping it when the value is
-/// empty.
+/// Escape an optional field string, dropping it when the value is empty.
 ///
 /// Only for fields whose presence carries no meaning of its own, so that a
 /// value rendering as nothing and a value never supplied are genuinely the
@@ -163,15 +163,15 @@ const EMPTY_VALUE: &str = "(empty)\\";
 /// what executes, use [`present_value`] instead -- dropping the field there
 /// hides the difference between the two on-chain behaviours.
 ///
-/// `charset_safe` marks what it cannot render rather than deleting it, so an
-/// all-non-ASCII memo renders as markers and reaches the signer; only a
-/// genuinely empty string is dropped, which would otherwise render as a
-/// labelled blank line reading as a deliberately empty memo.
-fn nonempty_filtered(text: Option<&str>) -> Option<String> {
-    text.map(charset_safe).filter(|t| !t.is_empty())
+/// Escaping never deletes, so an all-non-ASCII memo renders as its escapes and
+/// reaches the signer; only a genuinely empty string is dropped, which would
+/// otherwise render as a labelled blank line reading as a deliberately empty
+/// memo.
+fn nonempty_escaped(text: Option<&str>) -> Option<String> {
+    text.map(escape_display_text).filter(|t| !t.is_empty())
 }
 
-/// Charset-filter a value whose presence changes what the transaction does,
+/// Escape a value whose presence changes what the transaction does,
 /// substituting [`EMPTY_VALUE`] when nothing renders.
 ///
 /// An empty `msg` still selects a contract-calling form on-chain: a
@@ -181,11 +181,11 @@ fn nonempty_filtered(text: Option<&str>) -> Option<String> {
 /// those byte-identically to the transfer that calls nothing, so the signer
 /// would approve a receiver callback with nothing on screen distinguishing it.
 fn present_value(text: &str) -> String {
-    let filtered = charset_safe(text);
-    if filtered.is_empty() {
+    let escaped = escape_display_text(text);
+    if escaped.is_empty() {
         EMPTY_VALUE.to_string()
     } else {
-        filtered
+        escaped
     }
 }
 
@@ -221,7 +221,7 @@ pub(crate) fn section(
     total: usize,
     mp: &MultiPayload,
     registry: &Reg,
-    network: NearNetwork,
+    network: SettlementNetwork,
 ) -> Result<Fields, VisualSignError> {
     let (check, extracted) = super::verify::verify_and_extract(mp);
     let signer_id = extracted.as_ref().ok().map(|p| p.signer_id.as_str());
@@ -257,11 +257,18 @@ pub(crate) fn intent_label(intent: &Intent) -> &'static str {
     }
 }
 
+/// What a payload with no intents does: nothing, except spend its nonce. A user
+/// signs one on purpose to cancel a pending signed request (a quote, an order)
+/// that uses the same nonce, so it is named as a cancel rather than shown as an
+/// envelope with an empty body.
+pub(crate) const CANCEL_LABEL: &str = "Cancel: invalidate nonce";
+
 /// Title for a pre-signature envelope, mirroring `convert::title_for` on the
 /// transaction path: a lone intent names its type, a batch stays generic
 /// because no single name describes it.
 pub(crate) fn title_for_intents(intents: &[Intent]) -> String {
     match intents {
+        [] => CANCEL_LABEL.to_string(),
         [single] => format!("NEAR Intent: {}", intent_label(single)),
         _ => "NEAR Intent".to_string(),
     }
@@ -363,9 +370,10 @@ fn render_intent_body(intent: &Intent, registry: &Reg) -> Result<Fields, VisualS
         Intent::AuthCall(c) => {
             let mut fields = vec![
                 create_text_field("Contract", c.contract_id.as_str())?.signable_payload_field,
-                create_text_field("Message", &charset_safe(&c.msg))?.signable_payload_field,
+                create_text_field("Message", &escape_display_text(&c.msg))?.signable_payload_field,
                 near_amount_field("Attached Deposit", c.attached_deposit.as_yoctonear())?,
             ];
+            push_min_gas(&mut fields, c.min_gas)?;
             if c.state_init.is_some() {
                 fields.push(state_init_field()?);
             }
@@ -421,7 +429,7 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
         if *delta == 0 {
             return Err(VisualSignError::ValidationError(format!(
                 "token_diff entry for {} has a zero delta",
-                charset_safe(&token_id.to_string())
+                escape_display_text(&token_id.to_string())
             )));
         }
         let label = if *delta < 0 { "Send" } else { "Receive" };
@@ -432,11 +440,11 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
             registry,
         )?);
     }
-    if let Some(memo) = nonempty_filtered(td.memo.as_deref()) {
+    if let Some(memo) = nonempty_escaped(td.memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // `referral` is an `AccountId`: its own charset rules already exclude
-    // everything `charset_safe` would strip, so filtering it would be dead code.
+    // everything `escape_display_text` would encode, so escaping it would be a no-op.
     if let Some(referral) = &td.referral {
         fields.push(create_text_field("Referral", referral.as_str())?.signable_payload_field);
     }
@@ -453,7 +461,7 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
             registry,
         )?);
     }
-    if let Some(memo) = nonempty_filtered(t.memo.as_deref()) {
+    if let Some(memo) = nonempty_escaped(t.memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // A `Transfer`'s optional notification changes what the transfer does
@@ -469,6 +477,7 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
             create_text_field("Message", &present_value(notification.msg.as_str()))?
                 .signable_payload_field,
         );
+        push_min_gas(&mut fields, notification.min_gas)?;
         if notification.state_init.is_some() {
             fields.push(state_init_field()?);
         }
@@ -476,19 +485,38 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     Ok(fields)
 }
 
+/// A signed `min_gas`: the gas the created promise must be given, which
+/// decides whether the callback (and with it anything it moves) can succeed.
+///
+/// Rendered on presence, not on value: an explicit `"0"` and an absent field
+/// sign different payloads (the contract applies its own default only to the
+/// absent one), so the two must not render alike.
+fn push_min_gas(
+    fields: &mut Fields,
+    min_gas: Option<near_sdk::Gas>,
+) -> Result<(), VisualSignError> {
+    if let Some(gas) = min_gas {
+        let tgas = tokens::format_tgas(gas.as_gas());
+        fields.push(create_text_field("Min Gas", &format!("{tgas} Tgas"))?.signable_payload_field);
+    }
+    Ok(())
+}
+
 /// A withdraw's trailing fields, shared by all three token standards so none
 /// can silently drop one: the optional `memo`, the optional `msg` (switches
-/// the call into its `_transfer_call` form, passing this to the receiver), and
+/// the call into its `_transfer_call` form, passing this to the receiver),
 /// `storage_deposit` (a separate, unconditional wNEAR debit for the receiver's
-/// storage on `token`, never refunded on failure). Each changes what the
-/// withdraw does beyond moving the named token/amount, so each must render.
+/// storage on `token`, never refunded on failure), and `min_gas` (the gas the
+/// withdraw's promise must be given). Each changes what the withdraw does
+/// beyond moving the named token/amount, so each must render.
 fn push_withdraw_call_details(
     fields: &mut Fields,
     memo: &Option<String>,
     msg: &Option<String>,
     storage_deposit: Option<near_sdk::NearToken>,
+    min_gas: Option<near_sdk::Gas>,
 ) -> Result<(), VisualSignError> {
-    if let Some(memo) = nonempty_filtered(memo.as_deref()) {
+    if let Some(memo) = nonempty_escaped(memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // `Some("")` is not the same withdraw as `None`: it selects the
@@ -503,7 +531,7 @@ fn push_withdraw_call_details(
             deposit.as_yoctonear(),
         )?);
     }
-    Ok(())
+    push_min_gas(fields, min_gas)
 }
 
 fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSignError> {
@@ -517,7 +545,7 @@ fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
         w.amount.0,
         registry,
     )?);
-    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit, w.min_gas)?;
     Ok(fields)
 }
 
@@ -527,10 +555,10 @@ fn render_nft_withdraw(w: &NftWithdraw) -> Result<Fields, VisualSignError> {
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
         // `token_id` is a plain `String` (`non_fungible_token::TokenId`), not
         // an `AccountId`, so it carries whatever bytes the sender chose.
-        create_text_field("NFT Token Id", &charset_safe(w.token_id.as_str()))?
+        create_text_field("NFT Token Id", &escape_display_text(w.token_id.as_str()))?
             .signable_payload_field,
     ];
-    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit, w.min_gas)?;
     Ok(fields)
 }
 
@@ -555,8 +583,9 @@ fn render_mt_withdraw(w: &MtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
     for (id, amount) in w.token_ids.iter().zip(w.amounts.iter()) {
         // As with `nft_withdraw`'s `token_id`, an MT token id is a plain
         // `String` (`defuse_nep245::TokenId`), so it carries whatever bytes
-        // the sender chose and must be filtered before it reaches field text.
-        fields.push(create_text_field("MT Token", &charset_safe(id))?.signable_payload_field);
+        // the sender chose and must be escaped before it reaches field text.
+        fields
+            .push(create_text_field("MT Token", &escape_display_text(id))?.signable_payload_field);
         fields.extend(token_amount_field(
             "Amount",
             &format!("nep245:{}:{id}", w.token),
@@ -564,7 +593,7 @@ fn render_mt_withdraw(w: &MtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
             registry,
         )?);
     }
-    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit, w.min_gas)?;
     Ok(fields)
 }
 
@@ -683,7 +712,7 @@ pub(crate) fn render_envelope(
 pub(crate) fn render_single(
     payload: &DefusePayload<DefuseIntents>,
     registry: &Reg,
-    network: NearNetwork,
+    network: SettlementNetwork,
 ) -> Result<Fields, VisualSignError> {
     // Every envelope reaches the signer through here -- the standalone
     // pre-signature view and each section of an on-chain signed batch alike --
@@ -700,7 +729,8 @@ pub(crate) fn render_single(
         ("signer", payload.signer_id.as_str()),
         ("verifying contract", payload.verifying_contract.as_str()),
     ] {
-        if let Some(mismatch) = crate::networks::network_mismatch(role, account_id, network) {
+        if let Some(mismatch) = crate::network::account_network_mismatch(role, account_id, network)
+        {
             return Err(VisualSignError::ValidationError(mismatch));
         }
     }
@@ -711,13 +741,17 @@ pub(crate) fn render_single(
             "deadline has passed; the intents would be rejected",
         )?);
     }
-    // An empty list is valid and does nothing, but still consumes the nonce
-    // for this signer -- so it renders as an envelope with no body, and a
-    // signer has nothing on screen telling them that is all it does.
+    // An empty or absent list is valid and does nothing, but still consumes
+    // the nonce for this signer: that is how a pending signed request is
+    // cancelled. Named as such, in the body as well as the title (a signed
+    // batch has no per-section title), with the warning saying that spending
+    // the nonce is all it does.
     if payload.intents.is_empty() {
+        fields.push(create_text_field("Intent", CANCEL_LABEL)?.signable_payload_field);
         fields.push(diagnostic(
             "empty-intents",
-            "this envelope carries no intents; signing it moves nothing but spends the nonce",
+            "this envelope carries no intents; signing it moves nothing but spends the nonce, \
+             cancelling any pending signed request that uses it",
         )?);
     }
     let total = payload.intents.len();
@@ -1022,7 +1056,7 @@ mod tests {
         )
         .expect("multi payload json");
 
-        let fields = section(1, 1, &mp, &empty_reg(), NearNetwork::Mainnet).expect("render");
+        let fields = section(1, 1, &mp, &empty_reg(), SettlementNetwork::Mainnet).expect("render");
 
         let has_extraction_warning = fields
             .iter()
@@ -1126,7 +1160,7 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("zero delta"), "{message}");
         assert!(
-            message.contains("nep245:mt.near:x?To: attacker.near?Amount: 1000 USDC"),
+            message.contains("nep245:mt.near:x%0ATo: attacker.near%0AAmount: 1000 USDC"),
             "{message}"
         );
         assert!(!message.contains('\n'), "{message}");
@@ -1496,15 +1530,64 @@ mod tests {
     }
 
     /// The other input that used to reach the same collapse. It no longer
-    /// sanitizes to nothing, so the field carries markers rather than needing
-    /// the placeholder.
+    /// escapes to nothing, so the field carries the escaped text rather than
+    /// needing the placeholder.
     #[test]
-    fn transfer_with_an_unrenderable_notification_message_renders_markers() {
+    fn transfer_with_an_unrenderable_notification_message_renders_escaped() {
         let intent = intent_from(
             r#"{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1"},"msg":"éé"}"#,
         );
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert_eq!(text_at(&fields, "Message"), "??");
+        assert_eq!(text_at(&fields, "Message"), "%C3%A9%C3%A9");
+    }
+
+    /// `min_gas` is signed, and an explicit `"0"` is a different payload from
+    /// an absent one: the contract applies its default gas only when the field
+    /// is missing. Every intent that carries it renders it on presence, so an
+    /// `auth_call` with an attached deposit -- not refunded on failure -- cannot
+    /// preview the same way under either.
+    #[test]
+    fn min_gas_renders_on_presence_for_every_intent_that_carries_it() {
+        let auth = |min_gas: &str| {
+            format!(
+                r#"{{"intent":"auth_call","contract_id":"app.near","msg":"go","attached_deposit":"1000000000000000000000000"{min_gas}}}"#
+            )
+        };
+        let defaulted = render_intent(&intent_from(&auth("")), &empty_reg()).expect("render");
+        let zero =
+            render_intent(&intent_from(&auth(r#","min_gas":"0""#)), &empty_reg()).expect("render");
+        // A static message: CodeQL treats rendered fields as tainted.
+        assert!(
+            defaulted
+                .iter()
+                .filter_map(label_of)
+                .all(|l| l != "Min Gas"),
+            "a defaulted min_gas must render no Min Gas field"
+        );
+        assert_eq!(text_at(&zero, "Min Gas"), "0 Tgas");
+        let labels = |fields: &Fields| -> Vec<String> {
+            fields
+                .iter()
+                .filter_map(label_of)
+                .map(str::to_string)
+                .collect()
+        };
+        assert_ne!(
+            labels(&defaulted),
+            labels(&zero),
+            "the two payloads must not preview alike"
+        );
+
+        for intent in [
+            auth(r#","min_gas":"30000000000000""#),
+            r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","min_gas":"30000000000000"}"#.to_string(),
+            r#"{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":"1","min_gas":"30000000000000"}"#.to_string(),
+            r#"{"intent":"mt_withdraw","token":"mt.near","receiver_id":"alice.near","token_ids":["a"],"amounts":["1"],"min_gas":"30000000000000"}"#.to_string(),
+            r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"},"msg":"m","min_gas":"30000000000000"}"#.to_string(),
+        ] {
+            let fields = render_intent(&intent_from(&intent), &empty_reg()).expect("render");
+            assert_eq!(text_at(&fields, "Min Gas"), "30 Tgas", "{intent}");
+        }
     }
 
     #[test]
@@ -1567,7 +1650,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1579,7 +1662,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1591,7 +1674,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1603,7 +1686,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1617,7 +1700,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1633,7 +1716,97 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "NFT Token Id"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
+        );
+    }
+
+    /// Distinct signed token ids must render distinctly. A single-marker
+    /// sanitizer showed `é`, `?` and a line feed identically.
+    #[test]
+    fn nft_withdraw_token_ids_that_a_marker_would_collapse_stay_distinct() {
+        let shown = |token_id: &str| {
+            let intent = intent_from(&format!(
+                r#"{{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":{}}}"#,
+                serde_json::to_string(token_id).unwrap()
+            ));
+            text_at(
+                &render_intent(&intent, &empty_reg()).expect("render"),
+                "NFT Token Id",
+            )
+        };
+        let ids = ["\u{e9}", "?", "\n", "%C3%A9", "%3F"];
+        let rendered: std::collections::BTreeSet<String> = ids.iter().map(|id| shown(id)).collect();
+        assert_eq!(rendered.len(), ids.len(), "{rendered:?}");
+        assert_eq!(shown("\u{e9}"), "%C3%A9");
+        assert_eq!(shown("%C3%A9"), "%25C3%25A9");
+    }
+
+    /// Every shared free-text field the signer approves (an `auth_call` or
+    /// withdraw message, a memo) shows distinct signed texts distinctly: a
+    /// character and the marker a lossy sanitizer put in its place, a line feed
+    /// and `?`, and a literal escape in either case and the character it would
+    /// encode. No message can render as the empty-value marker.
+    #[test]
+    fn freeform_texts_a_marker_would_collapse_stay_distinct() {
+        let texts = [
+            "\u{e9}",
+            "?",
+            "hello\nworld",
+            "hello?world",
+            "%C3%A9",
+            "%c3%a9",
+            "%0A",
+            "%0a",
+            "(empty)",
+            "(empty)\\",
+        ];
+        let render = |template: &str, text: &str, label: &str| {
+            let json = template.replace("TEXT", &serde_json::to_string(text).unwrap());
+            text_at(
+                &render_intent(&intent_from(&json), &empty_reg()).expect("render"),
+                label,
+            )
+        };
+        let fields = [
+            (
+                r#"{"intent":"auth_call","contract_id":"c.near","msg":TEXT}"#,
+                "Message",
+            ),
+            (
+                r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":TEXT}"#,
+                "Message",
+            ),
+            (
+                r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"},"memo":TEXT}"#,
+                "Memo",
+            ),
+            (
+                r#"{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":TEXT}"#,
+                "NFT Token Id",
+            ),
+        ];
+        for (template, label) in fields {
+            let shown: Vec<String> = texts.iter().map(|t| render(template, t, label)).collect();
+            let unique: std::collections::BTreeSet<&String> = shown.iter().collect();
+            assert_eq!(unique.len(), texts.len(), "{label}: {shown:?}");
+            assert!(
+                !shown.iter().any(|t| t == EMPTY_VALUE),
+                "{label}: a present text rendered as the empty marker: {shown:?}"
+            );
+            for (text, display) in texts.iter().zip(&shown) {
+                assert_eq!(
+                    visualsign::encodings::unescape_display_text(display).as_deref(),
+                    Some(*text),
+                    "{label}: {display} does not decode back"
+                );
+            }
+        }
+        // The withdraw's empty `msg` keeps its own marker, distinct from all of
+        // the above.
+        assert_eq!(
+            render(fields[1].0, "", "Message"),
+            EMPTY_VALUE,
+            "an empty msg renders as the marker"
         );
     }
 
@@ -1645,7 +1818,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "MT Token"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1657,7 +1830,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocent?To: alice.near?Amount: 0.001 SOL"
+            "innocent%0ATo: alice.near%0AAmount: 0.001 SOL"
         );
     }
 
@@ -1674,7 +1847,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Amount"),
-            "1 (unresolved nep245:mt.near:x?To: attacker.near?Amount: 1000 USDC)"
+            "1 (unresolved nep245:mt.near:x%0ATo: attacker.near%0AAmount: 1000 USDC)"
         );
     }
 
@@ -1720,7 +1893,10 @@ mod tests {
         // The non-`diagnostics` build prefixes the rule onto the same string,
         // so assert on the message's own content rather than the whole field.
         let message = message_of(&field);
-        assert!(message.contains("innocent?To: attacker.near"), "{message}");
+        assert!(
+            message.contains("innocent%0ATo: attacker.near"),
+            "{message}"
+        );
     }
 
     /// The `extraction` rule quotes a `serde_json::Error`, which interpolates
@@ -1732,7 +1908,7 @@ mod tests {
             r#"{"standard":"raw_ed25519","payload":"{\"signer_id\":\"alice.near\",\"verifying_contract\":\"intents.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"nonce\":\"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=\",\"intents\":[{\"intent\":\"innocent\\nTo: attacker.near\"}]}","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN","signature":"ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"}"#,
         )
         .expect("multi payload json");
-        let fields = section(1, 1, &mp, &empty_reg(), NearNetwork::Mainnet).expect("render");
+        let fields = section(1, 1, &mp, &empty_reg(), SettlementNetwork::Mainnet).expect("render");
         let extraction = fields
             .iter()
             .find(|f| super::super::test_support::is_warning_diagnostic(f, "extraction"))
@@ -1775,7 +1951,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         assert_eq!(intent_lines(&fields), ["Transfer"]);
@@ -1786,7 +1962,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER},{AN_ADD_KEY}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         assert_eq!(
@@ -1802,7 +1978,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER},{AN_ADD_KEY}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
@@ -1891,8 +2067,14 @@ mod tests {
     /// burn a user can be tricked into signing.
     #[test]
     fn an_empty_intent_list_warns_that_it_only_burns_the_nonce() {
-        let fields =
-            render_single(&payload_with("[]"), &empty_reg(), NearNetwork::Mainnet).expect("render");
+        let fields = render_single(
+            &payload_with("[]"),
+            &empty_reg(),
+            SettlementNetwork::Mainnet,
+        )
+        .expect("render");
+        assert_eq!(text_at(&fields, "Intent"), CANCEL_LABEL);
+        assert_eq!(title_for_intents(&[]), CANCEL_LABEL);
         assert!(
             fields
                 .iter()
@@ -1910,8 +2092,12 @@ mod tests {
             r#"[{}]"#,
             r#"{"intent":"transfer","receiver_id":"alice.near","tokens":{"nep141:wrap.near":"1"}}"#
         );
-        let fields = render_single(&payload_with(&intents), &empty_reg(), NearNetwork::Mainnet)
-            .expect("render");
+        let fields = render_single(
+            &payload_with(&intents),
+            &empty_reg(),
+            SettlementNetwork::Mainnet,
+        )
+        .expect("render");
         assert!(
             fields
                 .iter()
@@ -1925,7 +2111,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         assert!(
