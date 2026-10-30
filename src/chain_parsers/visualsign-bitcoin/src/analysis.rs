@@ -31,6 +31,8 @@ pub enum BitcoinParserError {
     FailedToDecodeTransaction(String),
     #[error("Malformed PSBT: {0}")]
     Malformed(String),
+    #[error("Invalid wallet metadata: {0}")]
+    Metadata(String),
 }
 
 /// How an input amount is known.
