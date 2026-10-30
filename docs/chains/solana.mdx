@@ -73,6 +73,23 @@ The parser recognizes common Solana programs:
 - **SPL Token Transfer** - Transfer of SPL tokens, often including ATA creation if needed
 - **Complex DeFi Transaction** - Multiple instructions working together (e.g., create account, transfer tokens, interact with DEX)
 
+## Off-chain messages
+
+Besides transactions, the parser renders a message a wallet is asked to sign with `signMessage`. The caller passes a JSON envelope in place of the encoded transaction:
+
+```json
+{"message": "Sign in to app.example.com\nNonce: 42", "signerAddress": "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT"}
+```
+
+- The envelope is recognized by its leading `{`, which neither base64 nor hex can produce. It must have exactly the two fields: an unknown or repeated field is refused, and so is a missing `signerAddress`.
+- `signerAddress` must be a well-formed Solana address (base58, 32 bytes). That is a format check only: the parser has no signing key to compare it with.
+- The envelope is at most 64 KiB.
+- The result has `payload_type` `SolanaMessage` and title `Solana Message`, with two fields: `Message` (text, escaped as below) and `Signing Address` (an address field).
+- The message text is escaped, never filtered: printable ASCII passes through, and every other byte, plus `%` and `\`, is shown as `%XX` (`%0A` for a line feed, `%E2%80%AE` for a right-to-left override). A space that is first, last or next to another space is shown as `%20`.
+- Some messages are refused because a signature over their bytes means more than "signed this text": a message of exactly 32 bytes that is not all ASCII letters and digits (it may be the SHA-256 prehash a NEP-413, SEP-53 or TON Connect verifier checks), and a message whose bytes are a serialized Solana transaction message.
+
+This path does not parse the Solana off-chain message standard (the `\xffsolana offchain` signing domain). A JSON string decodes to UTF-8, and `0xff` never occurs in UTF-8, so a message framed that way cannot arrive here. What a wallet must do with the result is in [Solana for Wallets](/wallet-integration/chains/solana).
+
 ## Resources
 
 - [Solana Documentation](https://docs.solana.com/)
