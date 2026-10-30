@@ -179,11 +179,6 @@ pub(crate) fn resolve(
     resolve(&mt_underlying_nep141(asset_id)?, registry)
 }
 
-/// Format `units / 10^decimals` as an exact decimal string, trailing zeros
-/// trimmed (e.g. `1_500_000` @ 6 -> `"1.5"`, `0` -> `"0"`).
-///
-/// `decimals` must be within [`MAX_DECIMALS`]; [`resolve`] is the only source
-/// of registry-supplied values and refuses anything larger.
 /// Gas as Tgas (10^12 gas units) with trailing-zero trim. The one formatter
 /// for the unit: the NEAR transaction path renders gas through it too.
 #[must_use]
@@ -191,6 +186,11 @@ pub fn format_tgas(gas: u64) -> String {
     format_units(u128::from(gas), 12)
 }
 
+/// Format `units / 10^decimals` as an exact decimal string, trailing zeros
+/// trimmed (e.g. `1_500_000` @ 6 -> `"1.5"`, `0` -> `"0"`).
+///
+/// `decimals` must be within [`MAX_DECIMALS`]; [`resolve`] is the only source
+/// of registry-supplied values and refuses anything larger.
 pub(crate) fn format_units(units: u128, decimals: u8) -> String {
     let scale = 10u128.pow(u32::from(decimals));
     let whole = units / scale;
