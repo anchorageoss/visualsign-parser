@@ -92,6 +92,7 @@ pub fn decode_args(
 /// JSON string, so a value that deserializes can still fail to be a number, and
 /// a label derived from a weaker check than the fields would let the title claim
 /// an unwrap the body never rendered.
+///
 /// Digits only, as NEP-141's U128 string is: `str::parse::<u128>` alone also
 /// takes a leading `+`.
 fn withdraw_amount(args: &[u8]) -> Option<u128> {
