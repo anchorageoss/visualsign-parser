@@ -1,0 +1,95 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Perp Deploy (HIP-3)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Perp Deploy (HIP-3)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Set Oracle Prices",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Set Oracle Prices"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc",
+      "Label": "DEX",
+      "TextV2": {
+        "Text": "abc"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc:QRS: 3.3, abc:XYZ: 12.6",
+      "Label": "Oracle Prices",
+      "TextV2": {
+        "Text": "abc:QRS: 3.3, abc:XYZ: 12.6"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc:QRS: 3.29, abc:XYZ: 12.55",
+      "Label": "Mark Prices 1",
+      "TextV2": {
+        "Text": "abc:QRS: 3.29, abc:XYZ: 12.55"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc:QRS: 3.31, abc:XYZ: 12.61",
+      "Label": "External Perp Prices",
+      "TextV2": {
+        "Text": "abc:QRS: 3.31, abc:XYZ: 12.61"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xf65d66ad8ba0898770546f3ab680adb7d08654fdfe1ac4a166a2ffe301c097a4 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xf65d66ad8ba0898770546f3ab680adb7d08654fdfe1ac4a166a2ffe301c097a4 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Perp Deploy (HIP-3)",
+  "Version": "0"
+}

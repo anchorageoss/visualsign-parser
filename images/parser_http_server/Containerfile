@@ -15,7 +15,8 @@ ENV VERSION=$VERSION
 # --build-arg CHAIN_FEATURES="<space-separated subset>". CARGOFLAGS above
 # passes --no-default-features, so chains not listed here are NOT linked into
 # the binary, shrinking both the image and the attestation surface. Default
-# mirrors parser_http_server/Cargo.toml's `default` feature set.
+# mirrors parser_http_server/Cargo.toml's `default` feature set. Opt-in chains
+# that are not in `default` (currently: hyperliquid) must be added here explicitly.
 ARG CHAIN_FEATURES="bitcoin ethereum near solana sui tron unspecified"
 ENV CHAIN_FEATURES=$CHAIN_FEATURES
 

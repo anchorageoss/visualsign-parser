@@ -1,0 +1,155 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Place Order",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Place Order"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "na",
+      "Label": "Grouping",
+      "TextV2": {
+        "Text": "na"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Sell 1.25 of perp #1 at 4000.5, Trigger stop-loss at 3900 (market), reduce-only",
+      "Label": "Order 1",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "perp #1",
+              "Label": "Asset",
+              "TextV2": {
+                "Text": "perp #1"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Sell",
+              "Label": "Side",
+              "TextV2": {
+                "Text": "Sell"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "4000.5",
+              "Label": "Limit Price",
+              "TextV2": {
+                "Text": "4000.5"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "1.25",
+              "Label": "Size",
+              "TextV2": {
+                "Text": "1.25"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Trigger stop-loss at 3900 (market)",
+              "Label": "Order Type",
+              "TextV2": {
+                "Text": "Trigger stop-loss at 3900 (market)"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Yes",
+              "Label": "Reduce Only",
+              "TextV2": {
+                "Text": "Yes"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0x00000000000000000000000000000007",
+              "Label": "Client Order ID",
+              "TextV2": {
+                "Text": "0x00000000000000000000000000000007"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "Sell 1.25 of perp #1 at 4000.5, Trigger stop-loss at 3900 (market), reduce-only"
+        },
+        "Title": {
+          "Text": "Order 1"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x8c967e73e7b15087c42a10d344cff4c96d877f1d"
+      },
+      "FallbackText": "0x8c967e73e7b15087c42a10d344cff4c96d877f1d",
+      "Label": "Builder",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "10 (tenths of a basis point)",
+      "Label": "Builder Fee",
+      "TextV2": {
+        "Text": "10 (tenths of a basis point)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xf37a96ff3b3040a656a7ec6cb3eb0322185d55048d4b6029acb91217a095f1c3 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xf37a96ff3b3040a656a7ec6cb3eb0322185d55048d4b6029acb91217a095f1c3 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Place Order",
+  "Version": "0"
+}

@@ -12,6 +12,8 @@ publish = false
 default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified"]
 bitcoin = ["parser_app/bitcoin"]
 ethereum = ["parser_app/ethereum"]
+# Opt-in, not in `default` (see parser_app/Cargo.toml).
+hyperliquid = ["parser_app/hyperliquid"]
 near = ["parser_app/near"]
 solana = ["parser_app/solana"]
 sui = ["parser_app/sui"]

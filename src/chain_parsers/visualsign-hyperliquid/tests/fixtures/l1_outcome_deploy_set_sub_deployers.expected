@@ -1,0 +1,79 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Outcome Deploy (HIP-4)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Outcome Deploy (HIP-4)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "ab",
+      "Label": "Venue",
+      "TextV2": {
+        "Text": "ab"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Set Sub-deployers",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Set Sub-deployers"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Grant settleOutcome for 0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c",
+      "Label": "Sub-deployer 1",
+      "TextV2": {
+        "Text": "Grant settleOutcome for 0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x5ba3237aec1f0ff5972202e8a8d66fd95b9e8123c94fec4de987ca730654329f (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x5ba3237aec1f0ff5972202e8a8d66fd95b9e8123c94fec4de987ca730654329f (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Outcome Deploy (HIP-4)",
+  "Version": "0"
+}

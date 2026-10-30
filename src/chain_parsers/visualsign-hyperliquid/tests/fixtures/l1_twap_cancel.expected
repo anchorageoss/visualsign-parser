@@ -1,0 +1,71 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Cancel TWAP Order",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Cancel TWAP Order"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "perp #0",
+      "Label": "Asset",
+      "TextV2": {
+        "Text": "perp #0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1234",
+      "Label": "TWAP ID",
+      "TextV2": {
+        "Text": "1234"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x31ce6ab0086ebc8e0e1834058dcc8448c22715f6f4c7eb848bac4ade6ac0e55f (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x31ce6ab0086ebc8e0e1834058dcc8448c22715f6f4c7eb848bac4ade6ac0e55f (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Cancel TWAP Order",
+  "Version": "0"
+}

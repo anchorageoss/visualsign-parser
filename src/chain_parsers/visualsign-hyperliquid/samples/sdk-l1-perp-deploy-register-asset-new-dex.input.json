@@ -1,0 +1,68 @@
+{
+  "kind": "l1",
+  "typedData": {
+    "domain": {
+      "chainId": 1337,
+      "name": "Exchange",
+      "verifyingContract": "0x0000000000000000000000000000000000000000",
+      "version": "1"
+    },
+    "types": {
+      "Agent": [
+        {
+          "name": "source",
+          "type": "string"
+        },
+        {
+          "name": "connectionId",
+          "type": "bytes32"
+        }
+      ],
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ]
+    },
+    "primaryType": "Agent",
+    "message": {
+      "source": "a",
+      "connectionId": "0x3e71a731187a7b0a1e8a9b6ec01802d3fc368097d2f9537979348bc243fa4c88"
+    }
+  },
+  "action": {
+    "type": "perpDeploy",
+    "registerAsset": {
+      "maxGas": null,
+      "assetRequest": {
+        "coin": "abc:XYZ",
+        "szDecimals": 3,
+        "oraclePx": "12.5",
+        "marginTableId": 1,
+        "onlyIsolated": false
+      },
+      "dex": "abc",
+      "schema": {
+        "fullName": "ABC dex",
+        "collateralToken": 0,
+        "oracleUpdater": null
+      }
+    }
+  },
+  "nonce": 1761480000000,
+  "vaultAddress": null,
+  "expiresAfter": null
+}

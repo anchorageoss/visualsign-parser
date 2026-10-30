@@ -1,0 +1,63 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Cancel Order",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Cancel Order"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "order 123456789 on perp #0",
+      "Label": "Cancel 1",
+      "TextV2": {
+        "Text": "order 123456789 on perp #0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x1719884eb866cb12b2287399b15f7db5e7d775ea"
+      },
+      "FallbackText": "0x1719884eb866cb12b2287399b15f7db5e7d775ea",
+      "Label": "Acting For (Vault / Subaccount)",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 13:00:00 UTC (1761483600000)",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "2025-10-26 13:00:00 UTC (1761483600000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x3bb5ea6ef721a84a87f78cdbb2f87d8cd72f4b66e539b485252a9fc1c9644c17 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x3bb5ea6ef721a84a87f78cdbb2f87d8cd72f4b66e539b485252a9fc1c9644c17 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Cancel Order",
+  "Version": "0"
+}

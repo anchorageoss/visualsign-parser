@@ -106,6 +106,7 @@
               "chains/sui",
               "chains/tron",
               "chains/bitcoin",
+              "chains/hyperliquid",
               "chains/near"
             ]
           },

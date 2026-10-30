@@ -1,0 +1,67 @@
+{
+  "kind": "l1",
+  "typedData": {
+    "domain": {
+      "name": "Exchange",
+      "version": "1",
+      "chainId": 1337,
+      "verifyingContract": "0x0000000000000000000000000000000000000000"
+    },
+    "message": {
+      "source": "b",
+      "connectionId": "0xdc35b8a7e49b2bd04cabf9fb87c4a733768459cc7c8087de19411a2055b0a168"
+    },
+    "primaryType": "Agent",
+    "types": {
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ],
+      "Agent": [
+        {
+          "name": "source",
+          "type": "string"
+        },
+        {
+          "name": "connectionId",
+          "type": "bytes32"
+        }
+      ]
+    }
+  },
+  "action": {
+    "type": "order",
+    "orders": [
+      {
+        "a": 3,
+        "b": true,
+        "p": "40200",
+        "s": "3",
+        "r": false,
+        "t": {
+          "limit": {
+            "tif": "Gtc"
+          }
+        }
+      }
+    ],
+    "grouping": "na"
+  },
+  "nonce": 1793023808821,
+  "vaultAddress": null,
+  "expiresAfter": null
+}

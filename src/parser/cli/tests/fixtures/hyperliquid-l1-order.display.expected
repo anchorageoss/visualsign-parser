@@ -1,0 +1,131 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Place Order",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Place Order"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "na",
+      "Label": "Grouping",
+      "TextV2": {
+        "Text": "na"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Buy 0.0003 of perp #3 at 40200, Limit (Gtc)",
+      "Label": "Order 1",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "perp #3",
+              "Label": "Asset",
+              "TextV2": {
+                "Text": "perp #3"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Buy",
+              "Label": "Side",
+              "TextV2": {
+                "Text": "Buy"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "40200",
+              "Label": "Limit Price",
+              "TextV2": {
+                "Text": "40200"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0.0003",
+              "Label": "Size",
+              "TextV2": {
+                "Text": "0.0003"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Limit (Gtc)",
+              "Label": "Order Type",
+              "TextV2": {
+                "Text": "Limit (Gtc)"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "No",
+              "Label": "Reduce Only",
+              "TextV2": {
+                "Text": "No"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "Buy 0.0003 of perp #3 at 40200, Limit (Gtc)"
+        },
+        "Title": {
+          "Text": "Order 1"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2026-10-26 14:10:08 UTC (1793023808821)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2026-10-26 14:10:08 UTC (1793023808821)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xdc35b8a7e49b2bd04cabf9fb87c4a733768459cc7c8087de19411a2055b0a168 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xdc35b8a7e49b2bd04cabf9fb87c4a733768459cc7c8087de19411a2055b0a168 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Place Order",
+  "Version": "0"
+}

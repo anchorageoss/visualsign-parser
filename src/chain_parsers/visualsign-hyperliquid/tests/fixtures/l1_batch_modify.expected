@@ -1,0 +1,215 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Modify Orders",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Modify Orders"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "77 -> Buy 0.002 of perp #0 at 98000, Limit (Gtc)",
+      "Label": "Modify 1",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "77",
+              "Label": "Order to Modify",
+              "TextV2": {
+                "Text": "77"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "perp #0",
+              "Label": "Asset",
+              "TextV2": {
+                "Text": "perp #0"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Buy",
+              "Label": "Side",
+              "TextV2": {
+                "Text": "Buy"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "98000",
+              "Label": "Limit Price",
+              "TextV2": {
+                "Text": "98000"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0.002",
+              "Label": "Size",
+              "TextV2": {
+                "Text": "0.002"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Limit (Gtc)",
+              "Label": "Order Type",
+              "TextV2": {
+                "Text": "Limit (Gtc)"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "No",
+              "Label": "Reduce Only",
+              "TextV2": {
+                "Text": "No"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "77 -> Buy 0.002 of perp #0 at 98000, Limit (Gtc)"
+        },
+        "Title": {
+          "Text": "Modify 1"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "client id 0x00000000000000000000000000000009 -> Sell 3 of perp #1 at 4100, Limit (Alo)",
+      "Label": "Modify 2",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "client id 0x00000000000000000000000000000009",
+              "Label": "Order to Modify",
+              "TextV2": {
+                "Text": "client id 0x00000000000000000000000000000009"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "perp #1",
+              "Label": "Asset",
+              "TextV2": {
+                "Text": "perp #1"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Sell",
+              "Label": "Side",
+              "TextV2": {
+                "Text": "Sell"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "4100",
+              "Label": "Limit Price",
+              "TextV2": {
+                "Text": "4100"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "3",
+              "Label": "Size",
+              "TextV2": {
+                "Text": "3"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Limit (Alo)",
+              "Label": "Order Type",
+              "TextV2": {
+                "Text": "Limit (Alo)"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "No",
+              "Label": "Reduce Only",
+              "TextV2": {
+                "Text": "No"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0x00000000000000000000000000000009",
+              "Label": "Client Order ID",
+              "TextV2": {
+                "Text": "0x00000000000000000000000000000009"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "client id 0x00000000000000000000000000000009 -> Sell 3 of perp #1 at 4100, Limit (Alo)"
+        },
+        "Title": {
+          "Text": "Modify 2"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x01e17112654af6a1a61c15681a945fe3a9bce93f99bc815e210e186df8c4f227 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x01e17112654af6a1a61c15681a945fe3a9bce93f99bc815e210e186df8c4f227 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Modify Orders",
+  "Version": "0"
+}

@@ -1,0 +1,58 @@
+{
+  "kind": "userSigned",
+  "typedData": {
+    "domain": {
+      "name": "HyperliquidSignTransaction",
+      "version": "1",
+      "chainId": 421614,
+      "verifyingContract": "0x0000000000000000000000000000000000000000"
+    },
+    "types": {
+      "HyperliquidTransaction:ApproveAgent": [
+        {
+          "name": "hyperliquidChain",
+          "type": "string"
+        },
+        {
+          "name": "agentAddress",
+          "type": "address"
+        },
+        {
+          "name": "agentName",
+          "type": "string"
+        },
+        {
+          "name": "nonce",
+          "type": "uint64"
+        }
+      ],
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ]
+    },
+    "primaryType": "HyperliquidTransaction:ApproveAgent",
+    "message": {
+      "type": "approveAgent",
+      "agentAddress": "0x1563915e194D8CfBA1943570603F7606A3115508",
+      "agentName": "",
+      "nonce": 1761480000000,
+      "signatureChainId": "0x66eee",
+      "hyperliquidChain": "Mainnet"
+    }
+  }
+}

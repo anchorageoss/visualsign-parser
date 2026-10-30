@@ -13,6 +13,7 @@ VisualSign transforms opaque transaction data (hex strings, base64 blobs) into s
 - Sui
 - Tron
 - Bitcoin (PSBT, BIP-174)
+- Hyperliquid (L1 actions and user-signed actions; opt-in feature in parser_app)
 
 See the [Adding a New Chain](https://visualsign.dev/adding-new-chain) guide to add support for another blockchain. [Join the community on Telegram](https://t.me/+B03D2m1WlBBiYTdh) if you're interested in contributing.
 

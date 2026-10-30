@@ -1,0 +1,39 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Accept Hyperliquid Terms",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Accept Hyperliquid Terms"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2026-10-28 00:17:23 UTC (1793146643540)",
+      "Label": "Time",
+      "TextV2": {
+        "Text": "2026-10-28 00:17:23 UTC (1793146643540)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "1"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Accept Hyperliquid Terms",
+  "Version": "0"
+}

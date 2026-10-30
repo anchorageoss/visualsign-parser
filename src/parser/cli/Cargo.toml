@@ -6,12 +6,13 @@ rust-version.workspace = true
 publish = false
 
 [features]
-default = ["solana", "ethereum", "near", "tron", "bitcoin", "diagnostics"]
+default = ["solana", "ethereum", "near", "tron", "bitcoin", "hyperliquid", "diagnostics"]
 solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
 near = ["dep:visualsign-near", "visualsign-near/dev-signing"]
 tron = ["dep:visualsign-tron"]
 bitcoin = ["dep:visualsign-bitcoin"]
+hyperliquid = ["dep:visualsign-hyperliquid"]
 diagnostics = [
     "visualsign/diagnostics",
     "parser_cli_core/diagnostics",
@@ -26,6 +27,7 @@ parser_cli_core = { path = "../cli-core" }
 visualsign  = { workspace = true }
 visualsign-bitcoin  = { path = "../../chain_parsers/visualsign-bitcoin",  optional = true }
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
+visualsign-hyperliquid = { path = "../../chain_parsers/visualsign-hyperliquid", optional = true }
 visualsign-near     = { path = "../../chain_parsers/visualsign-near",     optional = true }
 visualsign-solana   = { path = "../../chain_parsers/visualsign-solana",   optional = true }
 visualsign-tron     = { path = "../../chain_parsers/visualsign-tron",     optional = true }

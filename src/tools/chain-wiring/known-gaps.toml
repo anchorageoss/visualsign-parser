@@ -16,7 +16,6 @@ cli-test-feature-list = "cli_test.rs's cfg_attr feature list doesn't name bitcoi
 cli-test-disabled-prefix = "cli_test.rs's disabled_chain_prefixes doesn't name bitcoin"
 cli-fixture = "no parser_cli end-to-end fixture for bitcoin"
 codeowners = "no CODEOWNERS line for visualsign-bitcoin"
-claude-md = "CLAUDE.md's crate list predates bitcoin"
 
 [ethereum]
 parser-app-registry-test = "the test exists but rustfmt splits convert_transaction( and &Chain::Ethereum across lines, which the line-based check can't see"
@@ -28,7 +27,6 @@ default-set-oss-scanner = ".oss-scanner/Dockerfile CHAIN_FEATURES lacks bitcoin,
 docs-chain-modules = "docs/chain-modules.mdx doesn't link chains/near"
 docs-introduction = "docs/introduction.mdx doesn't link chains/near"
 readme = "README's Supported Chains list doesn't name NEAR"
-claude-md = "CLAUDE.md's crate list predates near"
 
 [solana]
 parser-app-registry-test = "no parser_app registry test converts a Solana vector"

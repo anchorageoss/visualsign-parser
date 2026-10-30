@@ -14,6 +14,11 @@
       - any-glob-to-any-file:
           - 'src/chain_parsers/visualsign-bitcoin/**'
 
+"chain:hyperliquid":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-hyperliquid/**'
+
 "chain:tron":
   - changed-files:
       - any-glob-to-any-file:

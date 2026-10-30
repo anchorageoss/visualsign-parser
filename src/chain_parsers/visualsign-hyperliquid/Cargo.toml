@@ -1,0 +1,29 @@
+[package]
+name = "visualsign-hyperliquid"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[features]
+default = ["cli-plugin"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core"]
+
+# Runtime dependencies are pure Rust only (no cc/ring/aws-lc/*-sys), so the
+# crate builds for iOS. alloy-primitives supplies keccak256 via tiny-keccak.
+[dependencies]
+alloy-primitives = { version = "1.3.0", default-features = false, features = ["std"] }
+clap = { version = "4.0", features = ["derive"], optional = true }
+parser_cli_core = { path = "../../parser/cli-core", optional = true }
+rmp-serde = "1.3"
+serde = { workspace = true }
+# `raw_value` keeps the action's exact bytes; `preserve_order` is deliberately
+# not enabled, because feature unification would change other crates' maps.
+serde_json = { workspace = true, features = ["raw_value"] }
+serde-transcode = "1.1"
+visualsign = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+
+[lints]
+workspace = true

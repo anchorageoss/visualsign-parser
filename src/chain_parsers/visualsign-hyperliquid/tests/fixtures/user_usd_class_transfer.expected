@@ -1,0 +1,55 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Transfer USDC Between Spot and Perp",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Transfer USDC Between Spot and Perp"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "25.0",
+      "Label": "Amount",
+      "TextV2": {
+        "Text": "25.0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Yes",
+      "Label": "To Perp",
+      "TextV2": {
+        "Text": "Yes"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "421614",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "421614"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Transfer USDC Between Spot and Perp",
+  "Version": "0"
+}

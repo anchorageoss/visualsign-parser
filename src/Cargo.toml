@@ -17,6 +17,7 @@ members = [
   "visualsign",
   "chain_parsers/visualsign-bitcoin",
   "chain_parsers/visualsign-ethereum",
+  "chain_parsers/visualsign-hyperliquid",
   "chain_parsers/visualsign-near",
   "chain_parsers/visualsign-solana",
   "chain_parsers/visualsign-sui",

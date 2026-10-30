@@ -1,0 +1,63 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Approve API Wallet (Agent)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Approve API Wallet (Agent)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x60cdd13677de17c3978fac255eaa9b7f358236a5"
+      },
+      "FallbackText": "0x60cdd13677de17c3978fac255eaa9b7f358236a5",
+      "Label": "Agent Address",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "hl-e2e-exp valid_until 1793024108950",
+      "Label": "Agent Name",
+      "TextV2": {
+        "Text": "hl-e2e-exp valid_until 1793024108950"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2026-10-26 14:15:08 UTC (1793024108950)",
+      "Label": "Agent Expiry",
+      "TextV2": {
+        "Text": "2026-10-26 14:15:08 UTC (1793024108950)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2026-10-26 14:13:09 UTC (1793023989088)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2026-10-26 14:13:09 UTC (1793023989088)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "1"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Approve API Wallet (Agent)",
+  "Version": "0"
+}

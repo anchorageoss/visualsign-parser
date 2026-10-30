@@ -12,6 +12,7 @@ fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
     mapping.insert("polkadot", Chain::Polkadot);
     mapping.insert("tron", Chain::Tron);
     mapping.insert("near", Chain::Near);
+    mapping.insert("hyperliquid", Chain::Hyperliquid);
     mapping
 }
 
@@ -41,6 +42,7 @@ mod tests {
     fn parse_chain_maps_builtins() {
         assert_eq!(parse_chain("ethereum"), Chain::Ethereum);
         assert_eq!(parse_chain("solana"), Chain::Solana);
+        assert_eq!(parse_chain("hyperliquid"), Chain::Hyperliquid);
     }
 
     #[test]

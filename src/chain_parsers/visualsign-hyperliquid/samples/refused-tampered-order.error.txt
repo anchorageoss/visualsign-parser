@@ -1,0 +1,1 @@
+Error: Failed to parse transaction: Decode error: connectionId mismatch: the action, nonce, vaultAddress and expiresAfter hash to 0x009c481a2cc0ac9b092c5f51b2e5186320d4b058af2d00ef8bec8cc01a18a84a, but the typed data signs 0xdc35b8a7e49b2bd04cabf9fb87c4a733768459cc7c8087de19411a2055b0a168; refusing to display an action that is not the one signed

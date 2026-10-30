@@ -53,6 +53,10 @@ pub(crate) struct ChainArgs {
     #[cfg(feature = "bitcoin")]
     #[command(flatten)]
     pub(crate) bitcoin: visualsign_bitcoin::BitcoinArgs,
+
+    #[cfg(feature = "hyperliquid")]
+    #[command(flatten)]
+    pub(crate) hyperliquid: visualsign_hyperliquid::HyperliquidArgs,
 }
 
 impl ChainArgs {
@@ -79,6 +83,10 @@ impl ChainArgs {
         #[cfg(feature = "bitcoin")]
         plugins.push(Box::new(visualsign_bitcoin::BitcoinPlugin::new(
             self.bitcoin.clone(),
+        )));
+        #[cfg(feature = "hyperliquid")]
+        plugins.push(Box::new(visualsign_hyperliquid::HyperliquidPlugin::new(
+            self.hyperliquid.clone(),
         )));
         plugins
     }

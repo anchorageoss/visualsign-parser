@@ -1,0 +1,143 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Outcome Deploy (HIP-4)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Outcome Deploy (HIP-4)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "ab",
+      "Label": "Venue",
+      "TextV2": {
+        "Text": "ab"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Register Question",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Register Question"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc",
+      "Label": "Question Template",
+      "TextV2": {
+        "Text": "abc"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "expiry: 20260801-1830",
+      "Label": "Question Keywords",
+      "TextV2": {
+        "Text": "expiry: 20260801-1830"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1",
+      "Label": "Deployer Fee Scale",
+      "TextV2": {
+        "Text": "1"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc-outcome",
+      "Label": "Outcome 1 Template",
+      "TextV2": {
+        "Text": "abc-outcome"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "choice: A",
+      "Label": "Outcome 1 Keywords",
+      "TextV2": {
+        "Text": "choice: A"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc-outcome",
+      "Label": "Outcome 2 Template",
+      "TextV2": {
+        "Text": "abc-outcome"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "choice: B",
+      "Label": "Outcome 2 Keywords",
+      "TextV2": {
+        "Text": "choice: B"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc-other",
+      "Label": "Outcome 3 Template",
+      "TextV2": {
+        "Text": "abc-other"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "(none)",
+      "Label": "Outcome 3 Keywords",
+      "TextV2": {
+        "Text": "(none)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x711146246d13dd5538518fa496af4cf9f41ff86029ab399bb274eb995cbbaa63 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x711146246d13dd5538518fa496af4cf9f41ff86029ab399bb274eb995cbbaa63 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Outcome Deploy (HIP-4)",
+  "Version": "0"
+}

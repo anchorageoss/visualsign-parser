@@ -1,0 +1,91 @@
+{
+  "kind": "l1",
+  "typedData": {
+    "domain": {
+      "chainId": 1337,
+      "name": "Exchange",
+      "verifyingContract": "0x0000000000000000000000000000000000000000",
+      "version": "1"
+    },
+    "types": {
+      "Agent": [
+        {
+          "name": "source",
+          "type": "string"
+        },
+        {
+          "name": "connectionId",
+          "type": "bytes32"
+        }
+      ],
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ]
+    },
+    "primaryType": "Agent",
+    "message": {
+      "source": "b",
+      "connectionId": "0x711146246d13dd5538518fa496af4cf9f41ff86029ab399bb274eb995cbbaa63"
+    }
+  },
+  "action": {
+    "type": "outcomeDeploy",
+    "venue": "ab",
+    "operation": {
+      "registerQuestionFromTemplate": {
+        "questionTemplateInstance": {
+          "id": "abc",
+          "keywordToValue": [
+            [
+              "expiry",
+              "20260801-1830"
+            ]
+          ],
+          "deployerFeeScale": "1"
+        },
+        "namedOutcomeTemplateInstances": [
+          {
+            "id": "abc-outcome",
+            "keywordToValue": [
+              [
+                "choice",
+                "A"
+              ]
+            ]
+          },
+          {
+            "id": "abc-outcome",
+            "keywordToValue": [
+              [
+                "choice",
+                "B"
+              ]
+            ]
+          },
+          {
+            "id": "abc-other",
+            "keywordToValue": []
+          }
+        ]
+      }
+    }
+  },
+  "nonce": 1761480000000,
+  "vaultAddress": null,
+  "expiresAfter": null
+}

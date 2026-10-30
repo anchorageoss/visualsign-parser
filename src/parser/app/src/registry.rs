@@ -51,6 +51,11 @@ pub fn create_registry(
         visualsign::registry::Chain::Near,
         visualsign_near::NearVisualSignConverter::new(),
     );
+    #[cfg(feature = "hyperliquid")]
+    registry.register::<visualsign_hyperliquid::HyperliquidTransaction, _>(
+        visualsign::registry::Chain::Hyperliquid,
+        visualsign_hyperliquid::HyperliquidVisualSignConverter,
+    );
     #[cfg(feature = "unspecified")]
     registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
         visualsign::registry::Chain::Unspecified,
@@ -183,6 +188,46 @@ mod tests {
         assert!(
             rendered.contains(CUSTOM_FOO_SELECTOR),
             "dropping the ABI must leave the raw selector {CUSTOM_FOO_SELECTOR}, got: {rendered}"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "hyperliquid"))]
+mod hyperliquid_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use visualsign::registry::Chain;
+    use visualsign::vsptrait::VisualSignOptions;
+
+    /// A Hyperliquid `noop` L1 action as hyperliquid-python-sdk 0.24.0 signs it
+    /// (see visualsign-hyperliquid's tests/vectors).
+    const NOOP: &str = r#"{"kind":"l1","typedData":{"domain":{"chainId":1337,"name":"Exchange","verifyingContract":"0x0000000000000000000000000000000000000000","version":"1"},"types":{"Agent":[{"name":"source","type":"string"},{"name":"connectionId","type":"bytes32"}],"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"}]},"primaryType":"Agent","message":{"source":"a","connectionId":"0x8fcfbd0208ea356e800447d3f5bfb5a3dd6d63afc5d9b0e9dc70eae5a1f096d8"}},"action":{"type":"noop"},"nonce":1761480000000,"vaultAddress":null,"expiresAfter":null}"#;
+
+    fn registry() -> visualsign::registry::TransactionConverterRegistry {
+        super::create_registry(&crate::config::ParserConfig::new(
+            visualsign::signing::MetadataTrustPolicy::AcceptUnsigned,
+            crate::payment_verify::PaymentPolicy::Disabled,
+        ))
+    }
+
+    #[test]
+    fn create_registry_registers_hyperliquid() {
+        let rendered = registry()
+            .convert_transaction(&Chain::Hyperliquid, NOOP, VisualSignOptions::default())
+            .expect("the SDK-signed noop must convert")
+            .payload
+            .to_json()
+            .unwrap();
+        assert!(rendered.contains("No-op (Invalidate Nonce)"), "{rendered}");
+        assert!(rendered.contains("Mainnet"), "{rendered}");
+    }
+
+    #[test]
+    fn create_registry_hyperliquid_refuses_a_tampered_nonce() {
+        let tampered = NOOP.replace("1761480000000", "1761480000001");
+        assert!(
+            registry()
+                .convert_transaction(&Chain::Hyperliquid, &tampered, VisualSignOptions::default())
+                .is_err()
         );
     }
 }

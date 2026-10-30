@@ -1,0 +1,63 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Send Spot Token",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Send Spot Token"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x5e9ee1089755c3435139848e47e6635505d5a13a",
+      "Label": "Destination",
+      "TextV2": {
+        "Text": "0x5e9ee1089755c3435139848e47e6635505d5a13a"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "PURR:0xc4bf3f870c0e9465323c0b6ed28096c2",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "PURR:0xc4bf3f870c0e9465323c0b6ed28096c2"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "10.0",
+      "Label": "Amount",
+      "TextV2": {
+        "Text": "10.0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Time",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "421614",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "421614"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Send Spot Token",
+  "Version": "0"
+}

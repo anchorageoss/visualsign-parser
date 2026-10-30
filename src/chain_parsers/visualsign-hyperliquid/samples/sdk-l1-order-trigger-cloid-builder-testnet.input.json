@@ -1,0 +1,74 @@
+{
+  "kind": "l1",
+  "typedData": {
+    "domain": {
+      "chainId": 1337,
+      "name": "Exchange",
+      "verifyingContract": "0x0000000000000000000000000000000000000000",
+      "version": "1"
+    },
+    "types": {
+      "Agent": [
+        {
+          "name": "source",
+          "type": "string"
+        },
+        {
+          "name": "connectionId",
+          "type": "bytes32"
+        }
+      ],
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ]
+    },
+    "primaryType": "Agent",
+    "message": {
+      "source": "b",
+      "connectionId": "0xf37a96ff3b3040a656a7ec6cb3eb0322185d55048d4b6029acb91217a095f1c3"
+    }
+  },
+  "action": {
+    "type": "order",
+    "orders": [
+      {
+        "a": 1,
+        "b": false,
+        "p": "4000.5",
+        "s": "1.25",
+        "r": true,
+        "t": {
+          "trigger": {
+            "isMarket": true,
+            "triggerPx": "3900",
+            "tpsl": "sl"
+          }
+        },
+        "c": "0x00000000000000000000000000000007"
+      }
+    ],
+    "grouping": "na",
+    "builder": {
+      "b": "0x8c967e73e7b15087c42a10d344cff4c96d877f1d",
+      "f": 10
+    }
+  },
+  "nonce": 1761480000000,
+  "vaultAddress": null,
+  "expiresAfter": null
+}

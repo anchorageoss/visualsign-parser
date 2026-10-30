@@ -24,7 +24,7 @@ PARSER_APP_CHAINS := $(sort $(patsubst visualsign-%,%,$(notdir $(wildcard chain_
 # derived from chain_parsers/* -- parser_cli only wires up chains that have a
 # ChainPlugin registered (see parser/cli/src/), which sui and unspecified
 # don't yet, so a subset is the actual rule and a literal list says so.
-PARSER_CLI_CHAINS := bitcoin ethereum near solana tron
+PARSER_CLI_CHAINS := bitcoin ethereum hyperliquid near solana tron
 
 .PHONY: all
 all: generated
@@ -49,6 +49,9 @@ test: build
 	@# diagnostics OFF: production payload shape (parser_app, integration, others).
 	cargo test --no-fail-fast --workspace --exclude parser_cli --all-targets
 	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
+	@# hyperliquid is opt-in for parser_app (not in `default`), so its registry
+	@# wiring is only compiled, and tested, with the feature named explicitly.
+	cargo test --no-fail-fast -p parser_app --features hyperliquid --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test --no-fail-fast -p parser_cli --all-targets
 	cargo test --no-fail-fast -p visualsign --features diagnostics --lib
@@ -103,6 +106,7 @@ lint: fmt-check
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
 	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
+	cargo clippy -p parser_app --features hyperliquid --all-targets -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
 
 .PHONY: narrow-build-check

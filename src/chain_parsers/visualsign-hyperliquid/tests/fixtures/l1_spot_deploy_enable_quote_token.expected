@@ -1,0 +1,71 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Spot Deploy (HIP-1/HIP-2)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Spot Deploy (HIP-1/HIP-2)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Enable Quote Token",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Enable Quote Token"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "#1234",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "#1234"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xc3f0bf2bf19ca182f19afee514eee06bbbf9710bc792ef242e4b109d94ad1f10 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xc3f0bf2bf19ca182f19afee514eee06bbbf9710bc792ef242e4b109d94ad1f10 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Spot Deploy (HIP-1/HIP-2)",
+  "Version": "0"
+}

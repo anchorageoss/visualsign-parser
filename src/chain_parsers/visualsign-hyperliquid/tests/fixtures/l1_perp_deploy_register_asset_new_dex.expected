@@ -1,0 +1,151 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Perp Deploy (HIP-3)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Perp Deploy (HIP-3)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Register Asset",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Register Asset"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc",
+      "Label": "DEX",
+      "TextV2": {
+        "Text": "abc"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc:XYZ",
+      "Label": "Coin",
+      "TextV2": {
+        "Text": "abc:XYZ"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "3",
+      "Label": "Size Decimals",
+      "TextV2": {
+        "Text": "3"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "12.5",
+      "Label": "Oracle Price",
+      "TextV2": {
+        "Text": "12.5"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1",
+      "Label": "Margin Table",
+      "TextV2": {
+        "Text": "1"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "No",
+      "Label": "Isolated Only",
+      "TextV2": {
+        "Text": "No"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "current auction price",
+      "Label": "Max Gas",
+      "TextV2": {
+        "Text": "current auction price"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Yes",
+      "Label": "New DEX",
+      "TextV2": {
+        "Text": "Yes"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "ABC dex",
+      "Label": "DEX Full Name",
+      "TextV2": {
+        "Text": "ABC dex"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "#0",
+      "Label": "Collateral Token",
+      "TextV2": {
+        "Text": "#0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "deployer",
+      "Label": "Oracle Updater",
+      "TextV2": {
+        "Text": "deployer"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x3e71a731187a7b0a1e8a9b6ec01802d3fc368097d2f9537979348bc243fa4c88 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x3e71a731187a7b0a1e8a9b6ec01802d3fc368097d2f9537979348bc243fa4c88 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Perp Deploy (HIP-3)",
+  "Version": "0"
+}

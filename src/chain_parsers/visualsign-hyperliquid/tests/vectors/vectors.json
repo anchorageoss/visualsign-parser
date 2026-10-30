@@ -1,0 +1,533 @@
+{
+ "provenance": {
+  "generator": "tests/vectors/generate.py",
+  "hyperliquidPythonSdk": "0.24.0",
+  "msgpack": [
+   1,
+   2,
+   4
+  ]
+ },
+ "vectors": [
+  {
+   "name": "l1_order_limit_mainnet",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x2add22056b7eec4cd6b44a4b232f2c7264eebfd1730f185485ff1a1c576601df\"}},\"action\":{\"type\":\"order\",\"orders\":[{\"a\":0,\"b\":true,\"p\":\"100000\",\"s\":\"0.001\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xfad8ec455111ae09f79df655468cea45cc9c5a8e7a28c898308f6e239b839cc7",
+    "s": "0x5eeb25a838b3cab05486e3d53395e02b0d6eff36e5f9a47889987722fa410e69",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_order_trigger_cloid_builder_testnet",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0xf37a96ff3b3040a656a7ec6cb3eb0322185d55048d4b6029acb91217a095f1c3\"}},\"action\":{\"type\":\"order\",\"orders\":[{\"a\":1,\"b\":false,\"p\":\"4000.5\",\"s\":\"1.25\",\"r\":true,\"t\":{\"trigger\":{\"isMarket\":true,\"triggerPx\":\"3900\",\"tpsl\":\"sl\"}},\"c\":\"0x00000000000000000000000000000007\"}],\"grouping\":\"na\",\"builder\":{\"b\":\"0x8c967e73e7b15087c42a10d344cff4c96d877f1d\",\"f\":10}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xc286e0f85d22e4c0cf878d30a744df1fa57b1b488c59813886afae207ed972d3",
+    "s": "0x6ca160f7e17d3611b0af83b1cd7a7f8323d32017cda658ec4dbdc52c4bd7e66d",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_order_bulk_spot_and_perp",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x7fa3939bb2fb59e11db9e7eae3e57f323aed3f49da5c73aa86c045acdec8e45f\"}},\"action\":{\"type\":\"order\",\"orders\":[{\"a\":10000,\"b\":true,\"p\":\"0.2\",\"s\":\"100\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Alo\"}}},{\"a\":0,\"b\":false,\"p\":\"120000\",\"s\":\"0.5\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Ioc\"}}}],\"grouping\":\"normalTpsl\"},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x20e7a68d1fc7ed238a6ac80e922f87b1e49b6972091f429f0efe998459206d1c",
+    "s": "0x5accce09a12d0bb646506d0b52f36c97d479e5b1426f77e7743f14cf2a665713",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_order_vault",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x1af296f4176f46a9f3559e55a0a3bbc24d343152217eebaaa3f63a35b7fee5c4\"}},\"action\":{\"type\":\"order\",\"orders\":[{\"a\":0,\"b\":true,\"p\":\"99000\",\"s\":\"0.01\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1761480000000,\"vaultAddress\":\"0x1719884eb866cb12b2287399b15f7db5e7d775ea\",\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x679e5d9a1c0d6ce43eceb9e0f2157f092a9e6b0306b9755cfdaa7a702898dd75",
+    "s": "0xb11713510443a1d870d66bd9a0c98654dab82aef5e361935ba0bb17bb90cf9e",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_order_expires_after",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xd76a58719f4e87a9dd13e1963227359acf3d8feeee7d55af17adccb4847402c5\"}},\"action\":{\"type\":\"order\",\"orders\":[{\"a\":0,\"b\":true,\"p\":\"99000\",\"s\":\"0.01\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\"},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":1761483600000}",
+   "signature": {
+    "r": "0x601dc04836c63a48a9b701cd5faaf2a5b948daff84c06526afe419bd4448786e",
+    "s": "0xb1cf4e6aae1f7aa0cf38299b3664fcc23ee033028d87938bc4ff54488728e08",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_cancel_vault_expires_after",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x3bb5ea6ef721a84a87f78cdbb2f87d8cd72f4b66e539b485252a9fc1c9644c17\"}},\"action\":{\"type\":\"cancel\",\"cancels\":[{\"a\":0,\"o\":123456789}]},\"nonce\":1761480000000,\"vaultAddress\":\"0x1719884eb866cb12b2287399b15f7db5e7d775ea\",\"expiresAfter\":1761483600000}",
+   "signature": {
+    "r": "0xa81d0447ddca6982c884769c672f63d8bb84331f53dda29b631e002404531c13",
+    "s": "0x74fedc8f3e42ac226e2fe5710dda40a9ba6f4abf47093af0fcbb398b032fee93",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_cancel",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xa308c3ea1c7f6cec671fd30b9f014e6c4a7667e3d7f1e22fd8d49d21c37c3433\"}},\"action\":{\"type\":\"cancel\",\"cancels\":[{\"a\":1,\"o\":42}]},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xeb2211f44b0705ed7d831736837cabd2c5642f2603de48b4353a93be1dca411a",
+    "s": "0x44d99f574c7d7846c96e2f0061d29472f12757104ee55e6d7f1aa6da558675eb",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_cancel_by_cloid",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xf131be8a884137af5cac0e9d2359a2aa4b2338a541efcc05f11f44ca6faee298\"}},\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[{\"asset\":0,\"cloid\":\"0x000000000000000000000000000000ff\"}]},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xfc7237493fd2153946f9008744a8236097ade75ad1be953fbddb53a529dbed",
+    "s": "0x36122bac0fbe68c9ed13d2a21aea331da883f1224cc96fcb307aada1520c059e",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_batch_modify",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x01e17112654af6a1a61c15681a945fe3a9bce93f99bc815e210e186df8c4f227\"}},\"action\":{\"type\":\"batchModify\",\"modifies\":[{\"oid\":77,\"order\":{\"a\":0,\"b\":true,\"p\":\"98000\",\"s\":\"0.002\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}},{\"oid\":\"0x00000000000000000000000000000009\",\"order\":{\"a\":1,\"b\":false,\"p\":\"4100\",\"s\":\"3\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Alo\"}},\"c\":\"0x00000000000000000000000000000009\"}}]},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x1150444913285920d9f48eb2a1d1e6636b2acc7dc3ef2d47052440753b187159",
+    "s": "0x4d9dd8240593558f61e990eb34f03488eb56312bea5e6895c5ce4172bbceaea2",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_schedule_cancel_time",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x19e900a2415d2eada431a6d02f3fe36a7fdb1e39226841346fe673fac1ea7b25\"}},\"action\":{\"type\":\"scheduleCancel\",\"time\":1761480060000},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x192017dcac1d6174bf0f8994210ab8a228da21d246218ead179aba18a62b800a",
+    "s": "0x5d3e1db12a8be0e98caf3c08b88fe70cdf319f9686a49bef2dbcd40f716fd6a8",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_schedule_cancel_unset",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x639f86379632bc2c846efe76a0171203c40b77c7b6869accee7cc6c5651a97f3\"}},\"action\":{\"type\":\"scheduleCancel\"},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xd39760361a1ddeb4add25a29925420f43b7c405c7949f9e3993597654e14081",
+    "s": "0x79f2a69b1ee1ffe00536d65ae51bb8ffe073a57171e19152d8727434df590154",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_update_leverage",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x17a4ecc17a9bfbaca6f5e2e4b53094589c033a325a7010283c2539bbe4609178\"}},\"action\":{\"type\":\"updateLeverage\",\"asset\":1,\"isCross\":false,\"leverage\":10},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xdc877987aa30c464786e5a39389f85d705e6c6ebc36fcbc54daa65dbee04784c",
+    "s": "0x2c4bcc75ca7d14b4f0d3ebf241be6ee5c1ee1e23a9a5a15d302dabac4209c84f",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_update_isolated_margin",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x390430b262cf93ddbfffce407eac6607a5543a4f16429178663a1717f509f408\"}},\"action\":{\"type\":\"updateIsolatedMargin\",\"asset\":0,\"isBuy\":true,\"ntli\":-12500000},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x2d303d2e9630c81d6fce94506543ee33dc34069624f315270b74c027a953da8c",
+    "s": "0x1e55b311ae9bb4070a0bedd0f2c7798a161548ba5d63c78e03fb0e4411add479",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_vault_transfer",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xd623a2c302beadf74c608406d7bb3d7c9db2fba9cc3910fedd59ce2bdd95c712\"}},\"action\":{\"type\":\"vaultTransfer\",\"vaultAddress\":\"0x1719884eb866cb12b2287399b15f7db5e7d775ea\",\"isDeposit\":true,\"usd\":5000000},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x18107efa693cd2f4274fbfa084f6aa95fe1f9eb2bd9decc6be0ab35d9c81b8bd",
+    "s": "0x5b2072f8c34287b6da955c4b839682e2c64c9d6ce68bcb30642ed9caabb56ad5",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_sub_account_transfer",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xe2076d74d285e876da920a03c19af2190781915d2a48381cdee1f6a4d89ca8eb\"}},\"action\":{\"type\":\"subAccountTransfer\",\"subAccountUser\":\"0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c\",\"isDeposit\":false,\"usd\":1000000},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x3576b41ecca3df8757357c4c97a71a78d3d4d90b32d8e4cad99ffeb8e955bb5c",
+    "s": "0x1e4bcce5efd96b1662a70598239062a223cc94d388465a78c6d1b1a5653f126e",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_noop",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x8fcfbd0208ea356e800447d3f5bfb5a3dd6d63afc5d9b0e9dc70eae5a1f096d8\"}},\"action\":{\"type\":\"noop\"},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xfb8bac41a51bb1f83e920b538f70bd2d01fdd3376087898a191b0a23dd53af41",
+    "s": "0x2ff8112b665b3d733e76d6ea07a3802a91ad032cbe321fd6faf69134b616dca",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_register_token2",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x62421a2b1d7ef747e8e0e337d44b1ea13a8aa21eae4ca74e0e3a2dc4f6482fb9\"}},\"action\":{\"type\":\"spotDeploy\",\"registerToken2\":{\"spec\":{\"name\":\"TEST\",\"szDecimals\":2,\"weiDecimals\":8},\"maxGas\":1000000000000,\"fullName\":\"Test Token\"}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xa4aa612410b71f1325b4080e5d5288d1481a72d5dbbbb476f33bfbd0b876acc1",
+    "s": "0x162005287fe5962a0aae6f4464cd4c368c94138bb5af16643af35d69b9a13961",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_user_genesis",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xc6749a7ed5a8c66a1b5445468366bfa8c55db7244465a302c5cb7a40c8e115d6\"}},\"action\":{\"type\":\"spotDeploy\",\"userGenesis\":{\"token\":1234,\"userAndWei\":[[\"0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c\",\"1000000\"],[\"0x5e9ee1089755c3435139848e47e6635505d5a13a\",\"250\"]],\"existingTokenAndWei\":[[0,\"5000\"]]}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xca9588349c1a0d482857d46255baf1a0de72e5cace85a9ecc18429fee1e43f0b",
+    "s": "0x34f6caa7ab498fb6dca08f0cfbc7fb5d44474b4f86bddb164b1f2a8eae687b3e",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_genesis",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x900e47aad82881a19e82e28d8cb96a67e3b42eff6fed3627ca285174f847627b\"}},\"action\":{\"type\":\"spotDeploy\",\"genesis\":{\"token\":1234,\"maxSupply\":\"1000250\",\"noHyperliquidity\":true}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xe8591ad60b59dbade680e9884c271b845bcd41916c54d9bcd2906671751b9777",
+    "s": "0x6d11ebb4e1bc9020d8f1976a909b7fb15ce3b741b688dc741198d2b8c6f07668",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_register_spot",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x2fa789d4347b84a34c4aae453a3b1dba5f4d6706514af53b5a8432ff51390023\"}},\"action\":{\"type\":\"spotDeploy\",\"registerSpot\":{\"tokens\":[1234,0]}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x2929f92e2d262b14a79ea5e0d9b3bad5bb80ccb0bb3e1d5a0fa6b8339a0121ff",
+    "s": "0x66f4323ab9feddcaacb6acee549448458d08cf10d2dedf824ad0f04d29ed7b3a",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_register_hyperliquidity",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x25a56543e08a3ec3beaffab48bfe91d6c82a0bb3eb3bdbdc8de1c5cc08e67023\"}},\"action\":{\"type\":\"spotDeploy\",\"registerHyperliquidity\":{\"spot\":321,\"startPx\":\"2.5\",\"orderSz\":\"100.0\",\"nOrders\":50,\"nSeededLevels\":5}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xab033b35f715218ad1512f92964f71f983a3b08137de3497c936bab2daf44bf",
+    "s": "0x7e99f4cdb34e2749ff32d57ec61ca4cd5d60cb7f6dbf221498bd3498b5cddd5f",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_set_fee_share",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x1a954bd883edbfccc0c7ba27f801342eaffa9574a6345903da0c8ceceecdc429\"}},\"action\":{\"type\":\"spotDeploy\",\"setDeployerTradingFeeShare\":{\"token\":1234,\"share\":\"50%\"}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x6f5bb543cf6a84017ba477d942b58c985d64c4bd9e251fc31c0895dca60729b8",
+    "s": "0x37cfef22c313776494b978894b0fad36b583c7870ab49540d8c07b7b4dc7ca0e",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_enable_freeze_privilege",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x8b07d15a56d5dc3c08b67edc602b225333a6518bc9c0a0ed159df72adeb5bad5\"}},\"action\":{\"type\":\"spotDeploy\",\"enableFreezePrivilege\":{\"token\":1234}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x7e99180eef4d4a275bc640521b993b20b00c66ead8e0c9a64b6b5105833ae302",
+    "s": "0x48a95feea9bd6d5e4ba3f31821e043087cbae19a23f61747fa8cc4a7672c83ab",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_freeze_user",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x0098e79d24fc0c000d9fc24d84e55b8436c6eb802cc87bcfbfc147f2ab7617c9\"}},\"action\":{\"type\":\"spotDeploy\",\"freezeUser\":{\"token\":1234,\"user\":\"0x5e9ee1089755c3435139848e47e6635505d5a13a\",\"freeze\":true}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xe7c8af0d149f8666e4476ae9966c96d153ed4b34365a1c408cd89ca1e3fe4f59",
+    "s": "0x7b7a6499c840ba2d692a4cdf91ffea5000e117114846bf53251959a274175787",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_revoke_freeze_privilege",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x48422310cb5a23f75d1dc9bd71107738941ed3262a53ce69f3148e747853b3f5\"}},\"action\":{\"type\":\"spotDeploy\",\"revokeFreezePrivilege\":{\"token\":1234}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xe43b94025d67c1194de5df074d7673f333a53e74ed647bd2e2f7cd555e9d42a9",
+    "s": "0x71af8c6e40dacb29bb5e33001286c393bf1126a3206f6dbd71f114c3f36d1e40",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_spot_deploy_enable_quote_token",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xc3f0bf2bf19ca182f19afee514eee06bbbf9710bc792ef242e4b109d94ad1f10\"}},\"action\":{\"type\":\"spotDeploy\",\"enableQuoteToken\":{\"token\":1234}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x392d96fde03fef45c0e415cde1c7d0d2ed7d78c445eb0acc318adeb4631f6464",
+    "s": "0x5c52e6573f0773f5e2059a71d24f3cf7de9ce3fb44fab98623a753650cfa6a75",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_perp_deploy_register_asset_new_dex",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x3e71a731187a7b0a1e8a9b6ec01802d3fc368097d2f9537979348bc243fa4c88\"}},\"action\":{\"type\":\"perpDeploy\",\"registerAsset\":{\"maxGas\":null,\"assetRequest\":{\"coin\":\"abc:XYZ\",\"szDecimals\":3,\"oraclePx\":\"12.5\",\"marginTableId\":1,\"onlyIsolated\":false},\"dex\":\"abc\",\"schema\":{\"fullName\":\"ABC dex\",\"collateralToken\":0,\"oracleUpdater\":null}}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x6d2c4571254739611df5d0a0a6208b65919b2ac03bce38f3cc96b564fc2883e1",
+    "s": "0x5be953fda9cf28d43fd762c1b6fcd94303e0f59fc28902864c1e719c2a046632",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_perp_deploy_register_asset_existing_dex",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x38344ba01945383794df9a146a48b869f928daf655d1ad2c1a2458852f6014a4\"}},\"action\":{\"type\":\"perpDeploy\",\"registerAsset\":{\"maxGas\":1000000,\"assetRequest\":{\"coin\":\"abc:QRS\",\"szDecimals\":2,\"oraclePx\":\"3.25\",\"marginTableId\":2,\"onlyIsolated\":true},\"dex\":\"abc\",\"schema\":null}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xfe96b219314c1d6a9bd12f306e0308a0ef25d20c518a43fc7b0a5b7e24fc2921",
+    "s": "0x262482451d7b244669899f4aed776e21cff7b6b11d653a5c1c3248e32f0e69c8",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_perp_deploy_set_oracle",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xf65d66ad8ba0898770546f3ab680adb7d08654fdfe1ac4a166a2ffe301c097a4\"}},\"action\":{\"type\":\"perpDeploy\",\"setOracle\":{\"dex\":\"abc\",\"oraclePxs\":[[\"abc:QRS\",\"3.3\"],[\"abc:XYZ\",\"12.6\"]],\"markPxs\":[[[\"abc:QRS\",\"3.29\"],[\"abc:XYZ\",\"12.55\"]]],\"externalPerpPxs\":[[\"abc:QRS\",\"3.31\"],[\"abc:XYZ\",\"12.61\"]]}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x469aaa7870775abeae9b78c293a87e822d4a086d04298afd2a43ea9e21ad6573",
+    "s": "0x3290660e3b8e06a34c1e512835a8d1e4183995ae42ba1a9fe0196b7da62b2c85",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_modify_single",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x894d9d8c202a3c0fcbf8004be15e3a20818b74d75140646fa9640d6c84c86eb9\"}},\"action\":{\"type\":\"modify\",\"oid\":77,\"order\":{\"a\":0,\"b\":true,\"p\":\"98500\",\"s\":\"0.002\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xaf394fbfc0c6c10ca5d85de0752406c11483b0595aa1e1324599e2a3b260c77",
+    "s": "0x63b69e42568dc6987cb07df1e220380ca2697dce197899cfc5579b06278e50a6",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_cancel_fast",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x42214b95f1f5d743c57d11a6df7571edc53efae168d77983f6ae9a1e876434f9\"}},\"action\":{\"type\":\"cancel\",\"cancels\":[{\"a\":1,\"o\":5}],\"f\":true},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x30e3bc5a7cfa07bf0510564f74d3d1a70c51d6fdaf24fd94c4e4ea35d10ddb37",
+    "s": "0x585f611d338d3b0082623826a9324d52a91fa05e3f4d53c7a1634a734a91b4d5",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_twap_order",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xcc4b1b7d663f72b721840bdea067f7c08416908457ba987a255638cc3213c86f\"}},\"action\":{\"type\":\"twapOrder\",\"twap\":{\"a\":0,\"b\":true,\"s\":\"0.5\",\"r\":false,\"m\":30,\"t\":true}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x323590c125476c5d3a9ec084e439f71cd7a6ba1d165af8aa3bf46c0b2d2f53c5",
+    "s": "0x4a35ca6aef06021210c9ef6bbfcbb8a39fa9f64bdcb03f9f434309822df4bf97",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_twap_cancel",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x31ce6ab0086ebc8e0e1834058dcc8448c22715f6f4c7eb848bac4ade6ac0e55f\"}},\"action\":{\"type\":\"twapCancel\",\"a\":0,\"t\":1234},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xfdca93625bb1b7e4937c3eec5c0497177b23b5e50f37dd4ecb509d0409ec2d9b",
+    "s": "0x5979de7dada63252a185c0b04003691ace72ed038ed3a8511bdb0e7c99170120",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_activate_outcome_deployer",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0xb1737525db19bc1b3b0f8a49db26f77a79cab467266237ca4262ad16427c8ad3\"}},\"action\":{\"type\":\"activateOutcomeDeployer\",\"activate\":{\"venueName\":\"ab\"}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x83ba69068f579e7c60af4b75dbeb3357be4ea77981e45c66ba896fa32d9cf37c",
+    "s": "0x40d84e13d5ca2d50820067ebdc76370871171970a3f92ec9d53d2d6066d5f757",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_deactivate_outcome_deployer",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0x4d930ae047124a0a52d04eb1e5e9dcad06e66ff8e615c56b563f7ae5e7535a46\"}},\"action\":{\"type\":\"activateOutcomeDeployer\",\"deactivate\":null},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x566caa6353f1d505640f3ed73bb4d3b39f480e32c84d8a7ca62fa1ba5029c8ee",
+    "s": "0x1c21784e467cdcd43dcd276d522ec975c3668e7400e36ab07e6cd78251704c57",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_outcome_deploy_register_standalone",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0xd3d9329e7050c184337797cc6832d77c1565b0eb6f278b2ebf9a98280d30ab4e\"}},\"action\":{\"type\":\"outcomeDeploy\",\"venue\":\"ab\",\"operation\":{\"registerStandaloneOutcomeFromTemplate\":{\"id\":\"abc\",\"keywordToValue\":[[\"expiry\",\"20260801-0600\"],[\"target\",\"100\"],[\"underlying\",\"ABC\"]],\"deployerFeeScale\":\"1\"}}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x87b4bdd5491e6326b9e55724c18b660c0025968557850887839af81a528d4134",
+    "s": "0x791694312e6251a71615d2fc30197dea086eb683eb268843d5157a88007a3c7c",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_outcome_deploy_register_question",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0x711146246d13dd5538518fa496af4cf9f41ff86029ab399bb274eb995cbbaa63\"}},\"action\":{\"type\":\"outcomeDeploy\",\"venue\":\"ab\",\"operation\":{\"registerQuestionFromTemplate\":{\"questionTemplateInstance\":{\"id\":\"abc\",\"keywordToValue\":[[\"expiry\",\"20260801-1830\"]],\"deployerFeeScale\":\"1\"},\"namedOutcomeTemplateInstances\":[{\"id\":\"abc-outcome\",\"keywordToValue\":[[\"choice\",\"A\"]]},{\"id\":\"abc-outcome\",\"keywordToValue\":[[\"choice\",\"B\"]]},{\"id\":\"abc-other\",\"keywordToValue\":[]}]}}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x728f0e0d1852dd401460073f9d298866af594c159b251abde7631dee136daece",
+    "s": "0x2e54d1a209d45aeea11c252c5be17724fac191f0b0cc8664969100506ee7747b",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_outcome_deploy_settle_outcome",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0x973a996acaeeb8170241c6d357e7c4ede4c202e058cbb9c2d95ce22554306e0b\"}},\"action\":{\"type\":\"outcomeDeploy\",\"venue\":\"ab\",\"operation\":{\"settleOutcome\":{\"outcome\":7,\"settleFraction\":\"1\",\"details\":\"\",\"nameAndDescription\":[\"template:abc\",\"expiry:20260801-0600|target:100|underlying:ABC\"],\"sideNames\":[\"template:Over\",\"template:Under\"]}}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x12040409514be5878f55561b1de4d4e1ccfd769bdccd2e923a5dd421f90f08b6",
+    "s": "0x549dbd8a74c18abae753d08420c9bab559e486449d5e3b287c8549507380d707",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "l1_outcome_deploy_set_sub_deployers",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"b\",\"connectionId\":\"0x5ba3237aec1f0ff5972202e8a8d66fd95b9e8123c94fec4de987ca730654329f\"}},\"action\":{\"type\":\"outcomeDeploy\",\"venue\":\"ab\",\"operation\":{\"setSubDeployers\":[{\"variant\":\"settleOutcome\",\"user\":\"0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c\",\"allowed\":true}]}},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xf6ed2d8e2e78ddb46520442d22f173fcd14b7e8a8cce086c9349d44fb9d08742",
+    "s": "0x14956846d3900314951f45e21abe29b76bffe931bdda98d59a6fae7500ebe421",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "refuse_l1_set_referrer_not_allowlisted",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x5afeb7101f181e7b57a887a865968a41bf29cc711bc9d3cc456641c9a0e6087e\"}},\"action\":{\"type\":\"setReferrer\",\"code\":\"ABC\"},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x78b95a1cda59d45785fa27e20ce7f40bd48af4c985f87513265dfe263de5fbf3",
+    "s": "0x4ca01ff9081de3e68c2b5ea89535ad882a388f136b11f34acc49232d12b23101",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "refuse_l1_order_unknown_field",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xd08aa5880c62b919cb42ba6f16172b140fbb057dc9bb1959fbfb550d0f91b9d4\"}},\"action\":{\"type\":\"order\",\"orders\":[{\"a\":0,\"b\":true,\"p\":\"1\",\"s\":\"1\",\"r\":false,\"t\":{\"limit\":{\"tif\":\"Gtc\"}}}],\"grouping\":\"na\",\"extra\":1},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0x6bb329c44838cadba607a324b9c959d8a44c80bce932d91d70c36d7ef4d08777",
+    "s": "0x6780042f47388cbd89d8f90ab0264bc8cc6c0474f03eb85d5812924b902177c1",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "refuse_l1_schedule_cancel_null_time",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0xe2841bf0b889c5f68eb768e3d28a93cd196a67d84df6f9755a3a8c44a0dd1997\"}},\"action\":{\"type\":\"scheduleCancel\",\"time\":null},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xcea8fbd347f66a19b285e5627b55880e102af5737f96ad95b0307d241f617060",
+    "s": "0x3745828730443a7f591231c4de237d997b5d6ee048b4afe45dc85174f53528b8",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "refuse_l1_twap_cancel_reordered_keys",
+   "unsignedPayload": "{\"kind\":\"l1\",\"typedData\":{\"domain\":{\"chainId\":1337,\"name\":\"Exchange\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\",\"version\":\"1\"},\"types\":{\"Agent\":[{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"connectionId\",\"type\":\"bytes32\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"Agent\",\"message\":{\"source\":\"a\",\"connectionId\":\"0x64bfe1f10a497bee848b490c0becd33346a3422936a536b896a4b28bdfdeaec0\"}},\"action\":{\"type\":\"twapCancel\",\"t\":1234,\"a\":0},\"nonce\":1761480000000,\"vaultAddress\":null,\"expiresAfter\":null}",
+   "signature": {
+    "r": "0xd1df7ad7442137f9c2c236019ffe3f61d1832e5a4f9c7d238daee67a15dd54a3",
+    "s": "0x49e76f7fd47987742b36b42fbdf64bd42478ab475c683db75cda07480b349219",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_usd_send",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:UsdSend\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"destination\",\"type\":\"string\"},{\"name\":\"amount\",\"type\":\"string\"},{\"name\":\"time\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:UsdSend\",\"message\":{\"destination\":\"0x5e9ee1089755c3435139848e47e6635505d5a13a\",\"amount\":\"1.5\",\"time\":1761480000000,\"type\":\"usdSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x4fb9c000a985595aae3a38f6bddf50a11baeba0729a5614f5d03efe2ae671c91",
+    "s": "0x4e765b5786f5006ca4642f39d5b1afaf1ddfb65ec17711439b130ce8bb4bf3b5",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_spot_send_testnet",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:SpotSend\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"destination\",\"type\":\"string\"},{\"name\":\"token\",\"type\":\"string\"},{\"name\":\"amount\",\"type\":\"string\"},{\"name\":\"time\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:SpotSend\",\"message\":{\"destination\":\"0x5e9ee1089755c3435139848e47e6635505d5a13a\",\"amount\":\"10.0\",\"token\":\"PURR:0xc4bf3f870c0e9465323c0b6ed28096c2\",\"time\":1761480000000,\"type\":\"spotSend\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Testnet\"}}}",
+   "signature": {
+    "r": "0xe912e68e3fe84b231228f9d4c52d3ecde04f17a2f51f68b60dfadb45463ecef1",
+    "s": "0x4b83f1b3b11b895a9cee205bced9d563f46fbf94faf392276d412d95a71b247e",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_withdraw",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:Withdraw\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"destination\",\"type\":\"string\"},{\"name\":\"amount\",\"type\":\"string\"},{\"name\":\"time\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:Withdraw\",\"message\":{\"destination\":\"0x5e9ee1089755c3435139848e47e6635505d5a13a\",\"amount\":\"100.0\",\"time\":1761480000000,\"type\":\"withdraw3\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x22aab43aeed2589d97bf569c845c618b6f86dfc31a98624ffcfb9ac0473b7bbf",
+    "s": "0x79532cdb2378d074d30377f54714d0eb60979a49d965ce08e5851591e2ab5876",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_usd_class_transfer",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:UsdClassTransfer\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"amount\",\"type\":\"string\"},{\"name\":\"toPerp\",\"type\":\"bool\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:UsdClassTransfer\",\"message\":{\"type\":\"usdClassTransfer\",\"amount\":\"25.0\",\"toPerp\":true,\"nonce\":1761480000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x9a64094080028a9cc5a5316a15ef88d8dfad71feb71f6dc063f132498c96dda6",
+    "s": "0x7cdca5f8338271d35e1da863cf9a18c134d587674f1ab4cf42b995dd52885d1c",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_send_asset",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:SendAsset\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"destination\",\"type\":\"string\"},{\"name\":\"sourceDex\",\"type\":\"string\"},{\"name\":\"destinationDex\",\"type\":\"string\"},{\"name\":\"token\",\"type\":\"string\"},{\"name\":\"amount\",\"type\":\"string\"},{\"name\":\"fromSubAccount\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:SendAsset\",\"message\":{\"type\":\"sendAsset\",\"destination\":\"0x5e9ee1089755c3435139848e47e6635505d5a13a\",\"sourceDex\":\"\",\"destinationDex\":\"spot\",\"token\":\"USDC\",\"amount\":\"7.0\",\"fromSubAccount\":\"\",\"nonce\":1761480000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x35893fd91402a11ac8cc1a315c53cbd0ff9362acb585b66b6e236b8cbef63d16",
+    "s": "0x659e834adcba98af2242a84be8158807b708e48f3f6857dd114b66afdceb3cd2",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_token_delegate",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:TokenDelegate\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"validator\",\"type\":\"address\"},{\"name\":\"wei\",\"type\":\"uint64\"},{\"name\":\"isUndelegate\",\"type\":\"bool\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:TokenDelegate\",\"message\":{\"validator\":\"0x5ac99df645f3414876c816caa18b2d234024b487\",\"wei\":100000000,\"isUndelegate\":false,\"nonce\":1761480000000,\"type\":\"tokenDelegate\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x604ef2f3867f1d895f3f365dfcfdef649e31ca6af6d04bf581593b69a9384477",
+    "s": "0x635705a9754f51dc2540e3a32b8ce3f1b4a0b6d55fff8d955c97f8029b7ce62a",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_approve_agent_valid_until",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:ApproveAgent\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"agentAddress\",\"type\":\"address\"},{\"name\":\"agentName\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:ApproveAgent\",\"message\":{\"type\":\"approveAgent\",\"agentAddress\":\"0x1563915e194D8CfBA1943570603F7606A3115508\",\"agentName\":\"bot valid_until 1767225600000\",\"nonce\":1761480000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0xcf34db8b7603079d2966079f7ab9982c4e260b3dc6303aa780c8d2db11580565",
+    "s": "0x64a9f795895334baa7123b223a54c7a0f4be8d66f67b1aaf436d05fe695abbd0",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_approve_agent_no_name",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:ApproveAgent\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"agentAddress\",\"type\":\"address\"},{\"name\":\"agentName\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:ApproveAgent\",\"message\":{\"type\":\"approveAgent\",\"agentAddress\":\"0x1563915e194D8CfBA1943570603F7606A3115508\",\"agentName\":\"\",\"nonce\":1761480000000,\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x1b6d67b544312cbfc33c7343f2e66b9088ed281902962b3159eef0dec669cad0",
+    "s": "0x70f44804c5a02118119be942699f39b53df3230f614f3c376fe23afb7fbd5a0c",
+    "v": 27
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  },
+  {
+   "name": "user_approve_builder_fee",
+   "unsignedPayload": "{\"kind\":\"userSigned\",\"typedData\":{\"domain\":{\"name\":\"HyperliquidSignTransaction\",\"version\":\"1\",\"chainId\":421614,\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"types\":{\"HyperliquidTransaction:ApproveBuilderFee\":[{\"name\":\"hyperliquidChain\",\"type\":\"string\"},{\"name\":\"maxFeeRate\",\"type\":\"string\"},{\"name\":\"builder\",\"type\":\"address\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"primaryType\":\"HyperliquidTransaction:ApproveBuilderFee\",\"message\":{\"maxFeeRate\":\"0.001%\",\"builder\":\"0x8c967e73e7b15087c42a10d344cff4c96d877f1d\",\"nonce\":1761480000000,\"type\":\"approveBuilderFee\",\"signatureChainId\":\"0x66eee\",\"hyperliquidChain\":\"Mainnet\"}}}",
+   "signature": {
+    "r": "0x1e4202271b987d9cb8977fdd07c7655633ff0c1455c89eaf33f74eb3f6e732a8",
+    "s": "0x78a8def5edeaf80b11dd3682f6dfe4323aaee055a3d53b0fa6b5816be076283f",
+    "v": 28
+   },
+   "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+  }
+ ]
+}

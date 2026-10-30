@@ -1,0 +1,79 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Subaccount Transfer",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Subaccount Transfer"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Withdraw from subaccount",
+      "Label": "Direction",
+      "TextV2": {
+        "Text": "Withdraw from subaccount"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c"
+      },
+      "FallbackText": "0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c",
+      "Label": "Subaccount",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "1.000000",
+      "Label": "Amount (USDC)",
+      "TextV2": {
+        "Text": "1.000000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xe2076d74d285e876da920a03c19af2190781915d2a48381cdee1f6a4d89ca8eb (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xe2076d74d285e876da920a03c19af2190781915d2a48381cdee1f6a4d89ca8eb (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Subaccount Transfer",
+  "Version": "0"
+}

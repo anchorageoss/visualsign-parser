@@ -1,0 +1,55 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Approve Builder Fee",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Approve Builder Fee"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0.001%",
+      "Label": "Max Fee Rate",
+      "TextV2": {
+        "Text": "0.001%"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x8c967e73e7b15087c42a10d344cff4c96d877f1d"
+      },
+      "FallbackText": "0x8c967e73e7b15087c42a10d344cff4c96d877f1d",
+      "Label": "Builder",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "421614",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "421614"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Approve Builder Fee",
+  "Version": "0"
+}

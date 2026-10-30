@@ -7262,6 +7262,7 @@ dependencies = [
  "visualsign",
  "visualsign-bitcoin",
  "visualsign-ethereum",
+ "visualsign-hyperliquid",
  "visualsign-near",
  "visualsign-solana",
  "visualsign-sui",
@@ -7287,6 +7288,7 @@ dependencies = [
  "visualsign",
  "visualsign-bitcoin",
  "visualsign-ethereum",
+ "visualsign-hyperliquid",
  "visualsign-near",
  "visualsign-solana",
  "visualsign-tron",
@@ -8704,6 +8706,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
+]
+
+[[package]]
 name = "roaring"
 version = "0.10.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9100,7 +9121,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes 0.12.0",
+ "bitcoin_hashes 0.14.101",
  "secp256k1-sys 0.10.1",
 ]
 
@@ -9244,6 +9265,15 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "typeid",
+]
+
+[[package]]
+name = "serde-transcode"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "590c0e25c2a5bb6e85bf5c1bce768ceb86b316e7a01bdf07d2cb4ec2271990e2"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -15058,6 +15088,21 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.17",
+ "visualsign",
+]
+
+[[package]]
+name = "visualsign-hyperliquid"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "hex",
+ "parser_cli_core",
+ "rmp-serde",
+ "serde",
+ "serde-transcode",
+ "serde_json",
  "visualsign",
 ]
 

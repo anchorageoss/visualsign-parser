@@ -1,0 +1,7 @@
+decode
+--chain
+hyperliquid
+-o
+json
+-t
+@tests/fixtures/hyperliquid-l1-order.json

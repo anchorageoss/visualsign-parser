@@ -1,0 +1,110 @@
+---
+title: Hyperliquid
+description: Hyperliquid L1 actions verified against the signed connectionId, and user-signed EIP-712 actions
+---
+
+The Hyperliquid module ends blind signing of Hyperliquid L1 actions. An L1 action (an order, a cancel, a vault transfer, a deploy) is signed as an EIP-712 `Agent` struct that holds only `connectionId`, a keccak hash of the msgpack-encoded action. The typed data alone tells you nothing about what you are approving. The parser takes the typed data together with the action it claims to commit to, recomputes the hash, and refuses to render anything that does not match.
+
+<Note>
+`hyperliquid` is on by default in `parser_cli` only. In `parser_app`, `parser_http_server` and the container images it is opt-in: build with `--features hyperliquid`, or add `hyperliquid` to `CHAIN_FEATURES`.
+</Note>
+
+## Input format
+
+The transaction string is one JSON document.
+
+```json
+{"kind":"l1","typedData":{...},"action":{...},"nonce":1761480000000,"vaultAddress":null,"expiresAfter":null}
+```
+
+```json
+{"kind":"userSigned","typedData":{...}}
+```
+
+- `typedData` is the EIP-712 payload that gets signed.
+- For `l1`, `action`, `nonce`, `vaultAddress` (`null` or a `0x` address) and `expiresAfter` (`null` or milliseconds) are the request fields the hash covers. Send `action` exactly as it will be posted to `/exchange`: key order matters.
+- Inputs over 256 KiB, or nested deeper than 16 levels, are refused before parsing.
+
+## L1 actions
+
+### Verification
+
+1. The domain, types and primary type must equal the pinned L1 envelope: `{name: "Exchange", version: "1", chainId: 1337, verifyingContract: 0x0}`, `Agent [source string, connectionId bytes32]`. `chainId` must be a JSON integer.
+2. The parser transcodes the action's raw JSON to msgpack in received key order, then computes `keccak256(msgpack ‖ nonce u64 BE ‖ 0x00 | 0x01 ‖ vault ‖ [0x00 ‖ expiresAfter u64 BE])`, as `action_hash` does in the Python SDK. The result must equal `message.connectionId`.
+3. `source` `a` is shown as Mainnet and `b` as Testnet. Any other value is refused.
+4. The action is parsed into display structs that deny unknown fields. They are then re-encoded to msgpack and must equal the hashed bytes byte for byte, so what you see is exactly what was hashed.
+
+Floats anywhere in the action are refused. Hyperliquid carries prices and sizes as strings.
+
+### Supported action types
+
+| `type` | Shown |
+| --- | --- |
+| `order` | Each order: asset, side, limit price, size, limit TIF or trigger (tp/sl, market/limit, trigger price), reduce-only, client order id; grouping; builder and fee |
+| `cancel`, `cancelByCloid` | Asset and order id or client order id; `f` (fast) when present |
+| `modify`, `batchModify` | Order being modified (oid or cloid) and the new order |
+| `scheduleCancel` | Cancel-all time, or "unset" |
+| `updateLeverage`, `updateIsolatedMargin` | Asset, leverage and margin mode; margin added or removed in USDC |
+| `twapOrder`, `twapCancel` | Asset, side, size, minutes, randomize, reduce-only; TWAP id |
+| `vaultTransfer`, `subAccountTransfer` | Direction, vault or subaccount, USDC amount |
+| `spotDeploy` | `registerToken2`, `userGenesis`, `genesis`, `registerSpot`, `registerHyperliquidity`, `setDeployerTradingFeeShare`, `enableFreezePrivilege`, `freezeUser`, `revokeFreezePrivilege`, `enableQuoteToken`, `disableQuoteToken` |
+| `perpDeploy` | `registerAsset`, `registerAsset2`, `setOracle`, `setFundingMultipliers`, `haltTrading`, `setMarginTableIds`, `setFeeRecipient`, `setOpenInterestCaps`, `setSubDeployers`, `disableDex` |
+| `outcomeDeploy` (HIP-4) | Venue plus `registerStandaloneOutcomeFromTemplate`, `registerQuestionFromTemplate`, `registerAndAssociateNamedOutcomeFromTemplate`, `settleOutcome`, `settleQuestion2`, `setSubDeployers` |
+| `activateOutcomeDeployer` (HIP-4) | `activate` with venue name, or `deactivate` |
+| `noop` | Nonce invalidation |
+
+Every L1 payload also shows the vault or subaccount it acts for, the nonce as a UTC timestamp, `expiresAfter` as a UTC timestamp, and the verified `connectionId`.
+
+Prices, sizes and decimal amounts appear exactly as signed. Trading assets (in orders, cancels, leverage, margin and TWAP) are labelled by their index range: `perp #<n>` below 10000, `spot #<n> (asset <id>)` for spot pairs (`10000 + n`), and `builder perp dex <d> #<n> (asset <id>)` for builder-deployed perps (`100000 + d * 10000 + n`). Token and outcome indices in deploy actions appear as `#<index>`. Mapping indices to symbols needs exchange metadata, which is planned for a later release.
+
+### Refused
+
+- Any other `type`, such as `multiSig`, `setReferrer`, `createSubAccount`, `CValidatorAction` or `usdClassTransfer` sent as L1.
+- Unlisted sub-operations of the deploy families: `spotDeploy.setTokenAnnotation`, `spotDeploy.setDeployerLabel`, `perpDeploy.setFundingInterestRates`, `setMarginModes`, `setDeployerFees`, `setPerpAnnotation`, `insertMarginTable`, `star` (HIP-3\*), and `isStar` in a new DEX schema.
+- An action whose typed re-encoding differs from the hashed bytes, for example `scheduleCancel` with `"time": null` (the SDK omits the key) or keys in a different order from the SDK.
+
+## User-signed actions
+
+User-signed actions are plain EIP-712 with readable fields. The domain must be `{name: "HyperliquidSignTransaction", version: "1", verifyingContract: 0x0}`; `chainId` is taken from the domain and shown as `Signature Chain ID`. Each primary type pins its exact field list:
+
+| `primaryType` | Fields |
+| --- | --- |
+| `HyperliquidTransaction:ApproveAgent` | agent address, agent name, nonce; agent expiry from `valid_until <ms>` in the name, or a note that the signed request carries none (Hyperliquid may apply its own default). The zero agent address is shown as **Revoke API Wallet (Agent)**, with no expiry |
+| `HyperliquidTransaction:TokenDelegate` | validator, wei, undelegate, nonce |
+| `HyperliquidTransaction:Withdraw` | destination, amount, time |
+| `HyperliquidTransaction:UsdSend` | destination, amount, time |
+| `HyperliquidTransaction:SpotSend` | destination, token, amount, time |
+| `HyperliquidTransaction:SendAsset` | destination, source and destination DEX, token, amount, from-subaccount, nonce |
+| `HyperliquidTransaction:ApproveBuilderFee` | max fee rate, builder, nonce |
+| `HyperliquidTransaction:UsdClassTransfer` | amount, to-perp, nonce |
+| `Hyperliquid:AcceptTerms` | time; signed once when the Hyperliquid app first connects a wallet, and moves no funds |
+
+`hyperliquidChain` must be `Mainnet` or `Testnet`. The message may also carry the request's `type` and `signatureChainId`, which the SDK leaves in the dict it signs; they must agree with the primary type and the domain chain id. Any other field, or any other primary type, is refused.
+
+## Example
+
+```bash
+cargo run --bin parser_cli -- decode --chain hyperliquid --output human \
+  -t @src/parser/cli/tests/fixtures/hyperliquid-l1-order.json
+```
+
+```text
+└─ Fields:
+   ├─ Network: Testnet
+   ├─ Action: Place Order
+   ├─ Grouping: na
+   ├─ Order 1
+   │     Detail: Buy 0.0003 of perp #3 at 40200, Limit (Gtc)
+   ├─ Acting For (Vault / Subaccount): None (signer's own account)
+   ├─ Nonce: 2026-10-26 14:10:08 UTC (1793023808821)
+   ├─ Expires After: Not set
+   └─ Connection ID: 0xdc35b8a7...55b0a168 (verified against the action)
+```
+
+This fixture was recorded from a real testnet order. Change one byte of the action and the parser refuses it with `connectionId mismatch`.
+
+## Test vectors
+
+`src/chain_parsers/visualsign-hyperliquid/tests/vectors/vectors.json` is generated by `generate.py` in the same directory with hyperliquid-python-sdk 0.24.0. The SDK's own `Exchange` methods build the actions, with network calls stubbed out, and the typed data is captured from the SDK's signing path. Actions the SDK has no builder for (`modify`, `twapOrder`, `twapCancel`, `cancel` with `f`, and the HIP-4 actions) are written from the official API docs and hashed with the SDK's `sign_l1_action`.
+
+`tests/fixtures/recorded/` holds four payloads recorded from a real testnet run, built by the JavaScript SDK `@nktkas/hyperliquid` 0.33.3 and accepted by the Hyperliquid testnet API. See the README there for provenance.

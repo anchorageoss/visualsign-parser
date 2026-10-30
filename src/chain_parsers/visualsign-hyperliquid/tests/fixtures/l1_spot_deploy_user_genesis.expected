@@ -1,0 +1,87 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Spot Deploy (HIP-1/HIP-2)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Spot Deploy (HIP-1/HIP-2)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "User Genesis",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "User Genesis"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "#1234",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "#1234"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c: 1000000, 0x5e9ee1089755c3435139848e47e6635505d5a13a: 250",
+      "Label": "User Allocations (wei)",
+      "TextV2": {
+        "Text": "0x4b2c5a9a8f0e1d3c6b7a8f9e0d1c2b3a4f5e6d7c: 1000000, 0x5e9ee1089755c3435139848e47e6635505d5a13a: 250"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "#0: 5000",
+      "Label": "Existing Token Holders (wei)",
+      "TextV2": {
+        "Text": "#0: 5000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xc6749a7ed5a8c66a1b5445468366bfa8c55db7244465a302c5cb7a40c8e115d6 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xc6749a7ed5a8c66a1b5445468366bfa8c55db7244465a302c5cb7a40c8e115d6 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Spot Deploy (HIP-1/HIP-2)",
+  "Version": "0"
+}

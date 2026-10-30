@@ -1,0 +1,63 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Stake Delegation",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Stake Delegation"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x5ac99df645f3414876c816caa18b2d234024b487"
+      },
+      "FallbackText": "0x5ac99df645f3414876c816caa18b2d234024b487",
+      "Label": "Validator",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "100000000",
+      "Label": "Amount (wei)",
+      "TextV2": {
+        "Text": "100000000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "No",
+      "Label": "Undelegate",
+      "TextV2": {
+        "Text": "No"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "421614",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "421614"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Stake Delegation",
+  "Version": "0"
+}

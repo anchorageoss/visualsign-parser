@@ -1,0 +1,103 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Spot Deploy (HIP-1/HIP-2)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Spot Deploy (HIP-1/HIP-2)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Register Hyperliquidity",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Register Hyperliquidity"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "#321",
+      "Label": "Spot",
+      "TextV2": {
+        "Text": "#321"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2.5",
+      "Label": "Start Price",
+      "TextV2": {
+        "Text": "2.5"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "100.0",
+      "Label": "Order Size",
+      "TextV2": {
+        "Text": "100.0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "50",
+      "Label": "Number of Orders",
+      "TextV2": {
+        "Text": "50"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "5",
+      "Label": "Seeded Levels",
+      "TextV2": {
+        "Text": "5"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x25a56543e08a3ec3beaffab48bfe91d6c82a0bb3eb3bdbdc8de1c5cc08e67023 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x25a56543e08a3ec3beaffab48bfe91d6c82a0bb3eb3bdbdc8de1c5cc08e67023 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Spot Deploy (HIP-1/HIP-2)",
+  "Version": "0"
+}

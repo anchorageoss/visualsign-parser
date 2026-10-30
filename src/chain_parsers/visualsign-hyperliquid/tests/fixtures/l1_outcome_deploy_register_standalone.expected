@@ -1,0 +1,95 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Outcome Deploy (HIP-4)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Outcome Deploy (HIP-4)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "ab",
+      "Label": "Venue",
+      "TextV2": {
+        "Text": "ab"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Register Standalone Outcome",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Register Standalone Outcome"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "abc",
+      "Label": "Template",
+      "TextV2": {
+        "Text": "abc"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "expiry: 20260801-0600, target: 100, underlying: ABC",
+      "Label": "Keywords",
+      "TextV2": {
+        "Text": "expiry: 20260801-0600, target: 100, underlying: ABC"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1",
+      "Label": "Deployer Fee Scale",
+      "TextV2": {
+        "Text": "1"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0xd3d9329e7050c184337797cc6832d77c1565b0eb6f278b2ebf9a98280d30ab4e (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0xd3d9329e7050c184337797cc6832d77c1565b0eb6f278b2ebf9a98280d30ab4e (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Outcome Deploy (HIP-4)",
+  "Version": "0"
+}

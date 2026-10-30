@@ -21,6 +21,8 @@ metrics = { path = "../../metrics" }
 visualsign = {workspace = true}
 visualsign-bitcoin = { path = "../../chain_parsers/visualsign-bitcoin", optional = true }
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
+# no default features: the CLI plugin (clap, parser_cli_core) stays out of parser_app.
+visualsign-hyperliquid = { path = "../../chain_parsers/visualsign-hyperliquid", optional = true, default-features = false }
 visualsign-near = { path = "../../chain_parsers/visualsign-near", optional = true }
 visualsign-solana = { path = "../../chain_parsers/visualsign-solana", optional = true }
 visualsign-sui = { path = "../../chain_parsers/visualsign-sui", optional = true }
@@ -41,6 +43,9 @@ thiserror = "2.0.12"
 default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified"]
 bitcoin = ["dep:visualsign-bitcoin"]
 ethereum = ["dep:visualsign-ethereum"]
+# Opt-in, not in `default`: enable with `--features hyperliquid` (and add it to
+# CHAIN_FEATURES in the Containerfiles) for a deployment that serves Hyperliquid.
+hyperliquid = ["dep:visualsign-hyperliquid"]
 near = ["dep:visualsign-near"]
 solana = ["dep:visualsign-solana"]
 sui = ["dep:visualsign-sui"]

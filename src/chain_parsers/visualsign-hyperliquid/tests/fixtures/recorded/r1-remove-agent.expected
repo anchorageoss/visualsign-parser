@@ -1,0 +1,55 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Testnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Testnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Revoke API Wallet (Agent)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Revoke API Wallet (Agent)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x0000000000000000000000000000000000000000"
+      },
+      "FallbackText": "0x0000000000000000000000000000000000000000",
+      "Label": "Agent Address",
+      "Type": "address_v2"
+    },
+    {
+      "FallbackText": "(empty)",
+      "Label": "Agent Name",
+      "TextV2": {
+        "Text": "(empty)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2026-10-28 00:23:42 UTC (1793147022001)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2026-10-28 00:23:42 UTC (1793147022001)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1",
+      "Label": "Signature Chain ID",
+      "TextV2": {
+        "Text": "1"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidUserSignedAction",
+  "Title": "Hyperliquid: Revoke API Wallet (Agent)",
+  "Version": "0"
+}

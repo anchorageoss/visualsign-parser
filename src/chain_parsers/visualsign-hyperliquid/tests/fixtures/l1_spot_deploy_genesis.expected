@@ -1,0 +1,87 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Spot Deploy (HIP-1/HIP-2)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Spot Deploy (HIP-1/HIP-2)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Genesis",
+      "Label": "Operation",
+      "TextV2": {
+        "Text": "Genesis"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "#1234",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "#1234"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1000250",
+      "Label": "Max Supply",
+      "TextV2": {
+        "Text": "1000250"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Yes",
+      "Label": "No Hyperliquidity",
+      "TextV2": {
+        "Text": "Yes"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x900e47aad82881a19e82e28d8cb96a67e3b42eff6fed3627ca285174f847627b (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x900e47aad82881a19e82e28d8cb96a67e3b42eff6fed3627ca285174f847627b (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Spot Deploy (HIP-1/HIP-2)",
+  "Version": "0"
+}

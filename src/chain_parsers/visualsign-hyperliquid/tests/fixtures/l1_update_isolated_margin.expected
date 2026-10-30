@@ -1,0 +1,79 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Update Isolated Margin",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "Update Isolated Margin"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "perp #0",
+      "Label": "Asset",
+      "TextV2": {
+        "Text": "perp #0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "-12.500000",
+      "Label": "Remove Margin (USDC)",
+      "TextV2": {
+        "Text": "-12.500000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Yes",
+      "Label": "Is Buy",
+      "TextV2": {
+        "Text": "Yes"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x390430b262cf93ddbfffce407eac6607a5543a4f16429178663a1717f509f408 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x390430b262cf93ddbfffce407eac6607a5543a4f16429178663a1717f509f408 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: Update Isolated Margin",
+  "Version": "0"
+}

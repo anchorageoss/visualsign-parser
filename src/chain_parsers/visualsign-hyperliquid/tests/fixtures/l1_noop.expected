@@ -1,0 +1,55 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "No-op (Invalidate Nonce)",
+      "Label": "Action",
+      "TextV2": {
+        "Text": "No-op (Invalidate Nonce)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "None (signer's own account)",
+      "Label": "Acting For (Vault / Subaccount)",
+      "TextV2": {
+        "Text": "None (signer's own account)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2025-10-26 12:00:00 UTC (1761480000000)",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "2025-10-26 12:00:00 UTC (1761480000000)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "Not set",
+      "Label": "Expires After",
+      "TextV2": {
+        "Text": "Not set"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x8fcfbd0208ea356e800447d3f5bfb5a3dd6d63afc5d9b0e9dc70eae5a1f096d8 (verified against the action)",
+      "Label": "Connection ID",
+      "TextV2": {
+        "Text": "0x8fcfbd0208ea356e800447d3f5bfb5a3dd6d63afc5d9b0e9dc70eae5a1f096d8 (verified against the action)"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "HyperliquidL1Action",
+  "Title": "Hyperliquid: No-op (Invalidate Nonce)",
+  "Version": "0"
+}

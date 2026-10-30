@@ -9,7 +9,8 @@
         feature = "ethereum",
         feature = "solana",
         feature = "near",
-        feature = "tron"
+        feature = "tron",
+        feature = "hyperliquid"
     )),
     allow(dead_code, unused_imports)
 )]
@@ -72,6 +73,8 @@ fn test_cli_with_fixtures() {
         "solana",
         #[cfg(not(feature = "tron"))]
         "tron",
+        #[cfg(not(feature = "hyperliquid"))]
+        "hyperliquid",
     ];
 
     for input_file in test_cases {

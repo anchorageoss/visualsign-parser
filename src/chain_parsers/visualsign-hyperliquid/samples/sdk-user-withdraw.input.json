@@ -1,0 +1,58 @@
+{
+  "kind": "userSigned",
+  "typedData": {
+    "domain": {
+      "name": "HyperliquidSignTransaction",
+      "version": "1",
+      "chainId": 421614,
+      "verifyingContract": "0x0000000000000000000000000000000000000000"
+    },
+    "types": {
+      "HyperliquidTransaction:Withdraw": [
+        {
+          "name": "hyperliquidChain",
+          "type": "string"
+        },
+        {
+          "name": "destination",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "type": "string"
+        },
+        {
+          "name": "time",
+          "type": "uint64"
+        }
+      ],
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ]
+    },
+    "primaryType": "HyperliquidTransaction:Withdraw",
+    "message": {
+      "destination": "0x5e9ee1089755c3435139848e47e6635505d5a13a",
+      "amount": "100.0",
+      "time": 1761480000000,
+      "type": "withdraw3",
+      "signatureChainId": "0x66eee",
+      "hyperliquidChain": "Mainnet"
+    }
+  }
+}
