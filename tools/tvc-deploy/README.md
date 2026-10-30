@@ -283,6 +283,10 @@ tvc-deploy deploy-pivot \
   -- --accept-unsigned-abis --boot-proof-source nsm
 ```
 
+To deploy an image built from a fork (`ghcr.io/<owner>/...`) against your own
+Turnkey org, and to verify someone else's image by rebuilding it, see
+[Deploying from a fork](../../docs/wallet-integration/self-hosted-tee/getting-started.mdx#deploying-from-a-fork).
+
 - Everything after `--` becomes the manifest's `pivotArgs`, in order. A pivot
   flag that collides with one of `deploy-pivot`'s own (e.g. `--port`) goes to the
   pivot when it is after `--`. Without the separator it is rejected as an unknown

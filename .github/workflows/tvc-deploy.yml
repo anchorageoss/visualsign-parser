@@ -74,9 +74,19 @@ permissions:
 jobs:
   deploy:
     # Manual dispatch, or the `tvc-deploy-test` label on a PR (test app only).
+    # Needs this repo's TVC secrets and vars, so it never runs in a fork (a
+    # fork deploys with `tools/tvc-deploy` against its own Turnkey org, see
+    # docs/wallet-integration/self-hosted-tee/getting-started.mdx) or on a
+    # fork PR here (no secrets are passed to it).
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.label.name == 'tvc-deploy-test'
+      github.repository_owner == 'anchorageoss' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.label.name == 'tvc-deploy-test' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
     runs-on: ubuntu-26.04
     # Bounded: cargo install tvc (~minutes) + poll-to-healthy (up to 15m) + smoke.
     timeout-minutes: 45
