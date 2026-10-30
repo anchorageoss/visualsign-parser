@@ -20,6 +20,7 @@ host_primitives = { path = "../../host_primitives" }
 metrics = { path = "../../metrics" }
 visualsign = {workspace = true}
 visualsign-bitcoin = { path = "../../chain_parsers/visualsign-bitcoin", optional = true }
+visualsign-cosmos = { path = "../../chain_parsers/visualsign-cosmos", optional = true }
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
 visualsign-near = { path = "../../chain_parsers/visualsign-near", optional = true }
 visualsign-solana = { path = "../../chain_parsers/visualsign-solana", optional = true }
@@ -41,8 +42,9 @@ thiserror = "2.0.12"
 # production payload shape. Opt in explicitly with `--features diagnostics`.
 # zcash is opt-in (`--features zcash`) until its dependency set is curated;
 # see docs/chains/zcash.mdx.
-default = ["bitcoin", "ethereum", "near", "solana", "sui", "tron", "unspecified"]
+default = ["bitcoin", "cosmos", "ethereum", "near", "solana", "sui", "tron", "unspecified"]
 bitcoin = ["dep:visualsign-bitcoin"]
+cosmos = ["dep:visualsign-cosmos"]
 ethereum = ["dep:visualsign-ethereum"]
 near = ["dep:visualsign-near"]
 solana = ["dep:visualsign-solana"]

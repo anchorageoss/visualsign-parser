@@ -16,6 +16,7 @@ members = [
   "parser/http-server",
   "visualsign",
   "chain_parsers/visualsign-bitcoin",
+  "chain_parsers/visualsign-cosmos",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-near",
   "chain_parsers/visualsign-solana",

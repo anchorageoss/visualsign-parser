@@ -1,0 +1,405 @@
+{
+  "format_version": 1,
+  "provenance": "Schema-derived synthetic fixtures, not SDK-produced or chain-executed transactions. Amino canonicalized independently using Go encoding/json; protobuf assembled independently from tagged field numbers. No parser structs used.",
+  "sources": [
+    {
+      "id": "bank030",
+      "tag": "v0.30.0",
+      "path": "x/bank/msgs.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.30.0/x/bank/msgs.go",
+      "sha256": "500ae1f5b473db9d66b8a16d409d1d6348ac021f38a64fce0b1d13f7971673c1"
+    },
+    {
+      "id": "bank032",
+      "tag": "v0.32.0",
+      "path": "x/bank/msgs.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.32.0/x/bank/msgs.go",
+      "sha256": "077763162810a89fbfd8023d4aeb5e8efe41d9912e888981444da5628592281f"
+    },
+    {
+      "id": "staking030",
+      "tag": "v0.30.0",
+      "path": "x/staking/types/msg.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.30.0/x/staking/types/msg.go",
+      "sha256": "f4fbfa807b9653ec7524d946a3057f0f801f4923f89301e98eb79b14b135713a"
+    },
+    {
+      "id": "staking032",
+      "tag": "v0.32.0",
+      "path": "x/staking/types/msg.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.32.0/x/staking/types/msg.go",
+      "sha256": "42aca800e8e334e1218ec3082c2bef238b79d66caaf698eabd906f00b07ce129"
+    },
+    {
+      "id": "staking033",
+      "tag": "v0.33.0",
+      "path": "x/staking/types/msg.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.33.0/x/staking/types/msg.go",
+      "sha256": "f7c2ee243265e97331c35fb6b5a60c3628e11183b73cceba76d7f967ed003031"
+    },
+    {
+      "id": "staking034",
+      "tag": "v0.34.0",
+      "path": "x/staking/types/msg.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.34.0/x/staking/types/msg.go",
+      "sha256": "d6a992815b29140ebc361478e5918eaa71e979a709b086171a9d0212392f228e"
+    },
+    {
+      "id": "vote039",
+      "tag": "v0.39.3",
+      "path": "x/gov/types/vote.go",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.39.3/x/gov/types/vote.go",
+      "sha256": "0965c54020f341e67644167025fc529eb488b4f430014db236f49707657f2d4d"
+    },
+    {
+      "id": "tx040",
+      "tag": "v0.40.0",
+      "path": "proto/cosmos/tx/v1beta1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.40.0/proto/cosmos/tx/v1beta1/tx.proto",
+      "sha256": "f1e0f669c5d67809225ad9979ddf7a77827cef44d6b14abc241c9d2aa7cde07f"
+    },
+    {
+      "id": "gov040",
+      "tag": "v0.40.0",
+      "path": "proto/cosmos/gov/v1beta1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.40.0/proto/cosmos/gov/v1beta1/tx.proto",
+      "sha256": "f4cdc6c7343b12e9daa116235582bc45aedcbe4e17c8ad847b3599fd01fb259c"
+    },
+    {
+      "id": "tx046",
+      "tag": "v0.46.0",
+      "path": "proto/cosmos/tx/v1beta1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.46.0/proto/cosmos/tx/v1beta1/tx.proto",
+      "sha256": "f9e9c9e9046203fb307a4b3a6a985802cc7fecdc6b08e7deea29fe5ee333ec04"
+    },
+    {
+      "id": "gov046",
+      "tag": "v0.46.0",
+      "path": "proto/cosmos/gov/v1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.46.0/proto/cosmos/gov/v1/tx.proto",
+      "sha256": "39d0de5c2410264b105b73f5aec589ab1aa6068c50c06dbb4e4313fb5bcf2713"
+    },
+    {
+      "id": "tx050",
+      "tag": "v0.50.0",
+      "path": "proto/cosmos/tx/v1beta1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.50.0/proto/cosmos/tx/v1beta1/tx.proto",
+      "sha256": "2b7d9273e31819c687797bf38e0200f2f5096b2b538f460448c0dbc0479d48dc"
+    },
+    {
+      "id": "tx053",
+      "tag": "v0.53.0",
+      "path": "proto/cosmos/tx/v1beta1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.53.0/proto/cosmos/tx/v1beta1/tx.proto",
+      "sha256": "d516dc38295e984642e44703e94cac6d06e6cea55ed87566cefaceb7f3c0e895"
+    },
+    {
+      "id": "tx055",
+      "tag": "v0.55.0",
+      "path": "proto/cosmos/tx/v1beta1/tx.proto",
+      "url": "https://raw.githubusercontent.com/cosmos/cosmos-sdk/v0.55.0/proto/cosmos/tx/v1beta1/tx.proto",
+      "sha256": "6d694815814303538b08e6bb01da889de5fed3c1b15cb504668741f1f36491e1"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "sdk030-bank-inputs-outputs",
+      "sdk": "v0.30.0",
+      "source_ids": [
+        "bank030"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/Send\",\"value\":{\"inputs\":[{\"address\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\",\"coins\":[{\"amount\":\"1000000\",\"denom\":\"uatom\"}]}],\"outputs\":[{\"address\":\"cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan\",\"coins\":[{\"amount\":\"1000000\",\"denom\":\"uatom\"}]}]}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Input 1 / Address",
+          "cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn"
+        ],
+        [
+          "Message 1 / Output 1 / Address",
+          "cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "c8c1aa12fc2a9aac84d822f9fdd14e49198789f07d889e454348a66501dbf74c"
+    },
+    {
+      "id": "sdk032-bank-single-send",
+      "sdk": "v0.32.0",
+      "source_ids": [
+        "bank032"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/Send\",\"value\":{\"amount\":[{\"amount\":\"1000000\",\"denom\":\"uatom\"}],\"from_address\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\",\"to_address\":\"cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / To",
+          "cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "d0ba20865d8b658eec1962a74b27c51682ecea3b41341dc4e6facf7c61c97223"
+    },
+    {
+      "id": "sdk030-delegate-value",
+      "sdk": "v0.30.0",
+      "source_ids": [
+        "staking030"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgDelegate\",\"value\":{\"delegator_addr\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\",\"validator_addr\":\"cosmosvaloper1historical\",\"value\":{\"amount\":\"1000000\",\"denom\":\"uatom\"}}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Amount",
+          "1000000 uatom"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "b9937a3a49e1b3613dacf9dc42d52ca268da6c1394d8f8bee668c59946b4a653"
+    },
+    {
+      "id": "sdk032-undelegate-shares",
+      "sdk": "v0.32.0",
+      "source_ids": [
+        "staking032"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/Undelegate\",\"value\":{\"delegator_addr\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\",\"shares_amount\":\"1.250000000000000000\",\"validator_addr\":\"cosmosvaloper1historical\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Delegation shares",
+          "1.250000000000000000"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "7f5586fd89d338c0bde3a6cbfbcbb2c2f85a26219bdc0da8e9d55f3ed880e224"
+    },
+    {
+      "id": "sdk033-redelegate-shares",
+      "sdk": "v0.33.0",
+      "source_ids": [
+        "staking033"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgBeginRedelegate\",\"value\":{\"delegator_address\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\",\"shares_amount\":\"9007199254740993.123456789012345678\",\"validator_dst_address\":\"cosmosvaloper1destination\",\"validator_src_address\":\"cosmosvaloper1historical\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Delegation shares",
+          "9007199254740993.123456789012345678"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "6e2ea54425a3c4364b8b134051473d7b7be2affe63bb6e626fdcc0166f278d43"
+    },
+    {
+      "id": "sdk034-undelegate-tokens",
+      "sdk": "v0.34.0",
+      "source_ids": [
+        "staking034"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgUndelegate\",\"value\":{\"amount\":{\"amount\":\"1000000\",\"denom\":\"uatom\"},\"delegator_address\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\",\"validator_address\":\"cosmosvaloper1historical\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Amount",
+          "1000000 uatom"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "b821511c2608bb9ba12206281b83f0e3861d99d5a0d290942718cd68a6be75f7"
+    },
+    {
+      "id": "sdk039-vote-yes",
+      "sdk": "v0.39.3",
+      "source_ids": [
+        "vote039"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgVote\",\"value\":{\"option\":\"Yes\",\"proposal_id\":\"42\",\"voter\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Option",
+          "Yes"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "c6719865ca43fa881340d9244fa63f76d4fea99dd300aafb740996781ffc0402"
+    },
+    {
+      "id": "sdk039-vote-abstain",
+      "sdk": "v0.39.3",
+      "source_ids": [
+        "vote039"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgVote\",\"value\":{\"option\":\"Abstain\",\"proposal_id\":\"42\",\"voter\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Option",
+          "Abstain"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "900be98bfb7437de9ba46ddfba5db044369d17d6113ccbeec498ed597fdc0781"
+    },
+    {
+      "id": "sdk039-vote-no",
+      "sdk": "v0.39.3",
+      "source_ids": [
+        "vote039"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgVote\",\"value\":{\"option\":\"No\",\"proposal_id\":\"42\",\"voter\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Option",
+          "No"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "d9faebee5a9d3131d46a5c231220990cdcc079f3248e580071240885c873b2c3"
+    },
+    {
+      "id": "sdk039-vote-nowithveto",
+      "sdk": "v0.39.3",
+      "source_ids": [
+        "vote039"
+      ],
+      "format": "amino",
+      "sign_doc": "{\"account_number\":\"42\",\"chain_id\":\"compat-test-1\",\"fee\":{\"amount\":[{\"amount\":\"5000\",\"denom\":\"uatom\"}],\"gas\":\"200000\"},\"memo\":\"historical SDK fixture\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgVote\",\"value\":{\"option\":\"NoWithVeto\",\"proposal_id\":\"42\",\"voter\":\"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn\"}}],\"sequence\":\"7\"}",
+      "fields": [
+        [
+          "Message 1 / Option",
+          "No with veto"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "0719ccab526ddf464956fe0ee59033af2933da1e84182d4aee81499c87766484"
+    },
+    {
+      "id": "sdk0400-direct-send",
+      "sdk": "v0.40.0",
+      "source_ids": [
+        "tx040"
+      ],
+      "format": "direct",
+      "sign_doc": "0a93010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e122d636f736d6f733173786d72306b38753674726435633665753674727a7961707a7578373039307933753564616e1a100a057561746f6d12073130303030303012670a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Message 1 / To",
+          "cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "2af972a348a2d09327caa50d89ec106a0ed2ab50228348740b3eee43673cef21"
+    },
+    {
+      "id": "sdk0500-direct-send",
+      "sdk": "v0.50.0",
+      "source_ids": [
+        "tx050"
+      ],
+      "format": "direct",
+      "sign_doc": "0a93010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e122d636f736d6f733173786d72306b38753674726435633665753674727a7961707a7578373039307933753564616e1a100a057561746f6d12073130303030303012670a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Message 1 / To",
+          "cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "2af972a348a2d09327caa50d89ec106a0ed2ab50228348740b3eee43673cef21"
+    },
+    {
+      "id": "sdk0550-direct-send",
+      "sdk": "v0.55.0",
+      "source_ids": [
+        "tx055"
+      ],
+      "format": "direct",
+      "sign_doc": "0a93010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e122d636f736d6f733173786d72306b38753674726435633665753674727a7961707a7578373039307933753564616e1a100a057561746f6d12073130303030303012670a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Message 1 / To",
+          "cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "2af972a348a2d09327caa50d89ec106a0ed2ab50228348740b3eee43673cef21"
+    },
+    {
+      "id": "sdk040-gov-v1beta1",
+      "sdk": "v0.40.0",
+      "source_ids": [
+        "gov040",
+        "tx040"
+      ],
+      "format": "direct",
+      "sign_doc": "0a540a520a1b2f636f736d6f732e676f762e763162657461312e4d7367566f74651233082a122d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e180112670a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Message 1 / Option",
+          "Yes"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "a4934cb4e7230459080fda07729dc52ef4ecbb30a7db182ef473576e48404ab2"
+    },
+    {
+      "id": "sdk046-gov-v1-metadata",
+      "sdk": "v0.46.0",
+      "source_ids": [
+        "gov046",
+        "tx046"
+      ],
+      "format": "direct",
+      "sign_doc": "0a650a630a162f636f736d6f732e676f762e76312e4d7367566f74651249082a122d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e18012214697066733a2f2f636f6d7061746962696c69747912670a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Message 1 / Metadata",
+          "ipfs://compatibility"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "ac45c298695772694895c3fbaf4f9490f44ac4dd372711b828fa19a08de0772e"
+    },
+    {
+      "id": "sdk046-tip",
+      "sdk": "v0.46.0",
+      "source_ids": [
+        "tx046"
+      ],
+      "format": "direct",
+      "sign_doc": "0a93010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e122d636f736d6f733173786d72306b38753674726435633665753674727a7961707a7578373039307933753564616e1a100a057561746f6d12073130303030303012a7010a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a3e0a0d0a057561746f6d120435303030122d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Tip (deprecated)",
+          "5000 uatom from cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn"
+        ]
+      ],
+      "sigil_partial": true,
+      "sha256": "e2a57ecbf395d0e0e9f7a09f91ab6a5f9bc0e7bf2115100311cbb2dac5316b78"
+    },
+    {
+      "id": "sdk053-unordered",
+      "sdk": "v0.53.0",
+      "source_ids": [
+        "tx053"
+      ],
+      "format": "direct",
+      "sign_doc": "0a9f010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f733139307671646a746c706371323778736c637665676c666d7234796e6677673767716d6368736e122d636f736d6f733173786d72306b38753674726435633665753674727a7961707a7578373039307933753564616e1a100a057561746f6d12073130303030303020012a080880c3bbc206107b12670a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a2102020202020202020202020202020202020202020202020202020202020202020212040a020801180712130a0d0a057561746f6d12043530303010c09a0c1a0d636f6d7061742d746573742d31202a",
+      "fields": [
+        [
+          "Unordered",
+          "yes"
+        ],
+        [
+          "Timeout timestamp",
+          "1750000000s 123ns (unix)"
+        ]
+      ],
+      "sigil_partial": false,
+      "sha256": "ddfb3e000dc2e9d35c5b66ed4119131d182fc5f2796ac67e1057da874f5bfeb0"
+    }
+  ]
+}

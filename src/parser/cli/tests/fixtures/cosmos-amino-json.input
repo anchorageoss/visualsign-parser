@@ -1,0 +1,7 @@
+decode
+--chain
+cosmos
+-o
+json
+-t
+{"account_number":"12345","chain_id":"cosmoshub-4","fee":{"amount":[{"amount":"5000","denom":"uatom"}],"gas":"200000"},"memo":"authz","msgs":[{"type":"cosmos-sdk/MsgExec","value":{"grantee":"cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan","msgs":[{"type":"cosmos-sdk/MsgSend","value":{"amount":[{"amount":"1000000","denom":"uatom"}],"from_address":"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn","to_address":"cosmos1sxmr0k8u6trd5c6eu6trzyapzux7090y3u5dan"}}]}},{"type":"cosmos-sdk/MsgVote","value":{"option":1,"proposal_id":"42","voter":"cosmos190vqdjtlpcq27xslcveglfmr4ynfwg7gqmchsn"}}],"sequence":"8"}

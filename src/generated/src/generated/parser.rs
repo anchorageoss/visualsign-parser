@@ -403,6 +403,7 @@ pub enum Chain {
     Tron = 5,
     Near = 6,
     Zcash = 7,
+    Cosmos = 8,
     /// Custom for extensibility
     Custom = 999,
 }
@@ -421,6 +422,7 @@ impl Chain {
             Chain::Tron => "CHAIN_TRON",
             Chain::Near => "CHAIN_NEAR",
             Chain::Zcash => "CHAIN_ZCASH",
+            Chain::Cosmos => "CHAIN_COSMOS",
             Chain::Custom => "CHAIN_CUSTOM",
         }
     }
@@ -435,6 +437,7 @@ impl Chain {
             "CHAIN_TRON" => Some(Self::Tron),
             "CHAIN_NEAR" => Some(Self::Near),
             "CHAIN_ZCASH" => Some(Self::Zcash),
+            "CHAIN_COSMOS" => Some(Self::Cosmos),
             "CHAIN_CUSTOM" => Some(Self::Custom),
             _ => None,
         }

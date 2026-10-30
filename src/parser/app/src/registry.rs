@@ -51,6 +51,11 @@ pub fn create_registry(
         visualsign::registry::Chain::Near,
         visualsign_near::NearVisualSignConverter::new(),
     );
+    #[cfg(feature = "cosmos")]
+    registry.register::<visualsign_cosmos::CosmosTransaction, _>(
+        visualsign::registry::Chain::Cosmos,
+        visualsign_cosmos::CosmosVisualSignConverter,
+    );
     #[cfg(feature = "zcash")]
     registry.register::<visualsign_zcash::ZcashTransactionWrapper, _>(
         visualsign::registry::Chain::Zcash,
@@ -189,5 +194,28 @@ mod tests {
             rendered.contains(CUSTOM_FOO_SELECTOR),
             "dropping the ABI must leave the raw selector {CUSTOM_FOO_SELECTOR}, got: {rendered}"
         );
+    }
+}
+
+#[cfg(all(test, feature = "cosmos"))]
+mod cosmos_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use visualsign::registry::Chain;
+    use visualsign::vsptrait::VisualSignOptions;
+
+    /// `CosmJS` proto-signing test vector: a faucet `MsgSend` sign doc.
+    const COSMJS_SIGN_DOC: &str = "0a93010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f7331706b707472653766646b6c366766727a6c65736a6a766878686c63337234676d6d6b38727336122d636f736d6f7331717970717870713971637273737a673270767871367273307a716733797963356c7a763778751a100a0575636f736d12073132333435363712650a4e0a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a21034f04181eeba35391b858633a765c4a0c189697b40d216354d50890d350c7029012040a02080112130a0d0a0575636f736d12043230303010c09a0c1a0c73696d642d74657374696e672001";
+
+    #[test]
+    fn registry_decodes_cosmos_sign_docs() {
+        let registry = super::create_registry(&crate::config::ParserConfig::accept_unsigned());
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            ..Default::default()
+        };
+        let result = registry
+            .convert_transaction(&Chain::Cosmos, COSMJS_SIGN_DOC, options)
+            .unwrap();
+        assert_eq!(result.payload.payload_type, "CosmosTx");
     }
 }

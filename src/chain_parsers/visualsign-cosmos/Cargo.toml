@@ -1,0 +1,23 @@
+[package]
+name = "visualsign-cosmos"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[features]
+default = ["cli-plugin"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core", "dep:generated"]
+
+[dependencies]
+base64 = "0.22.1"
+clap = { version = "4.0", features = ["derive"], optional = true }
+generated = { path = "../../generated", optional = true }
+hex = "0.4.3"
+parser_cli_core = { path = "../../parser/cli-core", optional = true }
+prost = { version = "0.12", default-features = false, features = ["prost-derive", "std"] }
+serde_json = "1.0"
+sha2 = "0.10"
+visualsign = { workspace = true }
+
+[lints]
+workspace = true
