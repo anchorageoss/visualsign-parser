@@ -551,12 +551,60 @@ fn amino_send_and_authz_vote() {
 
 const AMINO_FEE: &str = r#""fee":{"amount":[],"gas":"1"}"#;
 
+/// Serialize with sorted keys, as the SDK's `MustSortJSON` does. Plain
+/// `to_string` follows map order, which is insertion order when another
+/// workspace crate enables serde_json's `preserve_order` feature.
+fn sorted_json(v: &serde_json::Value, out: &mut String) {
+    match v {
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            out.push('{');
+            for (i, k) in keys.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&serde_json::Value::String(k.clone()).to_string());
+                out.push(':');
+                sorted_json(&map[k], out);
+            }
+            out.push('}');
+        }
+        serde_json::Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                sorted_json(item, out);
+            }
+            out.push(']');
+        }
+        other => out.push_str(&other.to_string()),
+    }
+}
+
 fn historical_amino(ty: &str, value: serde_json::Value) -> String {
-    serde_json::json!({
+    let doc = serde_json::json!({
         "account_number": "1", "chain_id": "legacy", "fee": {"amount": [], "gas": "1"},
         "memo": "", "msgs": [{"type": ty, "value": value}], "sequence": "0"
-    })
-    .to_string()
+    });
+    let mut out = String::new();
+    sorted_json(&doc, &mut out);
+    out
+}
+
+/// Assert the doc is refused with `expected` in the error, so a refusal for
+/// some other reason (such as non-canonical JSON) does not pass.
+fn assert_refused(doc: &str, expected: &str, what: &str) {
+    let err = match convert(doc) {
+        Ok(_) => panic!("accepted {what}"),
+        Err(e) => format!("{e}"),
+    };
+    assert!(
+        err.contains(expected),
+        "{what}: got {err:?}, want {expected:?}"
+    );
 }
 
 #[test]
@@ -646,65 +694,85 @@ fn sdk_historical_staking_values_and_shares_are_distinct() {
 
 #[test]
 fn sdk_colliding_historical_shapes_are_refused() {
-    for (ty, v) in [
+    for (ty, v, expected) in [
         (
             "cosmos-sdk/Send",
             serde_json::json!({"inputs":[],"outputs":[],"from_address":"a","to_address":"b","amount":[]}),
+            "incomplete or colliding historical message shapes",
         ),
         (
             "cosmos-sdk/MsgSend",
             serde_json::json!({"inputs":[],"outputs":[]}),
+            "bank shape does not match historical message type",
         ),
         (
             "cosmos-sdk/MsgDelegate",
             serde_json::json!({"delegator_addr":"a","delegator_address":"b","validator_addr":"v","value":{"amount":"1","denom":"stake"}}),
+            "incomplete or colliding historical message shapes",
         ),
         (
             "cosmos-sdk/MsgDelegate",
             serde_json::json!({"delegator_addr":"a","validator_address":"v","value":{"amount":"1","denom":"stake"}}),
+            "incomplete or colliding historical message shapes",
         ),
         (
             "cosmos-sdk/MsgDelegate",
             serde_json::json!({"delegator_address":"a","validator_address":"v","value":{"amount":"1","denom":"stake"},"amount":{"amount":"1","denom":"stake"}}),
+            "incomplete or colliding historical message shapes",
         ),
         (
             "cosmos-sdk/MsgUndelegate",
             serde_json::json!({"delegator_address":"a","validator_address":"v","shares_amount":"1.5","amount":{"amount":"1","denom":"stake"}}),
+            "incomplete or colliding historical message shapes",
         ),
         (
             "cosmos-sdk/Undelegate",
             serde_json::json!({"delegator_address":"a","validator_address":"v","amount":{"amount":"1","denom":"stake"}}),
+            "staking addresses do not match historical message type",
         ),
     ] {
-        assert!(convert(&historical_amino(ty, v)).is_err(), "accepted {ty}");
+        assert_refused(
+            &historical_amino(ty, v.clone()),
+            expected,
+            &format!("{ty} {v}"),
+        );
     }
 }
 
 #[test]
 fn sdk_historical_shapes_require_the_documented_field_types() {
-    for (ty, v) in [
+    for (ty, v, expected) in [
         (
             "cosmos-sdk/Send",
             serde_json::json!({"inputs":[{"coins":[]}],"outputs":[{"address":"b","coins":[]}]}),
+            "incomplete or colliding historical message shapes",
         ),
         (
             "cosmos-sdk/Send",
             serde_json::json!({"inputs":[{"address":"a","coins":{"amount":"1","denom":"stake"}}],"outputs":[{"address":"b","coins":[]}]}),
+            "coins is not a coin array",
         ),
         (
             "cosmos-sdk/Send",
             serde_json::json!({"from_address":"a","to_address":"b","amount":{"amount":"1","denom":"stake"}}),
+            "amount is not a coin array",
         ),
         (
             "cosmos-sdk/MsgDelegate",
             serde_json::json!({"delegator_address":"a","validator_address":"v","amount":[{"amount":"1","denom":"stake"}]}),
+            "coin is not an object",
         ),
         (
             "cosmos-sdk/MsgDelegate",
             serde_json::json!({"delegator_address":"a","validator_address":"v","amount":null}),
+            "coin is not an object",
         ),
     ] {
-        assert!(convert(&historical_amino(ty, v)).is_err(), "accepted {ty}");
+        assert_refused(
+            &historical_amino(ty, v.clone()),
+            expected,
+            &format!("{ty} {v}"),
+        );
     }
 }
 
@@ -716,7 +784,9 @@ fn sdk_historical_vote_options_and_versioned_metadata() {
         ("No", "No"),
         ("NoWithVeto", "No with Veto"),
         ("VOTE_OPTION_YES", "Yes"),
-        ("1", "Yes"),
+        // No SDK writes the number as a string.
+        ("1", "unrecognized"),
+        ("4", "unrecognized"),
     ] {
         let p = convert(&historical_amino(
             "cosmos-sdk/MsgVote",
@@ -738,6 +808,48 @@ fn sdk_historical_vote_options_and_versioned_metadata() {
             assert!(has(&p, "Message 1 / Metadata", "x"));
         }
     }
+}
+
+#[test]
+fn sdk_historical_withdraw_reward_address_shapes() {
+    for v in [
+        serde_json::json!({"delegator_addr":"a","validator_addr":"v"}),
+        serde_json::json!({"delegator_address":"a","validator_address":"v"}),
+    ] {
+        let p = convert(&historical_amino(
+            "cosmos-sdk/MsgWithdrawDelegationReward",
+            v,
+        ))
+        .unwrap();
+        assert!(has(&p, "Message 1 / Type", "Withdraw Rewards"));
+        assert!(has(&p, "Message 1 / Delegator", "a"));
+        assert!(has(&p, "Message 1 / Validator", "v"));
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("Unrecognized"), "{json}");
+    }
+    for v in [
+        serde_json::json!({"delegator_addr":"a","validator_address":"v"}),
+        serde_json::json!({"delegator_address":"a"}),
+        serde_json::json!({}),
+    ] {
+        assert_refused(
+            &historical_amino("cosmos-sdk/MsgWithdrawDelegationReward", v.clone()),
+            "incomplete or colliding historical message shapes",
+            &v.to_string(),
+        );
+    }
+}
+
+#[test]
+fn sdk_negative_delegation_shares_are_refused() {
+    assert_refused(
+        &historical_amino(
+            "cosmos-sdk/MsgUndelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","shares_amount":"-1.5"}),
+        ),
+        "shares_amount is not a decimal string",
+        "negative shares",
+    );
 }
 
 #[test]

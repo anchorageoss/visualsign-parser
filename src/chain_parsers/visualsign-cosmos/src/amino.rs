@@ -328,9 +328,9 @@ fn staking_amount(
             )
         }
         2 if !delegate => {
+            // Undelegated and redelegated shares are positive; a sign is refused.
             let shares = m.str("shares_amount")?;
-            let unsigned = shares.strip_prefix('-').unwrap_or(&shares);
-            let mut parts = unsigned.split('.');
+            let mut parts = shares.split('.');
             let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
             let valid = parts.next().is_some_and(digits)
                 && parts.next().is_none_or(digits)
@@ -460,8 +460,30 @@ fn render_msg(v: &Value, prefix: &str, depth: usize, out: &mut Out) -> Result<()
         }
         "cosmos-sdk/MsgWithdrawDelegationReward" => {
             out.text(&p("Type"), "Withdraw Rewards")?;
-            out.address(&p("Delegator"), &m.str("delegator_address")?)?;
-            out.address(&p("Validator"), &m.str("validator_address")?)?;
+            // v0.32 and earlier used the `_addr` keys.
+            let old = shape(
+                &m,
+                &[
+                    &["delegator_addr", "validator_addr"],
+                    &["delegator_address", "validator_address"],
+                ],
+            )? == 0;
+            out.address(
+                &p("Delegator"),
+                &m.str(if old {
+                    "delegator_addr"
+                } else {
+                    "delegator_address"
+                })?,
+            )?;
+            out.address(
+                &p("Validator"),
+                &m.str(if old {
+                    "validator_addr"
+                } else {
+                    "validator_address"
+                })?,
+            )?;
         }
         "cosmos-sdk/MsgVote" | "cosmos-sdk/v1/MsgVote" => {
             out.text(&p("Type"), "Vote")?;
@@ -470,10 +492,10 @@ fn render_msg(v: &Value, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             let option = match m.get("option") {
                 Some(Value::Number(n)) => n.as_i64().and_then(vote_option),
                 Some(Value::String(s)) => match s.as_str() {
-                    "Yes" | "1" | "VOTE_OPTION_YES" => Some("Yes"),
-                    "Abstain" | "2" | "VOTE_OPTION_ABSTAIN" => Some("Abstain"),
-                    "No" | "3" | "VOTE_OPTION_NO" => Some("No"),
-                    "NoWithVeto" | "4" | "VOTE_OPTION_NO_WITH_VETO" => Some("No with Veto"),
+                    "Yes" | "VOTE_OPTION_YES" => Some("Yes"),
+                    "Abstain" | "VOTE_OPTION_ABSTAIN" => Some("Abstain"),
+                    "No" | "VOTE_OPTION_NO" => Some("No"),
+                    "NoWithVeto" | "VOTE_OPTION_NO_WITH_VETO" => Some("No with Veto"),
                     _ => None,
                 },
                 _ => None,

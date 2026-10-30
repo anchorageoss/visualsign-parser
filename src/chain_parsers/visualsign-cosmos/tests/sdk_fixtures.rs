@@ -1,4 +1,5 @@
-//! Schema-derived cross-version corpus shared with Sigil's signing decoder.
+//! Schema-derived cross-version Cosmos SDK corpus (see
+//! `docs/cosmos-sdk-compatibility.md`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::Value;

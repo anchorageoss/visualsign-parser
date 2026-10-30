@@ -66,7 +66,7 @@ impl Transaction for CosmosTransaction {
                 "sign doc too large".to_string(),
             ));
         }
-        let data = data.trim();
+        let data = data.trim_ascii();
         let document = if data.starts_with('{') {
             SignDocument::Amino(AminoDoc::parse(data)?)
         } else {
