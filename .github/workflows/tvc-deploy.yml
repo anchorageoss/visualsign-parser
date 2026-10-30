@@ -81,12 +81,12 @@ jobs:
     # Bounded: cargo install tvc (~minutes) + poll-to-healthy (up to 15m) + smoke.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
 
       - name: Install tvc CLI
         run: cargo install tvc --version 0.7.0 --locked
