@@ -191,3 +191,27 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "zcash"))]
+mod zcash_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use visualsign::registry::Chain;
+    use visualsign::vsptrait::VisualSignOptions;
+
+    /// Orchard send fixture from `visualsign-zcash`, converted through the real
+    /// registry so a missing or mis-wired registration fails here.
+    const ORCHARD_SEND_PCZT_HEX: &str = include_str!(
+        "../../../chain_parsers/visualsign-zcash/tests/fixtures/orchard_send_v5.input"
+    );
+
+    #[test]
+    fn registry_decodes_zcash() {
+        let registry = super::create_registry(&crate::config::ParserConfig::accept_unsigned());
+        let pczt = ORCHARD_SEND_PCZT_HEX.trim();
+        let options = VisualSignOptions::default();
+        let result = registry
+            .convert_transaction(&Chain::Zcash, pczt, options)
+            .expect("fixture PCZT must convert");
+        assert_eq!(result.payload.payload_type, "ZcashTx");
+    }
+}
