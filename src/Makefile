@@ -114,14 +114,16 @@ SHELLCHECK ?= $(if $(filter 1,$(SHELLCHECK_IN_DOCKER)),$(SHELLCHECK_DOCKER),$(if
 # shebang (shellcheck does not support zsh). Paths are relative to the repo
 # root, which is also the container's working directory.
 lint-shell:
-	@cd $(ROOT) && files=$$( { git ls-files '*.sh'; \
-		git grep -lI -E '^#!' | while IFS= read -r f; do \
-			head -n 1 "$$f" | grep -qE '^#!.*[/ ](ba|da|k)?sh([[:space:]]|$$)' && echo "$$f"; \
-		done; } | sort -u); \
-	test -n "$$files" || { echo "no shell scripts found"; exit 1; }; \
+	@cd "$(ROOT)" && list=$$(mktemp) && trap 'rm -f "$$list"' EXIT && \
+	{ git ls-files -z '*.sh'; \
+		git grep -z -lI -E '^#!' | xargs -0 sh -c 'for f; do \
+			head -n 1 -- "$$f" | grep -qE "^#!.*[/ ](ba|da|k)?sh([[:space:]]|$$)" && printf "%s\0" "$$f"; \
+		done' sh; } | sort -zu > "$$list"; \
+	n=$$(tr -cd '\000' < "$$list" | wc -c | tr -d ' '); \
+	test "$$n" -gt 0 || { echo "no shell scripts found"; exit 1; }; \
 	$(SHELLCHECK) --version | sed -n 2p; \
-	echo "shellcheck $$(echo $$files | wc -w | tr -d ' ') scripts"; \
-	$(SHELLCHECK) $$files
+	echo "shellcheck $$n scripts"; \
+	xargs -0 $(SHELLCHECK) < "$$list"
 
 .PHONY: lint
 lint: fmt-check lint-shell
