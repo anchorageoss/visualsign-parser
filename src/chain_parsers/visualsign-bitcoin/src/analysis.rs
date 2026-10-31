@@ -8,9 +8,15 @@
 //! a lying `witness_utxo` can hide an arbitrary fee. An input amount is
 //! therefore only `Verified` when a `non_witness_utxo` hashes to the prevout
 //! txid. With only ALL / DEFAULT sighashes, the fee is verified when every input
-//! is verified, or when every input spends a taproot output (a BIP-341
-//! ALL / DEFAULT signature without ANYONECANPAY commits to all input amounts
-//! and outputs, so whichever input gets signed binds the rest).
+//! is verified. When every input spends a taproot output but some amounts are
+//! only claimed, the fee is `SignatureBound`: a BIP-341 ALL / DEFAULT signature
+//! without ANYONECANPAY commits to all input amounts, so a signature over a
+//! wrong amount is invalid, but only if the signer computes the sighash from
+//! the PSBT's amounts rather than from its own view of the prevouts.
+//!
+//! Scripts: as BIP-174 requires of a signer, a `redeem_script` must hash to the
+//! prevout, a `witness_script` must hash to the script it spends, and a
+//! `witness_utxo` must spend a segwit output. A PSBT failing these is refused.
 
 use crate::scripts::{self, ScriptDetail};
 use std::collections::BTreeSet;
@@ -64,7 +70,13 @@ pub struct OutputInfo {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Fee {
     Verified(Amount),
-    Unverified { fee: Amount, reason: &'static str },
+    /// Every input is taproot and some amounts are only claimed: correct only
+    /// as far as the BIP-341 signature enforces it (see the module docs).
+    SignatureBound(Amount),
+    Unverified {
+        fee: Amount,
+        reason: &'static str,
+    },
     Unknown,
 }
 
@@ -109,6 +121,7 @@ pub fn analyze(psbt: &Psbt, network: Network) -> Result<Analysis, BitcoinParserE
         let (prevout, source) = resolve_prevout(txin, input)?;
         if let Some(prevout) = prevout {
             check_money_range(prevout.value, "input value")?;
+            check_input_scripts(input, &prevout.script_pubkey)?;
         }
         let is_taproot = prevout.is_some_and(|o| o.script_pubkey.is_p2tr());
         prevout_scripts.push(prevout.map(|o| o.script_pubkey.clone()));
@@ -186,8 +199,10 @@ fn compute_fee(
             fee,
             reason: "sighash permits other inputs to change",
         }
-    } else if all_verified || all_taproot {
+    } else if all_verified {
         Fee::Verified(fee)
+    } else if all_taproot {
+        Fee::SignatureBound(fee)
     } else {
         Fee::Unverified {
             fee,
@@ -225,6 +240,45 @@ fn resolve_prevout<'a>(
         Some(w) => (Some(w), AmountSource::Claimed),
         None => (None, AmountSource::Missing),
     })
+}
+
+/// The BIP-174 signer checks on an input's scripts, as its pseudocode states
+/// them. `prevout` is the script being spent; a P2SH prevout without a
+/// `redeem_script` can't be checked further, since it may wrap a segwit
+/// program the PSBT doesn't reveal. A `witness_script` on a non-P2WSH spend is
+/// not refused here; `scripts` shows it as not matching the output.
+fn check_input_scripts(input: &Input, prevout: &Script) -> Result<(), BitcoinParserError> {
+    let spent = match &input.redeem_script {
+        Some(redeem) => {
+            if *prevout != ScriptBuf::new_p2sh(&redeem.script_hash()) {
+                return Err(BitcoinParserError::Malformed(
+                    "redeem_script does not match the prevout script".into(),
+                ));
+            }
+            redeem.as_script()
+        }
+        None => prevout,
+    };
+    if spent.is_p2sh() {
+        return Ok(());
+    }
+    if input.non_witness_utxo.is_none()
+        && input.witness_utxo.is_some()
+        && !spent.is_witness_program()
+    {
+        return Err(BitcoinParserError::Malformed(
+            "witness_utxo given for a non-witness input".into(),
+        ));
+    }
+    if let Some(witness) = &input.witness_script
+        && spent.is_p2wsh()
+        && *spent != ScriptBuf::new_p2wsh(&witness.wscript_hash())
+    {
+        return Err(BitcoinParserError::Malformed(
+            "witness_script does not match the script it spends".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// BIP-370 explicitly excludes these fields from PSBTv0. rust-bitcoin
