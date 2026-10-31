@@ -100,8 +100,31 @@ fmt-check: check-preset-sources
 unused-deps:
 	cargo machete . ../tools/tvc-deploy
 
+# shellcheck, pinned by digest. `lint-shell` uses a `shellcheck` already on
+# PATH when there is one, and otherwise runs this image, so nothing needs
+# installing on the host. SHELLCHECK_IN_DOCKER=1 forces the pinned image (CI
+# sets it so the gate does not drift with the runner's shellcheck version);
+# SHELLCHECK=<cmd> overrides both.
+SHELLCHECK_IMAGE := koalaman/shellcheck:v0.10.0@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb
+SHELLCHECK_DOCKER := docker run --rm --network none -v "$(ROOT)":/mnt:ro -w /mnt $(SHELLCHECK_IMAGE)
+SHELLCHECK ?= $(if $(filter 1,$(SHELLCHECK_IN_DOCKER)),$(SHELLCHECK_DOCKER),$(if $(shell command -v shellcheck 2>/dev/null),shellcheck,$(SHELLCHECK_DOCKER)))
+
+.PHONY: lint-shell
+# Every tracked `*.sh`, plus tracked files whose first line is an sh/bash/dash/ksh
+# shebang (shellcheck does not support zsh). Paths are relative to the repo
+# root, which is also the container's working directory.
+lint-shell:
+	@cd $(ROOT) && files=$$( { git ls-files '*.sh'; \
+		git grep -lI -E '^#!' | while IFS= read -r f; do \
+			head -n 1 "$$f" | grep -qE '^#!.*[/ ](ba|da|k)?sh([[:space:]]|$$)' && echo "$$f"; \
+		done; } | sort -u); \
+	test -n "$$files" || { echo "no shell scripts found"; exit 1; }; \
+	$(SHELLCHECK) --version | sed -n 2p; \
+	echo "shellcheck $$(echo $$files | wc -w | tr -d ' ') scripts"; \
+	$(SHELLCHECK) $$files
+
 .PHONY: lint
-lint: fmt-check
+lint: fmt-check lint-shell
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
