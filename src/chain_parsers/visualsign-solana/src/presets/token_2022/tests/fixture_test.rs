@@ -289,6 +289,27 @@ fn test_transfer_checked_real_transaction() {
 }
 
 #[test]
+fn test_transfer_checked_mainnet_legacy() {
+    test_real_transaction(
+        "transfer_checked_mainnet_legacy",
+        "TransferChecked (legacy)",
+    );
+}
+
+#[test]
+fn test_transfer_checked_mainnet_v0() {
+    test_real_transaction("transfer_checked_mainnet_v0", "TransferChecked (v0)");
+}
+
+#[test]
+fn test_transfer_checked_mainnet_memo() {
+    test_real_transaction(
+        "transfer_checked_mainnet_memo",
+        "TransferChecked (with memo)",
+    );
+}
+
+#[test]
 fn test_pause_real_transaction() {
     test_real_transaction("pause", "Pause");
 }

@@ -1,0 +1,9 @@
+{
+  "description": "Full mainnet transaction behind transfer_checked.json. On chain the TransferChecked carries 5 accounts (the authority is repeated as a fifth account); transfer_checked.json keeps only the first 4.",
+  "source": "https://solscan.io/tx/pDxnsJ8RAucAfGKD54D9khP1GShcUQehyqAEhwbdogbxsD3UGdH2iFpyV2FXHDjV84WSvdXhrWYfW6vfjwy1vSe",
+  "signature": "pDxnsJ8RAucAfGKD54D9khP1GShcUQehyqAEhwbdogbxsD3UGdH2iFpyV2FXHDjV84WSvdXhrWYfW6vfjwy1vSe",
+  "cluster": "mainnet-beta",
+  "slot": 373242736,
+  "full_transaction_note": "Fetched keylessly with getTransaction from api.mainnet-beta.solana.com. Instruction 2 is Token-2022 TransferChecked of 50000000000000000 raw units (9 decimals) with accounts [source, mint, destination, authority, authority].",
+  "full_transaction_base64": "ASi5Rt7g4xJfCVHo11zbcLVHToSqX7AFqfyFNJ+54xdsAUZcbYndjfxGY+Pt7wg8VqF7bcnLxMcEF4rnf6IfCgMBAAMG/WFeUJjVI/TiTwLBED/D77rqhPsoLx3Sg7wlTnkukj2X7lilwDoMb3+3+yv84QcuZhwNUOT91i9WPwRv888u7N6wnE/b2T+4q5+PEDP5o1TOT6UxM/kiD1g4iwqsZOIZAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAMMezEBHkgeSbxHI/QKZXYTJh8kfjg3QoBVluSR/hUnAbd9uHudY/eGEJdvORszdq2GvxNg7kNJ/69+SjYoYv8KDjDH5G7YxgxhnRbpprks4FauLBNDwjQXhULROSsMKUDAwAJAyuVaQEAAAAAAwAFAl0MAAAFBQIEAQAACgwAAMUuvKKxAAk="
+}
