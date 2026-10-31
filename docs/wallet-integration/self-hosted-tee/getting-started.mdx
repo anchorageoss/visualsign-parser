@@ -205,7 +205,7 @@ Before you deploy an image you didn't build, such as one from a contributor's fo
 
 A rebuild that matches proves the binary was built from that source. It does not prove the source is safe, so read the source before you deploy it. The rebuild also runs the fork's build files on your machine: its `Makefile` (including any `$(shell ...)` call) and its Containerfiles. Review them first, or do the rebuild in a disposable VM.
 
-Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION**, the **SOURCE_URL** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and `SOURCE_URL` is recorded in the image's source label, so pass the same values when you rebuild. The run summary comes from the fork, so treat each value as untrusted input. Save these steps as a script, which reads the values as data, checks them, and stops at the first failure. Paste each value at its prompt; don't edit them into the script, where a quote or `;` in a value would run as shell code:
+Every `stagex` run's summary lists, for each target, the **Commit**, the **VERSION**, the **SOURCE_URL** and the **OCI manifest digest** it built. `VERSION` is compiled into the binary and `SOURCE_URL` is recorded in the image's source label, so pass the same values when you rebuild. The run summary comes from the fork, so treat each value as untrusted input. Save these steps as one script, which reads the values as data, checks them, shows you the fork's changes, and builds only after you confirm. Paste each value at its prompt; don't edit them into the script, where a quote or `;` in a value would run as shell code. The build needs Docker with the containerd image store enabled and a `docker-container` buildx builder, as in CI (create it once with `docker buildx create --driver docker-container --name build --use`):
 
 ```bash
 #!/usr/bin/env bash
@@ -221,17 +221,16 @@ IFS= read -r -p 'SOURCE_URL (from the run summary): ' SOURCE_URL
 git fetch "$SOURCE_URL" "$COMMIT"
 # Read all of this before you build. Look hardest at Makefile, images/** and scripts/**.
 git diff origin/main...FETCH_HEAD   # origin is your clone of anchorageoss/visualsign-parser
-```
 
-The workflow refuses to build with a `VERSION` of any other shape, and the `Makefile` passes both values to the shell, so a value with a quote or a `;` in it would run commands on your machine. After you have read the diff, build. The build needs Docker with the containerd image store enabled and a `docker-container` buildx builder, as in CI:
-
-```bash
+IFS= read -r -p 'Build this commit? [y/N] ' ok
+[[ "$ok" == y ]] || exit 1
 git checkout "$COMMIT"
-docker buildx create --driver docker-container --name build --use   # once
 rm -rf out/parser_http_server   # make won't rebuild for a new VERSION or SOURCE_URL alone
 make VERSION="$VERSION" SOURCE_URL="$SOURCE_URL" out/parser_http_server/index.json
 jq -r '.manifests[0].digest' out/parser_http_server/index.json      # compare with the run summary
 ```
+
+The checks match the shapes the workflow accepts; it refuses to build with any other `VERSION`. They matter because the `Makefile` passes both values to the shell, so a value with a quote or a `;` in it would run commands on your machine.
 
 A manifest digest mismatch is not conclusive. This reads the first entry of `index.json`, which assumes it has a single entry, and this page hasn't confirmed that it equals the registry digest after `docker load` and push. The pivot hash below is what decides.
 
