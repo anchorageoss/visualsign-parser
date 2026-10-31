@@ -68,11 +68,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         let program_id_str = resolve_program_display(context);
 
         let summary = decoded.summary();
-        let mut expanded_fields = vec![
-            make_text_field("Program ID", program_id_str.clone())?,
-            make_text_field("Instruction Type", decoded.name())?,
-        ];
-        expanded_fields.extend(build_variant_fields(&decoded)?);
+        let expanded_fields = build_expanded_fields(&program_id_str, &decoded, context.data())?;
 
         let condensed = SignablePayloadFieldListLayout {
             fields: vec![make_text_field("Instruction", summary.clone())?],
@@ -310,7 +306,10 @@ impl SwigInstructionDecoded {
                 format!("Swig: Transfer assets (role #{role_id})")
             }
             SwigInstructionDecoded::Unknown { discriminator, .. } => {
-                format!("Swig: Unknown instruction ({discriminator})")
+                // The same hex the expanded Discriminator field shows, with
+                // the decoded code next to it.
+                let hex = hex::encode(discriminator.to_le_bytes());
+                format!("Swig: Unknown instruction (discriminator {hex}, code {discriminator})")
             }
         }
     }
@@ -1168,6 +1167,27 @@ fn nested_too_deeply_field(
     })
 }
 
+/// Expanded view shared by every swig instruction: program, instruction type
+/// and the raw discriminator (hex, as the IDL presets render it), followed by
+/// the variant's own fields.
+fn build_expanded_fields(
+    program_id: &str,
+    decoded: &SwigInstructionDecoded,
+    data: &[u8],
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let discriminator = data
+        .get(..2)
+        .map(hex::encode)
+        .ok_or_else(|| VisualSignError::DecodeError("swig: missing discriminator".to_string()))?;
+    let mut fields = vec![
+        make_text_field("Program ID", program_id)?,
+        make_text_field("Instruction Type", decoded.name())?,
+        make_text_field("Discriminator", discriminator)?,
+    ];
+    fields.extend(build_variant_fields(decoded)?);
+    Ok(fields)
+}
+
 fn build_variant_fields(
     decoded: &SwigInstructionDecoded,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
@@ -1392,13 +1412,10 @@ fn build_variant_fields(
             }
             Ok(fields)
         }
-        SwigInstructionDecoded::Unknown {
-            discriminator,
-            raw_data,
-        } => Ok(vec![
-            make_text_field("Discriminator", discriminator.to_string())?,
-            make_text_field("Raw Data (hex)", format_hex(raw_data))?,
-        ]),
+        SwigInstructionDecoded::Unknown { raw_data, .. } => Ok(vec![make_text_field(
+            "Raw Data (hex)",
+            format_hex(raw_data),
+        )?]),
     }
 }
 
@@ -2308,8 +2325,15 @@ fn format_web_authn_field_order(order: &[u8]) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
+    use crate::core::{
+        InstructionVisualizer, SolanaTransactionWrapper, SolanaVisualSignConverter,
+        VisualizerContext,
+    };
+    use crate::idl::IdlRegistry;
+    use solana_message::compiled_instruction::CompiledInstruction;
+    use solana_parser::solana::structs::SolanaAccount;
     use solana_pubkey::Pubkey;
+    use std::str::FromStr;
     use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
     use visualsign::{AnnotatedPayloadField, SignablePayload, SignablePayloadField};
 
@@ -2373,6 +2397,99 @@ mod tests {
             actual, expected,
             "Field '{label}' did not match expected value"
         );
+    }
+
+    /// Smallest zero-filled payload the parser accepts for swig kind `code`.
+    fn minimal_swig_instruction(code: u16) -> (Vec<u8>, super::SwigInstructionDecoded) {
+        (2..=512)
+            .find_map(|len| {
+                let mut data = vec![0u8; len];
+                data[..2].copy_from_slice(&code.to_le_bytes());
+                // UpdateAuthorityV1 needs a one-byte operation
+                // (actions_data_len = 1).
+                if code == 3 && len > 2 {
+                    data[2] = 1;
+                }
+                super::parse_swig_instruction(&data, &[], 0)
+                    .ok()
+                    .map(|decoded| (data, decoded))
+            })
+            .unwrap_or_else(|| panic!("no zero-filled input parses for kind {code}"))
+    }
+
+    /// Every known swig instruction (and the unknown fallback) shows its raw
+    /// discriminator in the expanded view, like the IDL presets do.
+    #[test]
+    fn every_swig_instruction_surfaces_its_discriminator() {
+        const KNOWN: [u16; 13] = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13];
+        for code in KNOWN.into_iter().chain([8, 0xffff]) {
+            let (data, decoded) = minimal_swig_instruction(code);
+            assert_eq!(
+                matches!(decoded, super::SwigInstructionDecoded::Unknown { .. }),
+                !KNOWN.contains(&code),
+                "kind {code} decoded as {}",
+                decoded.name()
+            );
+            let fields = super::build_expanded_fields("Swig", &decoded, &data).unwrap();
+            assert_text_field(&fields, "Discriminator", &hex::encode(code.to_le_bytes()));
+            let count = fields
+                .iter()
+                .filter(|f| f.signable_payload_field.label() == "Discriminator")
+                .count();
+            assert_eq!(count, 1, "kind {code}: Discriminator shown {count} times");
+        }
+    }
+
+    /// The discriminator reaches the signer through the real visualizer, not
+    /// just `build_expanded_fields`: once for a known kind, and for an unknown
+    /// kind together with its raw data and a summary in the same hex.
+    #[test]
+    fn visualizer_shows_the_discriminator_for_known_and_unknown_kinds() {
+        let swig = Pubkey::from_str("swigypWHEksbC64pWKwah1WTeh9JXwx8H1rJHLdbQMB").unwrap();
+        let sender = SolanaAccount {
+            account_key: swig.to_string(),
+            signer: false,
+            writable: false,
+        };
+        let account_keys = vec![swig];
+        let registry = IdlRegistry::new();
+        for (code, expected_hex) in [(5u16, "0500"), (0xffff, "ffff")] {
+            let (data, _) = minimal_swig_instruction(code);
+            let compiled = CompiledInstruction {
+                program_id_index: 0,
+                accounts: vec![],
+                data,
+            };
+            let context = VisualizerContext::new(&sender, &compiled, &account_keys, &registry, 0);
+            let field = super::SwigWalletVisualizer
+                .visualize_tx_commands(&context)
+                .unwrap();
+            let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+                &field.signable_payload_field
+            else {
+                panic!("kind {code}: expected a PreviewLayout");
+            };
+            let expanded = &preview_layout.expanded.as_ref().unwrap().fields;
+            assert_text_field(expanded, "Discriminator", expected_hex);
+            let count = expanded
+                .iter()
+                .filter(|f| f.signable_payload_field.label() == "Discriminator")
+                .count();
+            assert_eq!(count, 1, "kind {code}: Discriminator shown {count} times");
+            if code == 0xffff {
+                assert!(
+                    expanded
+                        .iter()
+                        .any(|f| f.signable_payload_field.label() == "Raw Data (hex)"),
+                    "unknown kind must still show its raw data"
+                );
+                let title = &preview_layout.title.as_ref().unwrap().text;
+                assert_eq!(
+                    title,
+                    "Swig: Unknown instruction (discriminator ffff, code 65535)"
+                );
+            }
+        }
     }
 
     #[test]
