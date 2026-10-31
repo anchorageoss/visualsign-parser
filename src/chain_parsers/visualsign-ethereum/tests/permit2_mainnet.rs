@@ -23,6 +23,7 @@ use std::path::PathBuf;
 
 use alloy_primitives::{Address, U160};
 use serde_json::Value;
+use visualsign::encodings::decode_hex;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign_ethereum::registry::ContractRegistry;
 use visualsign_ethereum::transaction_string_to_visual_sign;
@@ -319,7 +320,7 @@ fn read_fixture(name: &str) -> (Address, Vec<u8>) {
         .unwrap_or_else(|e| panic!("{name}.input: {e}"));
     let v: Value = serde_json::from_str(&raw).unwrap();
     let to: Address = v["to"].as_str().unwrap().parse().unwrap();
-    let data = hex::decode(v["data"].as_str().unwrap().trim_start_matches("0x")).unwrap();
+    let data = decode_hex(v["data"].as_str().unwrap()).unwrap();
     (to, data)
 }
 
@@ -349,7 +350,9 @@ fn permit2_mainnet_fixtures_render_decoded_amounts() {
 fn assert_known_misrenders_fixed(issue: u32) {
     let (registry, _) = ContractRegistry::with_default_protocols();
     let mut failures = vec![];
+    let mut checked = 0;
     for m in KNOWN_MISRENDERS.iter().filter(|m| m.issue == issue) {
+        checked += 1;
         let (to, data) = read_fixture(m.fixture);
         let report = check(&registry, to, &data);
         if !report.problems.is_empty() {
@@ -359,6 +362,7 @@ fn assert_known_misrenders_fixed(issue: u32) {
             ));
         }
     }
+    assert!(checked > 0, "no KNOWN_MISRENDERS entries for #{issue}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -376,10 +380,11 @@ fn known_misrenders_611_render_correctly() {
 
 /// Pins today's wrong output for the known misrenders, so CI notices when a
 /// fix or any other behaviour change lands. When this fails because a bug
-/// was fixed, delete the entry's `current` line here and un-ignore the
-/// matching `known_misrenders_*_render_correctly` test.
-// TODO(#610): remove the #610 entries once the inline-permit fallback is fixed.
-// TODO(#611): remove the #611 entry once allow-revert commands are shown.
+/// was fixed, un-ignore the matching `known_misrenders_*_render_correctly`
+/// test and skip that issue's entries here. Keep the entries themselves:
+/// `assert_known_misrenders_fixed` reads the same fixtures.
+// TODO(#610): skip the #610 entries here once the inline-permit fallback is fixed.
+// TODO(#611): skip the #611 entry here once allow-revert commands are shown.
 #[test]
 fn known_misrenders_still_render_as_today() {
     let (registry, _) = ContractRegistry::with_default_protocols();
@@ -423,7 +428,7 @@ fn validate_real_calls_from_env() {
     for line in fs::read_to_string(&src).unwrap().lines() {
         let v: Value = serde_json::from_str(line).unwrap();
         let to: Address = v["to"].as_str().unwrap().parse().unwrap();
-        let data = hex::decode(v["input"].as_str().unwrap().trim_start_matches("0x")).unwrap();
+        let data = decode_hex(v["input"].as_str().unwrap()).unwrap();
         let report = check(&registry, to, &data);
         let verdict = match (
             report.routed,
