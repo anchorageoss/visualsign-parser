@@ -34,6 +34,10 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 # VPM verification
 thiserror = "2.0.12"
 
+# Quint Studio oracle client. Optional and behind the `oracle` feature so the
+# production enclave binary never links it; see `crate::oracle`.
+quint-oracle = { path = "../../../quint-specs/oracle-client/rust", optional = true }
+
 [features]
 # diagnostics is intentionally NOT in `default`: parser_app is the production
 # binary, and `cargo build --workspace --exclude parser_cli` (see Makefile)
@@ -59,6 +63,11 @@ diagnostics = [
 # of `./local-enclave/qos.ephemeral.key`). QOS 0.12.1 dropped `qos_core/vm`,
 # which used to do this.
 vsock = ["tvc-attestation/enclave"]
+# Quint Studio behavior-coverage instrumentation. Off by default: enabling it links
+# the oracle client, which reports transitions to a local daemon when
+# QUINT_ORACLE_URL is set (and is inert otherwise). Never enable for production
+# enclave builds.
+oracle = ["dep:quint-oracle", "quint-oracle/enabled"]
 
 [lints]
 workspace = true

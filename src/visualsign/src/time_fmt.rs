@@ -12,9 +12,30 @@ use chrono::DateTime;
 /// range — callers should still print the raw epoch alongside so signers can
 /// see the original bytes even when the date is unrepresentable.
 pub fn format_timestamp_ms(ms: i64) -> String {
-    DateTime::from_timestamp_millis(ms)
+    let rendered = DateTime::from_timestamp_millis(ms)
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-        .unwrap_or_else(|| "invalid timestamp".to_string())
+        .unwrap_or_else(|| "invalid timestamp".to_string());
+    if quint_oracle::enabled() {
+        use quint_oracle::ToLogged;
+        // The format string has second granularity, so the calendar second is the
+        // whole identity of the rendered text.
+        let second = DateTime::from_timestamp_millis(ms).map(|dt| dt.timestamp());
+        quint_oracle::Event::builder(quint_oracle::current_test(), "format_timestamp_ms")
+            .argument("ms", ms, Some("TIMES"))
+            .assert(
+                vec![
+                    quint_oracle::PathSeg::ident("facts"),
+                    quint_oracle::PathSeg::ident("timestamp"),
+                ],
+                quint_oracle::record([
+                    ("valid", (rendered != "invalid timestamp").to_logged()),
+                    ("second", second.unwrap_or(0).to_logged()),
+                ]),
+            )
+            .scope("shared-encoding-and-time-primitives")
+            .send();
+    }
+    rendered
 }
 
 /// Format epoch-ms relative to `now_ms`, e.g. `"about 2 hours ago"` or
@@ -25,7 +46,32 @@ pub fn format_timestamp_ms(ms: i64) -> String {
 pub fn format_relative_ms(ms: i64, now_ms: i64) -> Option<String> {
     // Validate the timestamp via chrono so we behave the same way as
     // format_timestamp_ms.
-    DateTime::from_timestamp_millis(ms)?;
+    if DateTime::from_timestamp_millis(ms).is_none() {
+        if quint_oracle::enabled() {
+            use quint_oracle::ToLogged;
+            quint_oracle::Event::builder(quint_oracle::current_test(), "format_relative_ms")
+                .argument("ms", ms, Some("TIMES"))
+                .argument("now_ms", now_ms, Some("NOWS"))
+                .assert(
+                    vec![
+                        quint_oracle::PathSeg::ident("facts"),
+                        quint_oracle::PathSeg::ident("relative"),
+                    ],
+                    quint_oracle::record([
+                        ("rendered", false.to_logged()),
+                        ("justNow", false.to_logged()),
+                        ("n", 0_i64.to_logged()),
+                        ("unit", "".to_logged()),
+                        ("future", false.to_logged()),
+                        ("approx", false.to_logged()),
+                        ("plural", false.to_logged()),
+                    ]),
+                )
+                .scope("shared-encoding-and-time-primitives")
+                .send();
+        }
+        return None;
+    }
 
     let diff_ms = (ms as i128) - (now_ms as i128);
     let abs_ms = diff_ms.unsigned_abs();
@@ -38,6 +84,29 @@ pub fn format_relative_ms(ms: i64, now_ms: i64) -> Option<String> {
     const MONTH: u128 = 30 * DAY;
 
     if abs_ms < SEC {
+        if quint_oracle::enabled() {
+            use quint_oracle::ToLogged;
+            quint_oracle::Event::builder(quint_oracle::current_test(), "format_relative_ms")
+                .argument("ms", ms, Some("TIMES"))
+                .argument("now_ms", now_ms, Some("NOWS"))
+                .assert(
+                    vec![
+                        quint_oracle::PathSeg::ident("facts"),
+                        quint_oracle::PathSeg::ident("relative"),
+                    ],
+                    quint_oracle::record([
+                        ("rendered", true.to_logged()),
+                        ("justNow", true.to_logged()),
+                        ("n", 0_i64.to_logged()),
+                        ("unit", "".to_logged()),
+                        ("future", false.to_logged()),
+                        ("approx", false.to_logged()),
+                        ("plural", false.to_logged()),
+                    ]),
+                )
+                .scope("shared-encoding-and-time-primitives")
+                .send();
+        }
         return Some("just now".to_string());
     }
 
@@ -60,6 +129,33 @@ pub fn format_relative_ms(ms: i64, now_ms: i64) -> Option<String> {
     } else {
         format!("{approx_word}{n} {unit}{plural} ago")
     };
+    if quint_oracle::enabled() {
+        use quint_oracle::ToLogged;
+        // The ladder's own choices, logged as it made them: the spec recomputes the
+        // thresholds independently, so a wrong bound or a flipped sign mismatches.
+        quint_oracle::Event::builder(quint_oracle::current_test(), "format_relative_ms")
+            .argument("ms", ms, Some("TIMES"))
+            .argument("now_ms", now_ms, Some("NOWS"))
+            .assert(
+                vec![
+                    quint_oracle::PathSeg::ident("facts"),
+                    quint_oracle::PathSeg::ident("relative"),
+                ],
+                quint_oracle::record([
+                    ("rendered", true.to_logged()),
+                    ("justNow", false.to_logged()),
+                    // -1 is unreachable for a real count, so a count too large for
+                    // an i64 surfaces as a mismatch rather than as a plausible fact.
+                    ("n", i64::try_from(n).unwrap_or(-1).to_logged()),
+                    ("unit", unit.to_logged()),
+                    ("future", future.to_logged()),
+                    ("approx", approx.to_logged()),
+                    ("plural", (plural == "s").to_logged()),
+                ]),
+            )
+            .scope("shared-encoding-and-time-primitives")
+            .send();
+    }
     Some(rendered)
 }
 

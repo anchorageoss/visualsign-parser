@@ -91,6 +91,12 @@ impl IdlRegistry {
             names.insert(program_id, program_name);
         }
 
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "build_idl_registry")
+                .scope("metadata-signature-trust")
+                .send();
+        }
+
         Ok(Self {
             configs,
             names,

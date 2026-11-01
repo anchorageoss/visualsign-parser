@@ -26,6 +26,8 @@ pub mod registry;
 /// VerifiedPaymentMarker verification
 pub mod payment_verify;
 
+pub(crate) mod oracle;
+
 /// Routes for the parser service
 pub mod routes {
     /// Parse route
