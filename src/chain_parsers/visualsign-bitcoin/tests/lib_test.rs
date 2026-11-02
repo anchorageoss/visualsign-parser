@@ -554,6 +554,48 @@ fn tampered_non_witness_utxo_error_names_the_cause() {
     assert!(err.to_string().contains("witness_utxo disagrees"), "{err}");
 }
 
+/// A P2SH prevout spent with `witness_utxo` only, whose `redeem_script` is given.
+fn p2sh_witness_utxo_with_redeem(redeem: ScriptBuf) -> Psbt {
+    let prev = prev_tx(ScriptBuf::new_p2sh(&redeem.script_hash()), 100_000, 7);
+    let mut p = spend(&prev, vec![txout(p2wpkh("m/84'/0'/5'/0/0"), 99_000)]);
+    p.inputs[0].witness_utxo = Some(prev.output[0].clone());
+    p.inputs[0].redeem_script = Some(redeem);
+    p
+}
+
+#[test]
+fn p2sh_shaped_redeem_script_with_witness_utxo_is_rejected() {
+    // BIP-174's signer applies the witness-program check to the redeem script.
+    // A redeem script that is itself P2SH-shaped is not a witness program, so a
+    // witness_utxo for it must be refused like any other non-witness spend.
+    let p2sh_shaped = ScriptBuf::new_p2sh(&ScriptBuf::new().script_hash());
+    let err = convert_with(
+        &encode(&p2sh_witness_utxo_with_redeem(p2sh_shaped)),
+        Network::Bitcoin,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("witness_utxo given for a non-witness input"),
+        "{err}"
+    );
+}
+
+#[test]
+fn p2sh_wrapped_segwit_redeem_script_with_witness_utxo_is_accepted() {
+    let p = p2sh_witness_utxo_with_redeem(p2wpkh("m/49'/0'/0'/0/0"));
+    convert_with(&encode(&p), Network::Bitcoin).unwrap();
+}
+
+#[test]
+fn p2sh_prevout_without_redeem_script_is_not_refused() {
+    // Without a redeem_script the P2SH prevout may wrap a segwit program the
+    // PSBT doesn't reveal, so the witness-program check can't be applied.
+    let mut p = p2sh_witness_utxo_with_redeem(p2wpkh("m/49'/0'/0'/0/0"));
+    p.inputs[0].redeem_script = None;
+    convert_with(&encode(&p), Network::Bitcoin).unwrap();
+}
+
 #[test]
 fn prevout_index_out_of_range_is_rejected() {
     let mut p = p2wpkh_single_sig();
