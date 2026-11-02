@@ -23,10 +23,21 @@
 //! `message_to_visual_sign_payload`).
 //!
 //! A remaining limitation: a Solana wallet signs message bytes as they are, so
-//! a 32-byte message can be the SHA-256 prehash a NEP-413, SEP-53 or TON
-//! Connect verifier checks. The message path refuses a 32-byte message unless
-//! it is all ASCII letters and digits; that bounds the risk, but only the
-//! wallet, which sees what the dApp asked for, can rule it out.
+//! a message can mean something to another verifier of the same key.
+//!
+//! - A 32-byte message can be the SHA-256 prehash a NEP-413, SEP-53 or TON
+//!   Connect verifier checks. The message path refuses a 32-byte message
+//!   unless it is all ASCII letters and digits.
+//! - A message of 69 bytes or more can be the signed bytes of a `webauthn`
+//!   (Ed25519) payload: defuse verifies that signature directly over
+//!   `authenticator_data || sha256(client_data_json)` and checks neither the
+//!   rpIdHash nor the origin, so a dApp can grind the trailing digest to look
+//!   like text. No length or charset rule bounds this. The message path flags
+//!   such a message with a warning (see `is_webauthn_shaped`), and the wallet
+//!   must treat a flagged message as do-not-sign unless it means to make a
+//!   NEAR Intents WebAuthn authorization.
+//!
+//! Only the wallet, which sees what the dApp asked for, can rule either out.
 
 use std::sync::Arc;
 

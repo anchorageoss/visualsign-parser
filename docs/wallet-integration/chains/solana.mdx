@@ -17,10 +17,11 @@ Send the envelope as the transaction string, with the chain set to Solana:
 
 ## Response
 
-`payload_type` is `SolanaMessage`, distinct from `SolanaTx`, so a wallet can tell a message from a transaction without looking at the fields. The title is `Solana Message`, and there are two fields:
+`payload_type` is `SolanaMessage`, distinct from `SolanaTx`, so a wallet can tell a message from a transaction without looking at the fields. The title is `Solana Message`, and there are two fields, or three when the message is [flagged](#flagged-messages):
 
 | Label | Field type | Value |
 | --- | --- | --- |
+| `Warning` | text | Only on a flagged message, and first (see [Flagged messages](#flagged-messages)) |
 | `Message` | text | The message, escaped (see below) |
 | `Signing Address` | address | `signerAddress`, as given |
 
@@ -40,3 +41,9 @@ Some messages are refused with an error instead of a payload, because a signatur
 - **Bytes that are a serialized Solana transaction message.** A signature over them is a valid signature for that transaction.
 
 A wallet should treat these errors as "do not sign", not fall back to showing the raw text.
+
+## Flagged messages
+
+A message can also be the signed bytes of a NEAR Intents WebAuthn (passkey) authorization. The Ed25519 WebAuthn check in NEAR Intents verifies the signature directly over `authenticator_data || sha256(client_data_json)`. It checks the flags byte, but not the relying-party hash or the origin. So a message of at least 69 bytes whose byte 32 passes that flags check can be such an authorization for a payload from the signer's NEAR account: a dApp can grind the last 32 bytes, a SHA-256 digest, until they look like text. No length or charset rule rules this out, so the 32-byte rule above does not cover it.
+
+The parser flags these messages instead of refusing them, because ordinary text matches the shape often. A flagged message renders as usual, with a `Warning` text field first (and, in a build with the `diagnostics` feature, a `message::near_intents_webauthn_shape` diagnostic). The wallet must treat a flagged message as "do not sign" unless it means to make a NEAR Intents WebAuthn authorization.
