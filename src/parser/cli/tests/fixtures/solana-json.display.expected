@@ -9,6 +9,15 @@
       "Type": "text_v2"
     },
     {
+      "AmountV2": {
+        "Abbreviation": "SOL",
+        "Amount": "0.1"
+      },
+      "FallbackText": "0.1 SOL",
+      "Label": "Max Fee (default)",
+      "Type": "amount_v2"
+    },
+    {
       "FallbackText": "Transfer 1: From B46xaUeRM112q7EVbsBJPfWMLs2X64vtZpJVE1ofKZMY To 7aHWbSHLuxkq9iN62P6zxU5VQWSH87x2hmhqQKm2Qara For 10000000000",
       "Label": "Transfer 1",
       "TextV2": {

@@ -14,11 +14,15 @@ jobs:
       github.base_ref == 'main' ||
       contains(github.event.pull_request.labels.*.name, 'ci')
     runs-on: ubuntu-latest-4-cores
+    # Checkout only; caches use the runner's cache token, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     steps:
       - name: git checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
         with:

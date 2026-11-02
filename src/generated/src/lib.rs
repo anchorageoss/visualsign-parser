@@ -61,6 +61,44 @@ pub mod abi_type_serde {
     }
 }
 
+/// Serde adapter for `parser.SolanaMetadata.max_fee_lamports`: accepts the JSON number
+/// serde emits and the decimal string protojson emits for `uint64`; serializes as a number.
+#[cfg(feature = "serde_derive")]
+pub mod u64_or_string_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(v) => serializer.serialize_some(v),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NumberOrString {
+        Number(u64),
+        String(String),
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Option::<NumberOrString>::deserialize(deserializer)? {
+            None => Ok(None),
+            Some(NumberOrString::Number(v)) => Ok(Some(v)),
+            Some(NumberOrString::String(s)) => s
+                .parse::<u64>()
+                .map(Some)
+                .map_err(|e| serde::de::Error::custom(format!("invalid uint64 string {s:?}: {e}"))),
+        }
+    }
+}
+
 /// Serde adapter that represents the `parser.TokenMetadataEntry.origin_chain`
 /// enum field as its protobuf string name (e.g.
 /// `"TOKEN_ORIGIN_CHAIN_ETHEREUM"`) over JSON instead of the raw i32

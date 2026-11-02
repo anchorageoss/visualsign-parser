@@ -1,0 +1,164 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Zcash mainnet",
+                label: "Declared network (unsigned)",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "Zcash mainnet",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "PCZT coin type and address prefixes are unsigned; confirm the network independently",
+                label: "Network trust",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "PCZT coin type and address prefixes are unsigned; confirm the network independently",
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "u1smekqtkppd5w6mtk0pextx5ttsl3mxffl3raevk6n6a5qt2s8y3pwhk5t0gyg3udleaghrge6ft7dud9n08wyv7up7ywzmu8scxqvp0c",
+                label: "Output 1",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "u1smekqtkppd5w6mtk0pextx5ttsl3mxffl3raevk6n6a5qt2s8y3pwhk5t0gyg3udleaghrge6ft7dud9n08wyv7up7ywzmu8scxqvp0c",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: Some(
+                    "Orchard",
+                ),
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.01985000 ZEC",
+                label: "Output 1 amount",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.01985000",
+                abbreviation: Some(
+                    "ZEC",
+                ),
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "t1TMLJ7k2N4Narqk5Fd5uUo82NXSMbKRgCc",
+                label: "Output 2",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "t1TMLJ7k2N4Narqk5Fd5uUo82NXSMbKRgCc",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: Some(
+                    "transparent P2PKH",
+                ),
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.10000000 ZEC",
+                label: "Output 2 amount",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.10000000",
+                abbreviation: Some(
+                    "ZEC",
+                ),
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "unverified (parser has no viewing key); outputs back to the sender are listed as outputs",
+                label: "Change",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "unverified (parser has no viewing key); outputs back to the sender are listed as outputs",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.12000000 ZEC; spend ownership unverified (parser has no viewing key)",
+                label: "Orchard spent",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0.12000000 ZEC; spend ownership unverified (parser has no viewing key)",
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.00015000 ZEC",
+                label: "Fee",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.00015000",
+                abbreviation: Some(
+                    "ZEC",
+                ),
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "equals the ZIP-317 conventional fee",
+                label: "Fee check",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "equals the ZIP-317 conventional fee",
+            },
+        },
+        Number {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "1",
+                label: "Padding outputs",
+            },
+            number: SignablePayloadFieldNumber {
+                number: "1",
+            },
+        },
+        Number {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "2851312",
+                label: "Expiry height",
+            },
+            number: SignablePayloadFieldNumber {
+                number: "2851312",
+            },
+        },
+        Number {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0",
+                label: "Fallback lock time",
+            },
+            number: SignablePayloadFieldNumber {
+                number: "0",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Nu6 (0xc8e71055)",
+                label: "Consensus branch",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "Nu6 (0xc8e71055)",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "25dbfe66a7c6c0e5f1d2a57bec8f147d8563605bdb36627d65f1a3f1cc51dcd9",
+                label: "Shielded sighash (ZIP-244)",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "25dbfe66a7c6c0e5f1d2a57bec8f147d8563605bdb36627d65f1a3f1cc51dcd9",
+            },
+        },
+    ],
+    payload_type: "ZcashTx",
+    subtitle: None,
+    title: "Zcash Transaction",
+    version: "0",
+}

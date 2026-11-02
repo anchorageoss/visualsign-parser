@@ -1,19 +1,24 @@
 name: cla-file-check
 
+# pull_request_target is required: the job comments on fork PRs, and a fork's
+# `pull_request` token is read-only. It is safe only because the job never
+# checks out, builds or runs PR code: the sole checkout is `.cla-signed-users`
+# from main, and PR fields (number, author login) reach the shell only through
+# env vars. Keep it that way; don't add steps that touch the PR's head.
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] no PR code is checked out or run; see above
     types: [opened, synchronize, reopened]
 
-# Add permissions for the GitHub token to write comments to pull requests
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 
 jobs:
   check-cla-file:
     # Skip CLA check for bots (e.g., github-actions[bot], dependabot[bot])
     if: github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read        # checkout of .cla-signed-users from main
+      pull-requests: write  # read and post the CLA comment
 
     # Environment variables for easy configuration
     env:
@@ -21,15 +26,15 @@ jobs:
       MAINTAINER_TAG: "@anchorageoss/maintainers"
 
     steps:
-      - name: Checkout repository
+      # Only main's copy of .cla-signed-users, never the PR head. A missing
+      # file is handled by the next step (treated as "not signed").
+      - name: Checkout CLA file from main
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout main branch for CLA file
-        run: |
-          git fetch origin main
-          git checkout origin/main -- .cla-signed-users || echo "CLA file not found on main branch"
+          ref: main
+          sparse-checkout: .cla-signed-users
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Check for username in .cla-signed-users
         id: check_user
@@ -53,9 +58,9 @@ jobs:
         id: check_comment
         run: |
           # Check if github-actions bot has already commented about CLA on this PR
-          COMMENTS=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.author.login == "github-actions") | .body')
+          COMMENTS=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select(.author.login == "github-actions") | .body')
 
-          if echo "$COMMENTS" | grep -Fq "${{ env.CLA_URL }}"; then
+          if echo "$COMMENTS" | grep -Fq "$CLA_URL"; then
             echo "CLA comment already exists, skipping"
             echo "comment_exists=true" >> $GITHUB_OUTPUT
           else
@@ -64,17 +69,22 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Comment on PR if user is not signed
         if: steps.check_user.outputs.is_signed == 'false' && steps.check_comment.outputs.comment_exists == 'false'
+        # PR fields reach the shell only through env, never through ${{ }} in
+        # run:. CLA_URL and MAINTAINER_TAG come from the job-level env.
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body "Hi @${{ github.event.pull_request.user.login }}, thank you for your contribution!
+          gh pr comment "$PR_NUMBER" --body "Hi @${PR_USER}, thank you for your contribution!
 
-          It looks like this is your first time contributing. To get this PR merged, please review our Contributor License Agreement (CLA) here: **${{ env.CLA_URL }}**
+          It looks like this is your first time contributing. To get this PR merged, please review our Contributor License Agreement (CLA) here: **${CLA_URL}**
 
-          Once you have reviewed the agreement, a maintainer (${{ env.MAINTAINER_TAG }}) will need to approve your addition to our contributors list by commenting \`/approve-cla\` on this PR. Thank you!"
+          Once you have reviewed the agreement, a maintainer (${MAINTAINER_TAG}) will need to approve your addition to our contributors list by commenting \`/approve-cla\` on this PR. Thank you!"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
 
       - name: Fail the check if user is not signed
         if: steps.check_user.outputs.is_signed == 'false'

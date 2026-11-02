@@ -16,6 +16,7 @@ ENV VERSION=$VERSION
 # passes --no-default-features, so chains not listed here are NOT linked into
 # the binary, shrinking both the image and the attestation surface. Default
 # mirrors parser_app/Cargo.toml's `default` feature set.
+# zcash is opt-in: add it here (or via --build-arg) to link it in.
 ARG CHAIN_FEATURES="bitcoin ethereum near solana sui tron unspecified"
 ENV CHAIN_FEATURES=$CHAIN_FEATURES
 

@@ -9,6 +9,18 @@ SignablePayload {
                 text: "Solana",
             },
         },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.1 SOL",
+                label: "Max Fee (default)",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.1",
+                abbreviation: Some(
+                    "SOL",
+                ),
+            },
+        },
         TextV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Transfer 1: From B46xaUeRM112q7EVbsBJPfWMLs2X64vtZpJVE1ofKZMY To 7aHWbSHLuxkq9iN62P6zxU5VQWSH87x2hmhqQKm2Qara For 10000000000",

@@ -7,12 +7,14 @@
 //! so the parser and the consumer share one definition; the bytes emitted here
 //! are placed verbatim into `ParsedTransactionPayload.intermediate_output`.
 //!
-//! Consumers (e.g. the Anchorage HSM) mirror these types and decode the bytes;
+//! Downstream consumers mirror these types and decode the bytes;
 //! [`SOLANA_INTERMEDIATE_SCHEMA_VERSION`] is the first field so a shape change
 //! is a single, reviewable signal that forces the mirrored decoder to update.
 //!
 //! Differences from `solana_parser::SolanaMetadata`:
 //! - `signatures` is dropped (unsigned txs have none).
+//! - `native_instruction_decoder` is added: the native decoding this build has.
+//! - `max_fee_lamports` is added: the fee cap the payload renders as "Max Fee".
 //! - All maps use `BTreeMap` so Borsh encoding is byte-deterministic.
 //! - `program_call_args` is emitted as a canonical JSON string
 //!   (`program_call_args_json`), as is each `jsonParsed` decode (`parsed_json`),
@@ -68,15 +70,39 @@ const UNSUPPORTED_NATIVE_PROGRAM: &str = "program has no native decoder";
 /// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on ANY change
 /// to the shape below. Mirrored decoders assert this value, so a bump makes a
 /// schema drift fail loudly instead of silently misparsing.
-pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 4;
+pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 5;
+
+/// Native decoding available in this build. This is independent of whether
+/// any particular instruction is valid or supported by the decoder.
+///
+/// Schema v5 adds this tag immediately after the version. Mirrored consumers
+/// must read it before decoding the account keys and instruction collections.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[borsh(use_discriminant = true)]
+pub enum SolanaNativeInstructionDecoder {
+    /// `json-parsed` is disabled; only Compute Budget uses a local decoder.
+    ComputeBudgetOnly = 0,
+    /// Solana's `jsonParsed` decoder and the local Compute Budget decoder.
+    JsonParsed = 1,
+}
+
+const NATIVE_INSTRUCTION_DECODER: SolanaNativeInstructionDecoder = if cfg!(feature = "json-parsed")
+{
+    SolanaNativeInstructionDecoder::JsonParsed
+} else {
+    SolanaNativeInstructionDecoder::ComputeBudgetOnly
+};
 
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
-/// minus `signatures`.
+/// minus `signatures`, plus `native_instruction_decoder` and `max_fee_lamports`.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SolanaIntermediateOutput {
     /// Always [`SOLANA_INTERMEDIATE_SCHEMA_VERSION`]. First field so decoders
     /// can gate on it before reading the rest.
     pub schema_version: u16,
+    /// Build capability: distinguishes an unavailable `jsonParsed` decoder
+    /// from rejection of malformed instructions in `solana_json_parse_error`.
+    pub native_instruction_decoder: SolanaNativeInstructionDecoder,
     pub account_keys: Vec<String>,
     pub program_keys: Vec<String>,
     pub instructions: Vec<SolanaIntermediateInstruction>,
@@ -90,6 +116,9 @@ pub struct SolanaIntermediateOutput {
     /// is authoritative -- empty there means the simulation genuinely had no
     /// inner instructions.
     pub simulation_error: Option<SolanaSimulationError>,
+    /// The fee cap the payload renders as "Max Fee": the caller's, or the parser default.
+    /// The parser has already checked that the fee the transaction commits to is within it.
+    pub max_fee_lamports: u64,
 }
 
 /// Why a caller-supplied `simulateTransaction` result could not be read. The
@@ -114,6 +143,8 @@ pub enum SolanaSimulationError {
     /// An inner instruction's data was not valid base58, which the RPC never
     /// emits.
     InvalidInstructionData = 6,
+    /// The parser was built without the `simulation` feature.
+    SimulationUnsupported = 7,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -703,6 +734,22 @@ pub(crate) fn parse_and_decode_simulated_instructions(
     decode_inner_instructions(inner_instructions, idl_registry)
 }
 
+/// Without the `simulation` feature a supplied simulation cannot be read.
+#[cfg(not(feature = "simulation"))]
+pub(crate) fn parse_and_decode_simulated_instructions(
+    _raw_json: &[u8],
+    _idl_registry: &IdlRegistry,
+) -> (
+    Vec<SolanaSimulatedInstruction>,
+    Option<SolanaSimulationError>,
+) {
+    tracing::warn!("simulated_transaction_result supplied but the `simulation` feature is off");
+    (
+        Vec::new(),
+        Some(SolanaSimulationError::SimulationUnsupported),
+    )
+}
+
 /// Builds one [`SolanaSimulatedInstruction`] per inner instruction across every
 /// outer instruction's `UiInnerInstructions` entry, from the raw `simulateTransaction`
 /// RPC shape
@@ -1174,12 +1221,14 @@ fn build_intermediate_output(
     value: &SolanaMetadata,
     message: Option<&VersionedMessage>,
     caller_idl_program_ids: &BTreeMap<String, CustomIdlConfig>,
+    max_fee_lamports: u64,
 ) -> SolanaIntermediateOutput {
     let compiled = message
         .map(CompiledMessage::new)
         .filter(|compiled| compiled.instructions.len() == value.instructions.len());
     SolanaIntermediateOutput {
         schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
+        native_instruction_decoder: NATIVE_INSTRUCTION_DECODER,
         account_keys: value.account_keys.clone(),
         program_keys: value.program_keys.clone(),
         instructions: value
@@ -1207,6 +1256,7 @@ fn build_intermediate_output(
             .collect(),
         simulated_instructions: Vec::new(),
         simulation_error: None,
+        max_fee_lamports,
     }
 }
 
@@ -1237,6 +1287,7 @@ pub(crate) fn extract_solana_intermediate_output(
     raw_message_hex: &str,
     full_transaction: bool,
     idl_registry: &IdlRegistry,
+    max_fee_lamports: u64,
 ) -> Result<SolanaIntermediateOutput, VisualSignError> {
     let configs = idl_registry.get_all_configs();
     let caller_records = caller_idl_records(configs).ok_or_else(|| {
@@ -1272,6 +1323,7 @@ pub(crate) fn extract_solana_intermediate_output(
         metadata,
         message.as_ref(),
         configs,
+        max_fee_lamports,
     ))
 }
 
@@ -1465,9 +1517,11 @@ mod tests {
             (SolanaSimulationError::CallerIdlRecordsUnusable, 4),
             (SolanaSimulationError::CompiledInstruction, 5),
             (SolanaSimulationError::InvalidInstructionData, 6),
+            (SolanaSimulationError::SimulationUnsupported, 7),
         ] {
             let io = SolanaIntermediateOutput {
                 schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
+                native_instruction_decoder: NATIVE_INSTRUCTION_DECODER,
                 account_keys: vec![],
                 program_keys: vec![],
                 instructions: vec![],
@@ -1477,14 +1531,16 @@ mod tests {
                 address_table_lookups: vec![],
                 simulated_instructions: vec![],
                 simulation_error: Some(error),
+                max_fee_lamports: 5_105_000,
             };
             let bytes = borsh::to_vec(&io).expect("borsh serializes");
             let recovered: SolanaIntermediateOutput =
                 borsh::from_slice(&bytes).expect("borsh deserializes");
             assert_eq!(io, recovered);
-            // Trailing `01 <tag>`: Some, then the variant. No payload.
-            assert_eq!(bytes[bytes.len() - 2], 1);
-            assert_eq!(bytes[bytes.len() - 1], tag, "{error:?} tag");
+            // `01 <tag>` ahead of the trailing cap: Some, then the variant. No payload.
+            let cap_at = bytes.len() - 8;
+            assert_eq!(bytes[cap_at - 2], 1);
+            assert_eq!(bytes[cap_at - 1], tag, "{error:?} tag");
             assert_ne!(tag, 0, "0 stays free to mean None");
         }
     }
@@ -2254,8 +2310,9 @@ mod tests {
         });
         let message_hex = hex::encode(bincode::serialize(&message).unwrap());
 
-        let output = extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new())
-            .expect("solana_parser accepts the message");
+        let output =
+            extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new(), 5_105_000)
+                .expect("solana_parser accepts the message");
         let instruction = &output.instructions[0];
         assert_eq!(instruction.address_table_lookups.len(), 1);
         assert!(instruction.solana_json_parse_error.is_none());
@@ -2303,8 +2360,9 @@ mod tests {
         let transaction: VersionedTransaction = bincode::deserialize(&bytes).unwrap();
         let message_hex = hex::encode(bincode::serialize(&transaction.message).unwrap());
 
-        let output = extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new())
-            .expect("solana_parser accepts the message");
+        let output =
+            extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new(), 5_105_000)
+                .expect("solana_parser accepts the message");
         assert_eq!(output.instructions.len(), 3);
 
         let limit = output.instructions[0]
@@ -2521,6 +2579,7 @@ mod tests {
         // The marker round-trips through the published schema.
         let io = SolanaIntermediateOutput {
             schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
+            native_instruction_decoder: NATIVE_INSTRUCTION_DECODER,
             account_keys: vec![],
             program_keys: vec![],
             instructions: vec![],
@@ -2530,6 +2589,7 @@ mod tests {
             address_table_lookups: vec![],
             simulated_instructions: inner,
             simulation_error: None,
+            max_fee_lamports: 5_105_000,
         };
         let bytes = borsh::to_vec(&io).expect("borsh serializes");
         let recovered: SolanaIntermediateOutput =
@@ -2549,18 +2609,56 @@ mod tests {
             recent_blockhash: "blockhash".to_string(),
             address_table_lookups: vec![],
         };
-        let io = build_intermediate_output(&metadata, None, &BTreeMap::new());
+        let io = build_intermediate_output(&metadata, None, &BTreeMap::new(), 5_105_000);
         assert_eq!(io.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
         assert_eq!(io.account_keys, vec!["A1".to_string(), "B2".to_string()]);
         assert_eq!(io.program_keys, vec!["P1".to_string()]);
         assert!(io.instructions.is_empty());
         assert_eq!(io.recent_blockhash, "blockhash");
+        assert_eq!(io.max_fee_lamports, 5_105_000);
 
         let bytes = borsh::to_vec(&io).expect("borsh serializes");
         let bytes_again = borsh::to_vec(&io).expect("borsh serializes");
         assert_eq!(bytes, bytes_again, "borsh encoding must be deterministic");
+        // The version leads and the cap trails, so a decoder gates on the first field and
+        // reads the last one after every field it already knew.
+        assert_eq!(bytes[..2], SOLANA_INTERMEDIATE_SCHEMA_VERSION.to_le_bytes());
+        assert_eq!(bytes[bytes.len() - 8..], 5_105_000u64.to_le_bytes());
         let recovered: SolanaIntermediateOutput =
             borsh::from_slice(&bytes).expect("borsh deserializes");
         assert_eq!(io, recovered);
+    }
+
+    #[test]
+    fn intermediate_wire_identifies_native_decoder_capability() {
+        let metadata = SolanaMetadata {
+            signatures: vec![],
+            account_keys: vec![],
+            program_keys: vec![],
+            instructions: vec![],
+            transfers: vec![],
+            spl_transfers: vec![],
+            recent_blockhash: String::new(),
+            address_table_lookups: vec![],
+        };
+        let output = build_intermediate_output(&metadata, None, &BTreeMap::new(), 5_105_000);
+        let bytes = borsh::to_vec(&output).expect("serializes intermediate output");
+        // Consumers read the version, then the capability tag, then the v4 body; the fee cap
+        // trails the body.
+        assert_eq!(&bytes[..2], &[5, 0]);
+        #[cfg(feature = "json-parsed")]
+        assert_eq!(bytes[2], 1, "jsonParsed decoder is available");
+        #[cfg(not(feature = "json-parsed"))]
+        assert_eq!(bytes[2], 0, "only Compute Budget decoding is available");
+        assert_eq!(
+            &bytes[3..7],
+            &[0, 0, 0, 0],
+            "the body opens with account_keys' length"
+        );
+        assert_eq!(bytes[bytes.len() - 8..], 5_105_000u64.to_le_bytes());
+        assert_eq!(
+            borsh::from_slice::<SolanaIntermediateOutput>(&bytes).expect("round trip"),
+            output
+        );
     }
 }

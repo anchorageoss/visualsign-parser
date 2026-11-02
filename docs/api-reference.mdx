@@ -72,6 +72,8 @@ message SolanaMetadata {
   optional string network_id = 2;       // Network identifier (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
   optional Idl idl = 1;                 // Anchor IDL for decoding (single program)
   map<string, Idl> idl_mappings = 3;    // Map of program_id to IDL (multiple programs)
+  optional string simulated_transaction_result = 5; // Base64 simulateTransaction result, for inner (CPI) instructions
+  optional uint64 max_fee_lamports = 6; // Max total fee allowed, in lamports; default 0.1 SOL. "Max Fee" row ("Max Fee (default)" without it), rejected when below the committed fee
 }
 ```
 
@@ -181,6 +183,42 @@ grpcurl -plaintext -d '{
         "idl_type": "SOLANA_IDL_TYPE_ANCHOR",
         "idl_version": "0.30.0"
       }
+    }
+  }
+}' localhost:44020 parser.ParserService/Parse
+```
+
+### Solana with a max fee
+
+Every Solana payload carries a top-level fee cap row right after the header
+rows: the caller's `max_fee_lamports` when the request sets one, labelled "Max
+Fee", otherwise the parser's default cap of 0.1 SOL (100000000 lamports),
+labelled "Max Fee (default)". The parser rejects the request when the
+transaction commits to more than the cap in force: 5000 lamports per signature,
+counting the ones precompile instructions verify, plus the compute budget's
+priority fee. That fee is the unit price times the requested unit limit, or,
+with no limit, times the runtime's default limit for the message (3000 units for
+each builtin instruction, 200000 for any other, at most 1400000). Compute budget
+requests are decoded as the runtime decodes them, so trailing bytes are ignored.
+A request the runtime rejects is rejected here too: one that does not decode, a
+repeated price, limit, heap frame, or loaded accounts data size, a heap frame
+size out of range, a zero loaded accounts data size, or the unused variant. With
+`include_intermediate_output`, the cap in force is also the trailing
+`max_fee_lamports` field of the Solana intermediate output. That output is at
+schema version 5, which also adds a `native_instruction_decoder` tag right after
+the version. A consumer that rewrites the compute budget instructions after
+parsing, for example to re-price at signing time, changes the fee the cap bounds
+and must re-check the final fee against `max_fee_lamports` itself.
+
+```bash
+# Solana with a caller-supplied cap, in lamports. Over the HTTP gateway the same
+# field is the camelCase key `maxFeeLamports`.
+grpcurl -plaintext -d '{
+  "unsigned_payload": "AgAAAAAAAA...",
+  "chain": "CHAIN_SOLANA",
+  "chain_metadata": {
+    "solana": {
+      "max_fee_lamports": 5105000
     }
   }
 }' localhost:44020 parser.ParserService/Parse

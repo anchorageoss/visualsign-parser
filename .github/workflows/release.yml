@@ -28,6 +28,9 @@ jobs:
       actions: write
     steps:
       - name: Checkout code
+        # Credentials stay persisted on purpose: the `Create tag` step runs
+        # `git push origin "$TAG"` with this checkout's token.
+        # zizmor: ignore[artipacked] tag push below needs the persisted token
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
@@ -126,5 +129,8 @@ jobs:
 
       - name: Dry run summary
         if: inputs.dry_run
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          FULL_VERSION: ${{ steps.version.outputs.full_version }}
         run: |
-          echo "DRY RUN: would have created tag ${{ steps.version.outputs.tag }} (version: ${{ steps.version.outputs.full_version }})"
+          echo "DRY RUN: would have created tag ${TAG} (version: ${FULL_VERSION})"
