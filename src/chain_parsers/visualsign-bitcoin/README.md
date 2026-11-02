@@ -24,9 +24,7 @@ spirit as the Solana surfpool lane.
   transactions and the explorer's view in `tests/fixtures/mainnet/`) and checks
   the rendered fee, addresses and amounts against the explorer.
 
-**Live node** (`.github/workflows/bitcoin-regtest.yml`): runs automatically on
-PRs that touch this crate or the lane's own files, and on any PR labelled
-`test:bitcoin-regtest`.
+**Live node, label `test:bitcoin-regtest`** (`.github/workflows/bitcoin-regtest.yml`):
 `tests/regtest.rs` starts `bitcoind -regtest`, has Bitcoin Core build PSBTs
 spending every address type, checks the rendering against `decodepsbt`, signs,
 finalizes and `testmempoolaccept`s them, then replays tampered PSBTs (lying

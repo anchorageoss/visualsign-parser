@@ -1,14 +1,9 @@
 name: "Bitcoin PSBT: regtest"
 
 # Validates the Bitcoin PSBT parser against a live Bitcoin Core node, like the
-# Solana surfpool lane does against a mainnet fork. Runs automatically on PRs
-# that touch the Bitcoin crate or this lane's own files, on any PR carrying the
+# Solana surfpool lane does against a mainnet fork. Runs on PRs carrying the
 # `test:bitcoin-regtest` label, or by hand. The offline half (BIP vectors and
 # replayed mainnet transactions) runs in the normal `make test`.
-#
-# Path matching is done here rather than by adding the label from labeler.yml:
-# labels applied with GITHUB_TOKEN don't start new workflow runs, and on
-# `opened` this workflow reads the labels before the labeler has added them.
 
 on:
   pull_request:
@@ -19,49 +14,13 @@ permissions:
   contents: read
 
 jobs:
-  # Decides whether the lane runs. Lists the PR's changed files through the API;
-  # no PR code is checked out.
-  gate:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - name: Decide
-        id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
-          ACTION: ${{ github.event.action }}
-          ADDED_LABEL: ${{ github.event.label.name }}
-          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          LANE_LABEL=test:bitcoin-regtest
-          LANE_PATHS='^(src/chain_parsers/visualsign-bitcoin/|\.github/workflows/bitcoin-regtest\.yml$|\.github/bitcoind\.env$|scripts/install-bitcoind\.sh$)'
-          decide() { echo "run=$1" >> "$GITHUB_OUTPUT"; echo "run=$1: $2"; exit 0; }
-
-          [[ "$EVENT" == workflow_dispatch ]] && decide true "manual dispatch"
-          # Any other label being added must not re-run the lane.
-          if [[ "$ACTION" == labeled ]]; then
-            [[ "$ADDED_LABEL" == "$LANE_LABEL" ]] && decide true "$LANE_LABEL added"
-            decide false "label $ADDED_LABEL added"
-          fi
-          jq -e --arg l "$LANE_LABEL" 'index($l)' <<<"$LABELS" >/dev/null && decide true "PR has $LANE_LABEL"
-          # Capture before matching: piping into `grep -q` would SIGPIPE `gh`
-          # and, under pipefail, read as "no match". Fail toward running.
-          files="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')" \
-            || decide true "could not list changed files"
-          grep -qE "$LANE_PATHS" <<<"$files" && decide true "PR touches the Bitcoin crate or this lane"
-          decide false "no Bitcoin changes and no $LANE_LABEL label"
-
   regtest:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
+    if: |
+      github.event_name == 'workflow_dispatch'
+      ||
+      (github.event.action == 'labeled' && github.event.label.name == 'test:bitcoin-regtest')
+      ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'test:bitcoin-regtest'))
     runs-on: ubuntu-latest-4-cores
     timeout-minutes: 45
     steps:
