@@ -404,6 +404,7 @@ deserves trust, and so what a compromised component can do:
 | Backend key | the wallet backend | the backend, per request | it can list an attacker's xpub as an account |
 | **Wallet enclave** (recommended) | an attested enclave that holds the wallet; the key never leaves it | a one-time registration into the enclave, under its own approvals | it can't add an account; it can only send requests the enclave answers from registered accounts |
 | Pinned account set | nobody: a hash of the account set is pinned in deploy-time config | a redeploy | it can't add an account |
+| Your own node (independent check) | nobody: `parser_cli` reads your own watch-only wallet | you, when you imported your descriptors | nothing it sends reaches this check ([walkthrough](#walkthrough-check-against-your-own-wallet-before-signing)) |
 
 **Wallet enclave.** The wallet (descriptors, issued-index state, labels, and
 the previous transactions it has seen) lives in an enclave. Given a PSBT, it
@@ -669,15 +670,133 @@ helpers keep producers and the parser on one implementation:
    `WalletSource` trait. It returns only what this transaction needs: the
    registered accounts its derivations name, the previous transactions it
    spends, and the labels for its outpoints and outputs. Two implementations:
-   - **BDK** (`bdk_wallet`, pure Rust), which suits an enclave and needs no
-     `wallet.dat`.
-   - **Bitcoin Core RPC** (`listdescriptors`, `gettransaction`, a BIP-329
-     export), for backends that already run Core.
+   - **Bitcoin Core RPC** (prototyped). It reads a node's public descriptors
+     (`listdescriptors false`), `gettransaction`, labels and `ismine`, through
+     a client that refuses any method outside a read-only allowlist. It serves
+     both backends that run Core and the [independent
+     check](#walkthrough-check-against-your-own-wallet-before-signing).
+   - **BDK** (`bdk_wallet`, pure Rust), which suits a wallet enclave and needs
+     no `wallet.dat`.
 3. **An enrollment tool.** It verifies a wallet enclave's attestation and prints
    the named allowlist entry (`name=pubkey`) with the measurements it checked,
    ready for deploy-time config.
-4. **Parser CLI support.** `--wallet-metadata <file>` plus a dev-key signer, so
-   the whole flow can be tested locally without an enclave.
+4. **Parser CLI support** under a Bitcoin subcommand, never as top-level
+   `decode` flags: `parser_cli bitcoin wallet-check` (prototyped) for the
+   independent check and `--compare`, plus a dev-key signer so the signed flow
+   can be tested locally without an enclave.
+
+## Walkthrough: check against your own wallet before signing
+
+Before you sign, you can check a PSBT against your own wallet on an offline
+machine. Nothing from the backend or any enclave is trusted in this check: the
+accounts come from your own Bitcoin Core node, which holds only your public
+descriptors and has networking turned off.
+
+<Note>
+This walkthrough runs the prototype on regtest
+(`scripts/bitcoin-airgap-walkthrough.sh`, Bitcoin Core 31.1). It isn't merged,
+and the command and flag names may change.
+</Note>
+
+**1. Set up the offline node once.** On the offline machine, start Bitcoin
+Core with networking off and create a blank watch-only wallet:
+
+```bash
+bitcoind -listen=0 -networkactive=0 -daemonwait
+bitcoin-cli -named createwallet wallet_name=airgap \
+  disable_private_keys=true blank=true
+```
+
+Export your wallet's **public** descriptors on the machine that holds them and
+carry the file across, then import them:
+
+```bash
+bitcoin-cli -rpcwallet=alice listdescriptors false > descriptors.json   # online machine
+bitcoin-cli -rpcwallet=airgap importdescriptors "$(jq -c '[.descriptors[]
+  | {desc, timestamp: "now", active, internal, range, next_index: (.next_index // .next // 0)}
+  | with_entries(select(.value != null))]' descriptors.json)"
+```
+
+Labels you keep on the offline wallet (`setlabel`) are shown too. The node
+needs no blocks and no peers: ownership comes from the descriptors, and
+previous transactions come from the PSBT.
+
+**2. Check each PSBT before signing.** Carry the PSBT across (USB or QR) and
+run:
+
+```bash
+parser_cli bitcoin wallet-check --network regtest \
+  --rpc-url http://127.0.0.1:18443 --rpc-cookie ~/.bitcoin/regtest/.cookie \
+  --wallet airgap --account-name Savings --psbt @spend.psbt
+```
+
+The client calls only `listdescriptors` (always without private keys),
+`getaddressinfo`, `gettransaction`, `getwalletinfo` and `getblockchaininfo`,
+and refuses any other method before connecting.
+
+**3. Read the result.** For an honest PSBT (output trimmed):
+
+```text
+Local node: wallet airgap, no chain sync
+  Node:        regtest chain, 0 blocks, wallet airgap: watch-only (private keys disabled)
+  Descriptors: 8 read, 4 accounts; none unsupported
+  This PSBT:   names 4 of them; 0 prevouts and 2 labels from the node
+  ismine:      input 0 yes, output 0 no, output 1 yes
+
+   ├─ Summary
+   │     Detail: Sending 1.00000000 BTC | Returning to your accounts 48.99997180 BTC | Fee 0.00002820 BTC
+   │     ├─ Ownership Source: your local node (wallet airgap, no chain sync): its public descriptors, re-derived against the PSBT
+   ├─ Input 0
+   │     ├─ Ownership: From your account - Savings (m/84'/1'/0'/0/0) - verified from your local node (wallet airgap, no chain sync)
+   │     ├─ Node Check: ismine=true, agrees - from your local node (wallet airgap, no chain sync)
+   │     ├─ Label: Mining rewards - label from your local node (wallet airgap, no chain sync)
+   │     └─ Amount Source: verified against previous transaction
+   ├─ Output 0
+   │     ├─ Ownership: External - not one of your accounts on your local node (wallet airgap, no chain sync)
+   │     ├─ Node Check: ismine=false, agrees - from your local node (wallet airgap, no chain sync)
+   │     ├─ Label: Bob - label from your local node (wallet airgap, no chain sync)
+   ├─ Output 1
+   │     ├─ Ownership: Change - Savings (m/84'/1'/0'/1/0) - verified from your local node (wallet airgap, no chain sync)
+   │     ├─ Node Check: ismine=true, agrees - from your local node (wallet airgap, no chain sync)
+```
+
+Two independent answers appear on every row: the parser's re-derivation from
+your descriptors, and your node's own `ismine`. Both must agree.
+
+For a fake-change PSBT, where output 1 pays someone else but still carries your
+fingerprint and change path, both answers object and the amount is counted as
+sending:
+
+```text
+  ismine:      input 0 yes, output 0 no, output 1 no
+   ├─ Summary
+   │     Detail: Sending 49.99997180 BTC | Returning to your accounts 0.00000000 BTC | Fee 0.00002820 BTC
+   ├─ Warning: Output 1 claims to be your change but does not match your account; counted as sending
+   ├─ Warning: Output 1: your local node disagrees with the PSBT about ownership (ismine=false); counted as sending
+   ├─ Output 1
+   │     ├─ Ownership: WARNING: claims to be your change but does not match your account (script is not account Savings at m/84'/1'/0'/1/0); counted as sending
+   │     ├─ Node Check: WARNING: your local node says this is not yours (ismine=false), but the PSBT claims it is yours; counted as sending
+```
+
+**4. Compare with what production was told.** Pass the metadata the backend
+sent the enclave with `--compare`. A compromised backend that listed an
+attacker's xpub as a second "Savings" account makes the fake change render as
+verified in production, but your node disagrees:
+
+```text
+Compare: backend-evil.json vs your local node
+  Input 0   agree    supplied: yours (Savings m/84'/1'/0'/0/0) | node: yours (Savings m/84'/1'/0'/0/0)
+  Output 0  agree    supplied: not yours | node: not yours
+  Output 1  DISAGREE supplied: yours (Savings m/84'/1'/0'/1/0) | node: not verified (ismine=false contradicts the PSBT)
+```
+
+**What this check doesn't cover.** An offline wallet can't tell whether the
+inputs are still unspent, so it relies on the PSBT's previous transactions,
+which the parser still hashes against their txids. `ismine` only covers the
+descriptors you imported: if you leave out your change descriptors, real change
+shows as a disagreement, which errs on the safe side. The prototype handles
+single-sig descriptors only; multisig and taproot script trees are counted as
+unsupported, not checked.
 
 ## Multisig (follow-up)
 
@@ -692,7 +811,10 @@ the structured form once the enclave takes a descriptor parser.
 
 A single-sig prototype exists in `visualsign-bitcoin` (not yet merged). It
 covers P2PKH, P2SH-P2WPKH, P2WPKH and BIP-86 P2TR, and has no proto wiring,
-signature check or network families yet. Its 14 tests cover:
+signature check or network families yet. It also includes the Bitcoin Core
+`WalletSource`, `parser_cli bitcoin wallet-check` with `--compare`, and a
+regtest test with an online node and a separate offline, watch-only node. Its
+14 metadata tests cover:
 
 - verified change (P2WPKH, P2TR) and fake change;
 - an unknown outpoint, a wrong-txid prevout, and a prevout contradicting
@@ -711,8 +833,9 @@ All golden fixtures are unchanged. The screens and JSON above are its output.
 3. **Ownership, attestation and display.** Accounts, prevouts and labels; the
    signature check with per-wallet scoping; the signer name on screen; the
    `intermediate_output`.
-4. **Producer helpers.** The shared metadata crate and the BDK builder first,
-   then the Core RPC source, the enrollment tool and CLI support.
+4. **Producer helpers.** The Core RPC source and `parser_cli bitcoin
+   wallet-check` first (the independent check needs no signing or enclave),
+   then the shared metadata crate, the BDK source and the enrollment tool.
 5. **Wallet enclave** as the recommended anchor, with registration approvals
    and snapshot freshness.
 6. **Pearl**, behind `bitcoinlike-pearl`, with its own tracking issue.
