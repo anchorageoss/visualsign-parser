@@ -1040,6 +1040,50 @@ fn check_message_domain(message: &[u8]) -> Result<(), VisualSignError> {
     Ok(())
 }
 
+/// Shortest authenticator data defuse's WebAuthn check accepts: a 32-byte
+/// rpIdHash, a flags byte and a 4-byte signature counter.
+const WEBAUTHN_MIN_AUTHENTICATOR_DATA_LEN: usize = 37;
+
+/// Index of the flags byte in WebAuthn authenticator data.
+const WEBAUTHN_FLAGS_INDEX: usize = 32;
+
+/// Whether a signature over `message` can also be a NEAR Intents `webauthn`
+/// signature from the same ed25519 key.
+///
+/// defuse (`near/intents` tag `defuse/v0.4.2`, `webauthn/src/lib.rs:25-59`)
+/// verifies a COSE EdDSA (-8) signature directly over
+/// `authenticator_data || sha256(client_data_json)`, with no prehash. Of those
+/// bytes it checks only the length of the authenticator data (at least 37) and
+/// its flags byte at index 32 (`verify_flags`, `:68-92`, called with
+/// `require_user_verification = false` by `core/src/payload/webauthn.rs:27`):
+/// UP must be set, and BS must not be set without BE. It never compares the
+/// rpIdHash, and the `origin` in the client data is free text. So any message
+/// of at least 37 + 32 bytes whose byte 32 passes that flags check can be the
+/// signed bytes of a WebAuthn authorization: the last 32 bytes can be a
+/// SHA-256 digest the dApp ground to look like text. No length or charset
+/// rule rules this out, so the message is flagged rather than refused, and
+/// this matches defuse's checks exactly rather than estimating.
+fn is_webauthn_shaped(message: &[u8]) -> bool {
+    const UP: u8 = 1 << 0;
+    const BE: u8 = 1 << 3;
+    const BS: u8 = 1 << 4;
+    if message.len() < WEBAUTHN_MIN_AUTHENTICATOR_DATA_LEN + PREHASH_LEN {
+        return false;
+    }
+    message
+        .get(WEBAUTHN_FLAGS_INDEX)
+        .is_some_and(|&flags| flags & UP == UP && !(flags & BE == 0 && flags & BS == BS))
+}
+
+/// Text of the warning a [WebAuthn-shaped](is_webauthn_shaped) message carries.
+const WEBAUTHN_SHAPE_WARNING: &str = "These bytes can also authorize a NEAR Intents WebAuthn \
+     signature: a signature over them may be accepted as a passkey authorization of a NEAR \
+     Intents payload for this key's account. Do not sign unless that is intended.";
+
+/// Rule name of the `Diagnostic` a WebAuthn-shaped message carries.
+#[cfg(feature = "diagnostics")]
+const WEBAUTHN_SHAPE_RULE: &str = "message::near_intents_webauthn_shape";
+
 /// Render an off-chain message.
 ///
 /// The text is escaped before it renders: it is caller-supplied and reaches a
@@ -1071,6 +1115,12 @@ fn message_to_visual_sign_payload(
     // label as on the plain-message path, [`SIGNING_ADDRESS_LABEL`], so a
     // wallet always finds the Solana key under it; the intents' own "Signer"
     // is the payload's `signer_id`, a NEAR account, not the signing key.
+    //
+    // Not checked for the WebAuthn shape (see [`is_webauthn_shaped`]): the
+    // last 32 bytes of a payload that decodes under the strict key set end in
+    // JSON closing bytes (at least `"}]}` after a string, the loosest place a
+    // digest could sit), and the rest must be valid inside a JSON string, so
+    // making them a chosen SHA-256 digest costs far more than for free text.
     #[cfg(feature = "intents")]
     if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
         let mut fields = rendered.fields;
@@ -1104,25 +1154,49 @@ fn message_to_visual_sign_payload(
                 .to_string(),
         ));
     }
+    let mut fields = Vec::new();
+    // Flagged, not refused: ordinary text matches this shape often, and only
+    // the wallet knows whether the dApp meant to ask for a WebAuthn
+    // authorization. First, so the signer reads it before the text.
+    let webauthn_shaped = is_webauthn_shaped(envelope.message.as_bytes());
+    if webauthn_shaped {
+        fields.push(create_text_field("Warning", WEBAUTHN_SHAPE_WARNING)?.signable_payload_field);
+    }
+    fields.push(
+        create_text_field("Message", &escape_display_text(&envelope.message))?
+            .signable_payload_field,
+    );
+    // Not escaped: checked above to be a base58 Solana address, and base58 has
+    // no character that needs escaping.
+    fields.push(
+        create_address_field(
+            SIGNING_ADDRESS_LABEL,
+            &envelope.signer_address,
+            None,
+            None,
+            None,
+            None,
+        )?
+        .signable_payload_field,
+    );
+    #[cfg(feature = "diagnostics")]
+    if webauthn_shaped {
+        fields.push(
+            visualsign::field_builders::create_diagnostic_field(
+                WEBAUTHN_SHAPE_RULE,
+                "message",
+                visualsign::lint::Severity::Warn,
+                WEBAUTHN_SHAPE_WARNING,
+                None,
+            )
+            .signable_payload_field,
+        );
+    }
     Ok(SignablePayload::new(
         0,
         "Solana Message".to_string(),
         None,
-        vec![
-            create_text_field("Message", &escape_display_text(&envelope.message))?
-                .signable_payload_field,
-            // Not escaped: checked above to be a base58 Solana address, and
-            // base58 has no character that needs escaping.
-            create_address_field(
-                SIGNING_ADDRESS_LABEL,
-                &envelope.signer_address,
-                None,
-                None,
-                None,
-                None,
-            )?
-            .signable_payload_field,
-        ],
+        fields,
         MESSAGE_PAYLOAD_TYPE.to_string(),
     ))
 }
@@ -3947,6 +4021,48 @@ mod tests {
     }
 }
 
+/// A message shaped like a NEAR Intents WebAuthn payload: a signature over its
+/// bytes is also a valid `webauthn` signature for the `DefusePayload` here.
+///
+/// defuse's Ed25519 WebAuthn check (`near/intents` `defuse/v0.4.2`,
+/// `webauthn/src/lib.rs:25-59`) verifies the signature directly over
+/// `authenticator_data || sha256(client_data_json)`. It checks the flags byte
+/// and the challenge, but not the rpIdHash in bytes 0..32 or the origin, so
+/// any text can stand in for the authenticator data.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod webauthn_vector {
+    use solana_sha256_hasher::hash;
+
+    /// The authenticator data: 32 bytes of text where the rpIdHash would be,
+    /// the flags byte `!` (0x21: UP set, BE and BS clear), and 4 bytes where
+    /// the signature counter would be.
+    pub(super) const AUTHENTICATOR_DATA: &[u8; 37] = b"Sign in to example.app with code! 42 ";
+
+    /// The `DefusePayload` the signature authorizes: a transfer of 1 wNEAR out
+    /// of the implicit account of [`SIGNING_SEED`]'s key. Only the `intents`
+    /// build verifies the signature, so only it uses this.
+    #[cfg(feature = "intents")]
+    pub(super) const PAYLOAD: &str = r#"{"signer_id":"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c","verifying_contract":"intents.near","deadline":"2030-01-01T00:00:00Z","nonce":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","intents":[{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1000000000000000000000000"}}]}"#;
+
+    /// The client data for [`PAYLOAD`]: `challenge` is its SHA-256, base64url.
+    /// The number in `origin` was found by trying values until the SHA-256 of
+    /// this text was valid UTF-8 (about 2^25 tries), so the message fits in a
+    /// JSON string.
+    pub(super) const CLIENT_DATA_JSON: &str = r#"{"type":"webauthn.get","challenge":"tuGYunE2dMgi_4ikey50MfmnPil7VzPyCIAn_IgDqq8","origin":"https://example.app/26657251"}"#;
+
+    /// The ed25519 seed of the key that signs.
+    #[cfg(feature = "intents")]
+    pub(super) const SIGNING_SEED: [u8; 32] = [7; 32];
+
+    /// `AUTHENTICATOR_DATA || sha256(CLIENT_DATA_JSON)`: 69 bytes.
+    pub(super) fn message() -> String {
+        let mut bytes = AUTHENTICATOR_DATA.to_vec();
+        bytes.extend_from_slice(&hash(CLIENT_DATA_JSON.as_bytes()).to_bytes());
+        String::from_utf8(bytes).expect("CLIENT_DATA_JSON was chosen so its digest is UTF-8")
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod solana_message_tests {
@@ -4321,6 +4437,109 @@ mod solana_message_tests {
             .map(|result| result.payload)
     }
 
+    fn has_webauthn_warning(payload: &SignablePayload) -> bool {
+        payload.fields.iter().any(|f| {
+            matches!(f, SignablePayloadField::TextV2 { common, text_v2 }
+                if common.label == "Warning" && text_v2.text == WEBAUTHN_SHAPE_WARNING)
+        })
+    }
+
+    /// A message of `len` ASCII bytes with `flags` at the WebAuthn flags index.
+    fn with_flags_byte(flags: u8, len: usize) -> String {
+        let mut bytes = vec![b'a'; len];
+        bytes[WEBAUTHN_FLAGS_INDEX] = flags;
+        String::from_utf8(bytes).expect("ASCII")
+    }
+
+    /// A message whose signature is also a NEAR Intents WebAuthn signature
+    /// still renders as a message, with a warning first. Built the same way
+    /// with or without the `intents` feature, since either way the bytes can
+    /// be signed as text.
+    #[test]
+    fn a_webauthn_shaped_message_renders_with_a_warning() {
+        let message = webauthn_vector::message();
+        let payload = convert_message(&message).expect("flagged, not refused");
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(payload.payload_type, "SolanaMessage");
+        assert_eq!(payload.fields[0].label(), "Warning");
+        assert!(has_webauthn_warning(&payload));
+        assert_eq!(
+            unescape_display_text(&message_text(&payload)).as_deref(),
+            Some(message.as_str())
+        );
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+        payload.validate_charset().expect("charset");
+        #[cfg(feature = "diagnostics")]
+        assert!(payload.fields.iter().any(|f| matches!(
+            f,
+            SignablePayloadField::Diagnostic { diagnostic, .. }
+                if diagnostic.rule == WEBAUTHN_SHAPE_RULE && diagnostic.level == "warn"
+        )));
+    }
+
+    /// 37 bytes of authenticator data plus a 32-byte digest is the shortest
+    /// message defuse's check can accept.
+    #[test]
+    fn the_webauthn_shape_starts_at_69_bytes() {
+        for len in [33, 37, 68] {
+            let payload = convert_message(&with_flags_byte(b'!', len)).expect("renders");
+            assert!(!has_webauthn_warning(&payload), "len {len}");
+            assert_eq!(payload.fields.len(), 2, "len {len}");
+        }
+        for len in [69, 70, 500] {
+            let payload = convert_message(&with_flags_byte(b'!', len)).expect("renders");
+            assert!(has_webauthn_warning(&payload), "len {len}");
+        }
+    }
+
+    /// The flags byte is checked as defuse's `verify_flags` checks it: UP
+    /// (0x01) set, and BS (0x10) not set without BE (0x08). UV is not required.
+    #[test]
+    fn the_webauthn_shape_follows_defuses_flags_check() {
+        for (flags, flagged) in [
+            (b'!', true),  // 0x21: UP
+            (b'A', true),  // 0x41: UP
+            (b'%', true),  // 0x25: UP, UV
+            (b')', true),  // 0x29: UP, BE
+            (b'9', true),  // 0x39: UP, BE, BS
+            (b'1', false), // 0x31: UP, BS without BE
+            (b'q', false), // 0x71: UP, BS without BE
+            (b' ', false), // 0x20: no UP
+            (b'b', false), // 0x62: no UP
+        ] {
+            assert_eq!(
+                is_webauthn_shaped(&[vec![b'a'; 32], vec![flags; 37]].concat()),
+                flagged
+            );
+            let payload = convert_message(&with_flags_byte(flags, 69)).expect("renders");
+            assert_eq!(has_webauthn_warning(&payload), flagged, "{flags:#04x}");
+        }
+        for flags in 0..=u8::MAX {
+            let defuse = flags & 0x01 == 0x01 && !(flags & 0x08 == 0 && flags & 0x10 == 0x10);
+            let mut bytes = vec![b'a'; 69];
+            bytes[WEBAUTHN_FLAGS_INDEX] = flags;
+            assert_eq!(is_webauthn_shaped(&bytes), defuse, "{flags:#04x}");
+        }
+    }
+
+    /// Ordinary text is flagged whenever its byte 32 passes the check: the
+    /// rule is the shape, not whether the text looks crafted.
+    #[test]
+    fn ordinary_long_text_is_flagged_by_its_byte_32() {
+        // Byte 32 is `i` (0x69: UP, BE).
+        let flagged = "Welcome to Example. Please sign in to prove you own this wallet address.";
+        assert_eq!(flagged.as_bytes()[WEBAUTHN_FLAGS_INDEX], b'i');
+        assert!(has_webauthn_warning(
+            &convert_message(flagged).expect("renders")
+        ));
+        // 69 bytes, and byte 32 is `r` (0x72: no UP).
+        let plain = "Welcome to Example. Please confirm you own this wallet address today.";
+        assert_eq!(plain.as_bytes()[WEBAUTHN_FLAGS_INDEX], b'r');
+        let payload = convert_message(plain).expect("renders");
+        assert!(!has_webauthn_warning(&payload));
+        assert_eq!(payload.fields.len(), 2);
+    }
+
     /// A 32-byte message may be the SHA-256 prehash a NEP-413, SEP-53 or TON
     /// Connect verifier checks a signature over, so it is refused unless it is
     /// all ASCII letters and digits, a set a digest essentially never falls in.
@@ -4469,7 +4688,14 @@ mod solana_message_without_intents_tests {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod solana_intents_message_tests {
     use super::*;
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
+    use std::sync::Arc;
+    use visualsign::registry::LayeredRegistry;
+    use visualsign_intents::NearTokenRegistry;
+    use visualsign_intents::network::SettlementNetwork;
 
     /// The Solana key that signs. Base58, 32 bytes.
     const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
@@ -4513,6 +4739,62 @@ mod solana_intents_message_tests {
             // A static message: CodeQL treats anything derived from the payload
             // as tainted, so the label is not interpolated.
             .expect("no field with the requested label")
+    }
+
+    /// The bytes of [`webauthn_vector::message`], signed by a Solana wallet as
+    /// a message, make a `webauthn` payload that the intents verifier accepts
+    /// for a transfer out of the key's implicit account.
+    #[test]
+    fn a_webauthn_shaped_message_signs_a_webauthn_intents_payload() {
+        let message = webauthn_vector::message();
+        assert_eq!(message.len(), 69);
+        let key = SigningKey::from_bytes(&webauthn_vector::SIGNING_SEED);
+        let signature = key.sign(message.as_bytes());
+        let public_key = format!(
+            "ed25519:{}",
+            bs58::encode(key.verifying_key().as_bytes()).into_string()
+        );
+        let signed = json!({
+            "standard": "webauthn",
+            "payload": webauthn_vector::PAYLOAD,
+            "public_key": public_key,
+            "signature": format!("ed25519:{}", bs58::encode(signature.to_bytes()).into_string()),
+            "client_data_json": webauthn_vector::CLIENT_DATA_JSON,
+            "authenticator_data": URL_SAFE_NO_PAD.encode(webauthn_vector::AUTHENTICATOR_DATA),
+        });
+        let args = json!({ "signed": [signed] }).to_string();
+        let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        let fields = visualsign_intents::try_decode_execute_intents(
+            args.as_bytes(),
+            &registry,
+            &VisualSignOptions::default(),
+            SettlementNetwork::Mainnet,
+        )
+        .expect("decode");
+        let text = |label: &str| {
+            fields.iter().find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+        };
+        let implicit = hex::encode(key.verifying_key().as_bytes());
+        assert_eq!(
+            text("Signature"),
+            Some(format!(
+                "valid for key {public_key} (derives signer_id {implicit})"
+            ))
+        );
+        assert_eq!(text("Signer"), Some(implicit));
+        assert_eq!(text("To"), Some("attacker.near".to_string()));
+
+        // The same bytes, sent to the parser as a Solana message, still render
+        // as a message, flagged so the signer sees what else they authorize.
+        let payload = render(&message);
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(payload.payload_type, "SolanaMessage");
+        assert_eq!(field_text(&payload, "Warning"), WEBAUTHN_SHAPE_WARNING);
     }
 
     /// A message carrying intents renders as intents, and the Solana key that
