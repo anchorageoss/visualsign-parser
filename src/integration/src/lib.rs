@@ -14,7 +14,7 @@
     clippy::missing_panics_doc
 )]
 
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::ops::Range;
 use std::thread;
 use std::time::Duration;
@@ -96,9 +96,11 @@ pub fn wait_until_port_is_bound(port: u16) {
     )
 }
 
-/// Return wether or not the port can be bind-ed too.
+/// Whether nothing is listening on `port` and it can be bound on every
+/// interface. A loopback-only bind is not enough: macOS allows binding
+/// `127.0.0.1:port` while another socket holds `0.0.0.0:port`.
 fn port_is_available(port: u16) -> bool {
-    TcpListener::bind(("127.0.0.1", port)).is_ok()
+    TcpStream::connect((HOST_IP, port)).is_err() && TcpListener::bind(("0.0.0.0", port)).is_ok()
 }
 
 const HOST_IP: &str = "127.0.0.1";
@@ -399,4 +401,27 @@ pub async fn k8_health_watch(test_args: TestArgs) {
             status: ServingStatus::ServiceUnknown as i32
         }
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A server listening on the wildcard address must count as bound. macOS
+    /// lets `127.0.0.1:port` be bound alongside `0.0.0.0:port`, so a
+    /// bind-based probe on loopback missed it and the wait ran ~2 hours.
+    #[test]
+    fn wildcard_listener_counts_as_bound() {
+        let listener = TcpListener::bind(("0.0.0.0", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(!port_is_available(port));
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            wait_until_port_is_bound(port);
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("wait_until_port_is_bound did not see the wildcard listener");
+        drop(listener);
+    }
 }
