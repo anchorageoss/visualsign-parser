@@ -4671,8 +4671,7 @@ mod solana_intents_message_tests {
                 SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
                 VisualSignOptions::default(),
             )
-            .err()
-            .expect("an undeclared key must be refused");
+            .expect_err("an undeclared key must be refused");
         assert!(err.to_string().contains("\"action\""), "{err}");
     }
 
