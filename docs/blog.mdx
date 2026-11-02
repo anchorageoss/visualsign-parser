@@ -5,6 +5,10 @@ description: "Concept exploration, design pieces, and deeper dives from the Visu
 
 <Icon icon="rss" /> [Subscribe](/blog/rss.xml) · Posts are tagged by chain, theme, and audience. Each entry below is a stub — click through for the full essay.
 
+<Update label="2026-11-02 — RFC VSP-BTC-1: telling your coins from theirs" tags={["Bitcoin", "RFC", "Security"]}>
+  A PSBT shows every output as a bare address, so an approver can't tell change from a payment. VSP-BTC-1 proposes signed wallet metadata that the parser checks against the transaction: an output is shown as yours only when its script re-derives from your account, fake change is flagged and counted as sending, and every added row names who signed it. It also covers how same-format forks such as Pearl get their own network family. [Read the RFC](/rfcs/btc/vsp-btc-1).
+</Update>
+
 <Update label="2026-05-13 — Composable by design: how Solana presets stack" tags={["Solana", "Architecture", "Contributors"]}>
   Adding a new protocol to VisualSign rarely touches existing code. The recent Solana preset wave is a useful proof point: 17 presets across nine protocols shipped without changes to existing decoders or the core parser. This post walks through the three composition primitives — the built-in IDL parser, protocol-specific preset overlays, and a build-time registry — and why adding a preset rarely means changing existing code. [Read the full post](/blog/2026-05-13-composable-solana-presets).
 </Update>

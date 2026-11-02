@@ -175,6 +175,23 @@
         ]
       },
       {
+        "tab": "RFCs",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "rfcs/index"
+            ]
+          },
+          {
+            "group": "Bitcoin",
+            "pages": [
+              "rfcs/btc/vsp-btc-1"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Blog",
         "groups": [
           {

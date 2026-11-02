@@ -1,0 +1,291 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Sending 0.00060000 BTC | Returning to your accounts 0.00039000 BTC | Fee 0.00001000 BTC",
+      "Label": "Summary",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "0.00060000 BTC to 1 output not verified as yours",
+              "Label": "Sending",
+              "TextV2": {
+                "Text": "0.00060000 BTC to 1 output not verified as yours"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0.00039000 BTC to 1 output - verified from wallet metadata",
+              "Label": "Returning to your accounts",
+              "TextV2": {
+                "Text": "0.00039000 BTC to 1 output - verified from wallet metadata"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0.00001000 BTC",
+              "Label": "Fee",
+              "TextV2": {
+                "Text": "0.00001000 BTC"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "wallet metadata supplied with this request, checked against the PSBT",
+              "Label": "Ownership Source",
+              "TextV2": {
+                "Text": "wallet metadata supplied with this request, checked against the PSBT"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "Sending 0.00060000 BTC | Returning to your accounts 0.00039000 BTC | Fee 0.00001000 BTC"
+        },
+        "Title": {
+          "Text": "Summary"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "Bitcoin Mainnet (transaction network unknown)",
+      "Label": "Address Encoding",
+      "TextV2": {
+        "Text": "Bitcoin Mainnet (transaction network unknown)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "From your account - Savings (m/84'/0'/0'/0/3) - verified from wallet metadata | Deposit #1234 - label from wallet metadata | 0.00100000 BTC from bc1qgl5vlg0zdl7yvprgxj9fevsc6q6x5dmcyk3cn3",
+      "Label": "Input 0",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "From your account - Savings (m/84'/0'/0'/0/3) - verified from wallet metadata",
+              "Label": "Ownership",
+              "TextV2": {
+                "Text": "From your account - Savings (m/84'/0'/0'/0/3) - verified from wallet metadata"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Deposit #1234 - label from wallet metadata",
+              "Label": "Label",
+              "TextV2": {
+                "Text": "Deposit #1234 - label from wallet metadata"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "6acdce89d7d879c671fa158d92364a0422a0e9f2254e387bbd15fb025c0405e7:0",
+              "Label": "Outpoint",
+              "TextV2": {
+                "Text": "6acdce89d7d879c671fa158d92364a0422a0e9f2254e387bbd15fb025c0405e7:0"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "0xffffffff (does not signal replaceability; relative lock disabled)",
+              "Label": "Sequence",
+              "TextV2": {
+                "Text": "0xffffffff (does not signal replaceability; relative lock disabled)"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "AddressV2": {
+                "Address": "bc1qgl5vlg0zdl7yvprgxj9fevsc6q6x5dmcyk3cn3"
+              },
+              "FallbackText": "bc1qgl5vlg0zdl7yvprgxj9fevsc6q6x5dmcyk3cn3",
+              "Label": "Address",
+              "Type": "address_v2"
+            },
+            {
+              "FallbackText": "P2WPKH",
+              "Label": "Script Type",
+              "TextV2": {
+                "Text": "P2WPKH"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "AmountV2": {
+                "Abbreviation": "BTC",
+                "Amount": "0.00100000"
+              },
+              "FallbackText": "0.00100000 BTC",
+              "Label": "Amount",
+              "Type": "amount_v2"
+            },
+            {
+              "FallbackText": "verified against previous transaction from wallet metadata",
+              "Label": "Amount Source",
+              "TextV2": {
+                "Text": "verified against previous transaction from wallet metadata"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "From your account - Savings (m/84'/0'/0'/0/3) - verified from wallet metadata | Deposit #1234 - label from wallet metadata | 0.00100000 BTC from bc1qgl5vlg0zdl7yvprgxj9fevsc6q6x5dmcyk3cn3"
+        },
+        "Title": {
+          "Text": "Input 0"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "External - not one of your accounts in wallet metadata | Invoice 2024-117 (Acme Corp) - label from wallet metadata | bc1qvx4y0qycukdpmg0ftrz9zjt377ra8nfpgdqk9c 0.00060000 BTC",
+      "Label": "Output 0",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "External - not one of your accounts in wallet metadata",
+              "Label": "Ownership",
+              "TextV2": {
+                "Text": "External - not one of your accounts in wallet metadata"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "Invoice 2024-117 (Acme Corp) - label from wallet metadata",
+              "Label": "Label",
+              "TextV2": {
+                "Text": "Invoice 2024-117 (Acme Corp) - label from wallet metadata"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "AddressV2": {
+                "Address": "bc1qvx4y0qycukdpmg0ftrz9zjt377ra8nfpgdqk9c"
+              },
+              "FallbackText": "bc1qvx4y0qycukdpmg0ftrz9zjt377ra8nfpgdqk9c",
+              "Label": "Address",
+              "Type": "address_v2"
+            },
+            {
+              "FallbackText": "P2WPKH",
+              "Label": "Script Type",
+              "TextV2": {
+                "Text": "P2WPKH"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "AmountV2": {
+                "Abbreviation": "BTC",
+                "Amount": "0.00060000"
+              },
+              "FallbackText": "0.00060000 BTC",
+              "Label": "Amount",
+              "Type": "amount_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "External - not one of your accounts in wallet metadata | Invoice 2024-117 (Acme Corp) - label from wallet metadata | bc1qvx4y0qycukdpmg0ftrz9zjt377ra8nfpgdqk9c 0.00060000 BTC"
+        },
+        "Title": {
+          "Text": "Output 0"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "FallbackText": "Change - Savings (m/84'/0'/0'/1/7) - verified from wallet metadata | bc1qschdw5sgdyyamnwgphy5yand4kdemhaj05tjl3 0.00039000 BTC",
+      "Label": "Output 1",
+      "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "Change - Savings (m/84'/0'/0'/1/7) - verified from wallet metadata",
+              "Label": "Ownership",
+              "TextV2": {
+                "Text": "Change - Savings (m/84'/0'/0'/1/7) - verified from wallet metadata"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "AddressV2": {
+                "Address": "bc1qschdw5sgdyyamnwgphy5yand4kdemhaj05tjl3"
+              },
+              "FallbackText": "bc1qschdw5sgdyyamnwgphy5yand4kdemhaj05tjl3",
+              "Label": "Address",
+              "Type": "address_v2"
+            },
+            {
+              "FallbackText": "P2WPKH",
+              "Label": "Script Type",
+              "TextV2": {
+                "Text": "P2WPKH"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "AmountV2": {
+                "Abbreviation": "BTC",
+                "Amount": "0.00039000"
+              },
+              "FallbackText": "0.00039000 BTC",
+              "Label": "Amount",
+              "Type": "amount_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "Change - Savings (m/84'/0'/0'/1/7) - verified from wallet metadata | bc1qschdw5sgdyyamnwgphy5yand4kdemhaj05tjl3 0.00039000 BTC"
+        },
+        "Title": {
+          "Text": "Output 1"
+        }
+      },
+      "Type": "preview_layout"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "BTC",
+        "Amount": "0.00001000"
+      },
+      "FallbackText": "0.00001000 BTC",
+      "Label": "Fee",
+      "Type": "amount_v2"
+    },
+    {
+      "FallbackText": "previous transactions for input 0 from wallet metadata",
+      "Label": "Fee Source",
+      "TextV2": {
+        "Text": "previous transactions for input 0 from wallet metadata"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2",
+      "Label": "Version",
+      "TextV2": {
+        "Text": "2"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "BitcoinTx",
+  "Title": "Bitcoin Transaction",
+  "Version": "0"
+}
