@@ -15273,7 +15273,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tracing",
  "visualsign",
 ]
