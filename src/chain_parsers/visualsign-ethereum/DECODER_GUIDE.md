@@ -141,15 +141,20 @@ match operation_type {
 The `ContractRegistry` is your key to clean code. Use these methods:
 
 ```rust
+use alloy_primitives::U256;
+
 // Get token symbol
 let symbol = registry.get_token_symbol(chain_id, address);
 
-// Format amount with decimals: use this for any uint160 or uint256 field
-let (formatted, symbol) = registry.format_token_amount_u256(
+// Format amount with decimals: use this for any uint160 or uint256 field.
+// The call returns an Option, so match on it instead of destructuring directly.
+if let Some((formatted, symbol)) = registry.format_token_amount_u256(
     chain_id,
     token_address,
-    U256::from(raw_amount)
-)?;
+    U256::from(raw_amount),
+) {
+    let _text = format!("{formatted} {symbol}");
+}
 ```
 
 `format_token_amount` takes a `u128` and is still fine for a field that is at most 128 bits wide.

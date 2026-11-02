@@ -105,7 +105,8 @@ fn require_canonical<T: borsh::BorshSerialize>(
     decoded: &T,
     input: &[u8],
 ) -> Result<(), TransactionParseError> {
-    let encoded = borsh::to_vec(decoded)
+    let mut encoded = Vec::with_capacity(input.len());
+    borsh::BorshSerialize::serialize(decoded, &mut encoded)
         .map_err(|e| TransactionParseError::DecodeError(format!("borsh re-encode: {e}")))?;
     if encoded != input {
         let offset = encoded
@@ -124,7 +125,7 @@ fn require_canonical<T: borsh::BorshSerialize>(
         };
         return Err(TransactionParseError::DecodeError(format!(
             "non-canonical NEAR transaction: input differs from its canonical encoding \
-             at byte offset {offset} ({lengths}; unsorted or duplicate map keys re-encode differently)"
+             at byte offset {offset} ({lengths}; e.g. unsorted or duplicate map keys)"
         )));
     }
     Ok(())
@@ -147,7 +148,10 @@ fn decode_input(s: &str) -> Result<Vec<u8>, TransactionParseError> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::primitives::{KeyType, Signature};
+    use crate::primitives::{
+        Action, DelegateAction, KeyType, NonDelegateAction, Signature, SignedDelegateAction,
+        TransactionNonce, TransactionV1,
+    };
     use visualsign::vsptrait::Transaction as _;
 
     /// Borsh-encoded unsigned NEAR Transfer: alice.near -> bob.near, 1 NEAR.
@@ -259,6 +263,142 @@ mod tests {
         }
         s.push_str("00000000000000000000000000000000");
         s
+    }
+
+    fn signed_state_init_bytes(v1: bool, delegate: bool, unsorted: bool) -> Vec<u8> {
+        let canonical = hex::decode(state_init_hex(&[("a", "1"), ("b", "2")])).expect("hex");
+        let Transaction::V0(mut tx) = borsh::from_slice(&canonical).expect("decode V0") else {
+            panic!("expected V0");
+        };
+        if delegate {
+            tx.actions = vec![Action::Delegate(Box::new(SignedDelegateAction {
+                delegate_action: DelegateAction {
+                    sender_id: "sender.near".parse().expect("account"),
+                    receiver_id: tx.receiver_id.clone(),
+                    actions: tx
+                        .actions
+                        .into_iter()
+                        .map(|a| NonDelegateAction::try_from(a).expect("non-delegate"))
+                        .collect(),
+                    nonce: 1,
+                    max_block_height: 100,
+                    public_key: tx.public_key.clone(),
+                },
+                signature: Signature::empty(KeyType::ED25519),
+            }))];
+        }
+        let transaction = if v1 {
+            Transaction::V1(TransactionV1 {
+                signer_id: tx.signer_id,
+                public_key: tx.public_key,
+                nonce: TransactionNonce::GasKeyNonce {
+                    nonce: tx.nonce,
+                    nonce_index: 0,
+                },
+                receiver_id: tx.receiver_id,
+                block_hash: tx.block_hash,
+                actions: tx.actions,
+            })
+        } else {
+            Transaction::V0(tx)
+        };
+        let signed = SignedTransaction::new(Signature::empty(KeyType::ED25519), transaction);
+        let mut bytes = borsh::to_vec(&signed).expect("encode signed");
+        if unsorted {
+            // Swap the two serialized entries without re-encoding the BTreeMap.
+            let entries = hex::decode("0100000061010000003101000000620100000032").expect("hex");
+            let offset = bytes
+                .windows(entries.len())
+                .position(|w| w == entries)
+                .expect("map");
+            bytes[offset..offset + 10].copy_from_slice(&entries[10..]);
+            bytes[offset + 10..offset + 20].copy_from_slice(&entries[..10]);
+        }
+        bytes
+    }
+
+    fn assert_signed_unsorted_map_rejected(v1: bool, delegate: bool, offset: usize, len: usize) {
+        let config = DeveloperConfig {
+            allow_signed_transactions: true,
+        };
+        let canonical = signed_state_init_bytes(v1, delegate, false);
+        NearTransaction::from_string_with_options(&hex::encode(&canonical), Some(&config))
+            .expect("canonical signed transaction");
+        let input = signed_state_init_bytes(v1, delegate, true);
+        assert_eq!(input.len(), canonical.len());
+        assert_eq!(
+            input.iter().zip(&canonical).position(|(a, b)| a != b),
+            Some(offset)
+        );
+        assert_eq!(input.len(), len);
+        let result = NearTransaction::from_string_with_options(&hex::encode(&input), Some(&config));
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for a signed unsorted map");
+        };
+        assert!(message.contains("non-canonical"), "message: {message}");
+        assert!(
+            message.contains(&format!(
+                "byte offset {offset} (both are {} bytes",
+                input.len()
+            )),
+            "message: {message}"
+        );
+    }
+
+    #[test]
+    fn signed_v0_unsorted_map_is_rejected() {
+        assert_signed_unsorted_map_rejected(false, false, 146, 243);
+    }
+
+    #[test]
+    fn signed_v1_unsorted_map_is_rejected() {
+        assert_signed_unsorted_map_rejected(true, false, 150, 247);
+    }
+
+    #[test]
+    fn signed_delegate_unsorted_map_is_rejected() {
+        assert_signed_unsorted_map_rejected(false, true, 178, 389);
+    }
+
+    #[test]
+    fn signed_v0_duplicate_key_is_rejected() {
+        let config = DeveloperConfig {
+            allow_signed_transactions: true,
+        };
+        let signature =
+            borsh::to_vec(&Signature::empty(KeyType::ED25519)).expect("encode signature");
+        // Raw bytes keep both entries [(a,1),(a,9)]; borsh would collapse them if re-encoded.
+        let mut input = hex::decode(state_init_hex(&[("a", "1"), ("a", "9")])).expect("hex");
+        input.extend_from_slice(&signature);
+        let mut canonical = hex::decode(state_init_hex(&[("a", "9")])).expect("hex");
+        canonical.extend_from_slice(&signature);
+
+        // The canonical form must be what borsh really re-encodes the decoded input to.
+        let decoded: SignedTransaction = borsh::from_slice(&input).expect("decode signed");
+        assert_eq!(borsh::to_vec(&decoded).expect("re-encode"), canonical);
+
+        let offset = input
+            .iter()
+            .zip(&canonical)
+            .position(|(a, b)| a != b)
+            .expect("payloads differ");
+        assert_eq!(offset, 138);
+        assert_eq!((input.len(), canonical.len()), (243, 233));
+
+        let result = NearTransaction::from_string_with_options(&hex::encode(&input), Some(&config));
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for a signed duplicate key");
+        };
+        assert_eq!(
+            message,
+            format!(
+                "non-canonical NEAR transaction: input differs from its canonical encoding \
+                 at byte offset {offset} (input is {} bytes, canonical encoding is {} bytes; \
+                 e.g. unsorted or duplicate map keys)",
+                input.len(),
+                canonical.len()
+            )
+        );
     }
 
     #[test]
