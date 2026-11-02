@@ -171,7 +171,7 @@ sequenceDiagram
     W->>W: sign metadata
     W->>R: PSBT + signed metadata
     R->>E: parse request
-    E->>E: recognise signer
+    E->>E: recognize signer
     E->>E: check against the PSBT
     E->>A: attributed, signed payload
 ```
@@ -337,7 +337,7 @@ changes meaning. A divergence that needs its own transaction parser is a new
 | Taproot fee bound by the BIP-341 signature | when every input is P2TR | the normal case: standard inputs are P2TR |
 | Legacy and segwit v0 scripts | rendered | refused (not standard) |
 | Base58 addresses | rendered | refused (none exist) |
-| P2MR (witness v2) and `OP_CHECKXMSSSIG` | not applicable | refused until modelled |
+| P2MR (witness v2) and `OP_CHECKXMSSSIG` | not applicable | refused until modeled |
 | Ownership re-derivation | BIP-44/49/84/86, coin type 0 | BIP-86 only, coin type 808276 (1 on testnets) |
 | Multisig | `wsh(sortedmulti)`, `tr` `multi_a` | `tr` `multi_a` only |
 | Signature binds the network | no | no |
@@ -392,6 +392,65 @@ mechanism the Ethereum ABI, Solana IDL and NEAR token-metadata paths already use
 **Policy.** The converter takes a deploy-time `MetadataTrustPolicy`, as NEAR's
 does. Production runs `RequireAllowlistedSigner`, and nothing in a request can
 change the posture.
+
+### Trust anchors
+
+The parser always does the same thing: it verifies one signature against the
+allowlist and re-derives every script. What differs is why the allowlisted key
+deserves trust, and so what a compromised component can do:
+
+| Anchor | The key is held by | Who decides which accounts are "yours" | If the backend is compromised |
+|---|---|---|---|
+| Backend key | the wallet backend | the backend, per request | it can list an attacker's xpub as an account |
+| **Wallet enclave** (recommended) | an attested enclave that holds the wallet; the key never leaves it | a one-time registration into the enclave, under its own approvals | it can't add an account; it can only send requests the enclave answers from registered accounts |
+| Pinned account set | nobody: a hash of the account set is pinned in deploy-time config | a redeploy | it can't add an account |
+
+**Wallet enclave.** The wallet (descriptors, issued-index state, labels, and
+the previous transactions it has seen) lives in an enclave. Given a PSBT, it
+returns the signed `BitcoinLikeMetadata` subset for that transaction:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Wallet backend
+    participant WE as Wallet enclave
+    participant E as visualsign enclave
+    participant A as Approver
+    B->>WE: PSBT
+    WE->>WE: look up registered accounts, prevouts, labels
+    WE->>B: signed BitcoinLikeMetadata
+    B->>E: PSBT + signed metadata
+    E->>E: recognize signer, check against the PSBT
+    E->>A: payload naming the wallet enclave
+```
+
+1. The backend sends the PSBT to the wallet enclave.
+2. The wallet enclave selects the registered accounts the PSBT's derivations
+   name, the previous transactions it spends, and the labels for its outpoints
+   and outputs.
+3. It signs that subset with its enclave-held key, scoped to the network,
+   `wallet_id` and unsigned txid, with its snapshot height.
+4. The backend forwards the PSBT and signed metadata, as with any other anchor.
+5. The parser recognizes the wallet enclave's key and checks every claim
+   against the PSBT. It still never trusts the metadata's conclusions.
+6. The approver sees `Wallet treasury-1 - account list signed by Wallet enclave
+   (attested) - snapshot at block 870123`.
+
+This is the BIP-388 model moved off the device. Registration is the trust root
+and happens once per account, under its own approvals. After that, a
+compromised backend can only ask questions about registered accounts.
+
+- **Enrollment.** The wallet enclave's key is enrolled only after its
+  attestation is verified, the same way the visualsign enclave's own signing
+  key is tied to its boot attestation. The allowlist entry records the name and
+  the measurements that were checked.
+- **The parser stays stateless.** It verifies a signature, as for any anchor,
+  and needs no attestation parser of its own.
+- **Registration is the new attack surface.** Whoever can import descriptors
+  into the wallet enclave decides what "yours" means, so registration needs
+  approvals at least as strong as those on the transactions it affects.
+- **Freshness.** The signed metadata carries the snapshot height, and the
+  parser shows it.
 
 **Keys per wallet.** Allowlist entries are scoped as `(chain_tag, wallet_id,
 pubkey)`, length-prefixed as NEAR's `scoped_signer_key(domain, pubkey)`. One key
@@ -539,6 +598,7 @@ change addresses or a consensus rule requiring an independent approver.
 |---|---|---|---|
 | Client edits or injects metadata | stops it | re-derive; re-hash prevouts | every row names the signer |
 | Signer key compromised | no | stops fake change against honest accounts, not a substituted account | fingerprints on screen; per-wallet keys limit reach; independent approver |
+| Backend compromised, wallet-enclave anchor | n/a | the enclave answers only from registered accounts | registration approvals; snapshot height on screen |
 | Fake change (our fingerprint, foreign script) | n/a | `ClaimedOwnUnverified`, counted as sending | `diagnostic` |
 | Ransom change (our key, odd path) | n/a | branch and `highest_index` bounds | `diagnostic` |
 | Input amount lie (CVE-2020-14199) | no | prevout must hash to txid and agree with `witness_utxo` | amount shown as claimed otherwise |
@@ -581,15 +641,43 @@ relevant to this transaction:
 | `prevouts` | `gettransaction` or `getrawtransaction` for each spent outpoint |
 | `labels` | a BIP-329 export, filtered to this transaction's outpoints and outputs |
 
-Two additions follow from the wallet-file idea:
+Three additions follow from the wallet-file idea:
 
+- **The wallet can run in an enclave.** The snapshot's producer can be an
+  attested wallet enclave that holds the wallet and signs each answer. For the
+  parser that is the same as trusting an allowlisted key, but the key's trust
+  comes from measured code and a one-time registration rather than from the
+  backend ([Trust anchors](#trust-anchors)).
 - **Snapshot freshness on screen.** An optional `snapshot_height` and
   `exported_at`, signed with the rest, shown as `Wallet snapshot at block
   870123`.
 - **Pinned account sets.** For wallets whose accounts never change (cold
   treasuries), a hash of the account set can be pinned in deploy-time config.
-  That anchors ownership without trusting any signing key, the closest
-  equivalent to BIP-388 registration.
+  That anchors ownership without trusting any signing key.
+
+## Producer helpers
+
+Whatever the anchor, something has to build and sign the metadata. These
+helpers keep producers and the parser on one implementation:
+
+1. **A shared metadata crate** (pure Rust, no C). It holds the
+   `BitcoinLikeMetadata` types, the canonical Borsh body, the prehash (reusing
+   `metadata_signing_prehash_v1`), and `sign` / `verify`. The wallet enclave,
+   any backend and the parser link the same code, so the signed bytes can't
+   drift between producer and verifier.
+2. **A metadata builder:** `build_metadata(psbt, source)` over a
+   `WalletSource` trait. It returns only what this transaction needs: the
+   registered accounts its derivations name, the previous transactions it
+   spends, and the labels for its outpoints and outputs. Two implementations:
+   - **BDK** (`bdk_wallet`, pure Rust), which suits an enclave and needs no
+     `wallet.dat`.
+   - **Bitcoin Core RPC** (`listdescriptors`, `gettransaction`, a BIP-329
+     export), for backends that already run Core.
+3. **An enrollment tool.** It verifies a wallet enclave's attestation and prints
+   the named allowlist entry (`name=pubkey`) with the measurements it checked,
+   ready for deploy-time config.
+4. **Parser CLI support.** `--wallet-metadata <file>` plus a dev-key signer, so
+   the whole flow can be tested locally without an enclave.
 
 ## Multisig (follow-up)
 
@@ -623,8 +711,12 @@ All golden fixtures are unchanged. The screens and JSON above are its output.
 3. **Ownership, attestation and display.** Accounts, prevouts and labels; the
    signature check with per-wallet scoping; the signer name on screen; the
    `intermediate_output`.
-4. **Pearl**, behind `bitcoinlike-pearl`, with its own tracking issue.
-5. **Multisig, descriptors and snapshot freshness.**
+4. **Producer helpers.** The shared metadata crate and the BDK builder first,
+   then the Core RPC source, the enrollment tool and CLI support.
+5. **Wallet enclave** as the recommended anchor, with registration approvals
+   and snapshot freshness.
+6. **Pearl**, behind `bitcoinlike-pearl`, with its own tracking issue.
+7. **Multisig and descriptors.**
 
 ## Open questions
 
@@ -634,9 +726,11 @@ All golden fixtures are unchanged. The screens and JSON above are its output.
 3. **Wording before attestation lands:** "your accounts" or "accounts in this
    request"?
 4. **Segwit v0 prevouts:** required before an own input is called verified?
-5. **Enrolment:** per-wallet keys in deploy-time config, a root key issuing
-   per-wallet certificates, or pinned account sets for static wallets?
+5. **Enrollment:** per-wallet keys in deploy-time config, or a root key issuing
+   per-wallet certificates? (This matters most for the backend-key anchor.)
 6. **Descriptors:** take `miniscript` into the enclave, or a narrow parser for
    `wpkh`, `tr` and `wsh(sortedmulti)`?
 7. **Snapshot freshness:** required, optional, or shown only when older than a
    bound?
+8. **Wallet enclave:** where it runs, who approves account registration, and
+   which attestation format the enrollment tool verifies.
