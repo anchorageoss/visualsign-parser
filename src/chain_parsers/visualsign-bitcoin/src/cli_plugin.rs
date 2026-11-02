@@ -1,3 +1,9 @@
+#[cfg(feature = "bitcoind-rpc")]
+mod wallet_check;
+
+#[cfg(feature = "bitcoind-rpc")]
+pub use wallet_check::{BitcoinCommand, WalletCheckArgs, WalletCheckOutput};
+
 use bitcoin::Network;
 use clap::Args as ClapArgs;
 use generated::parser::ChainMetadata;

@@ -7,19 +7,29 @@
 //!
 //! Wallet metadata supplied with the request ([`BitcoinMetadata`]) adds an
 //! ownership summary and per-row status lines; see [`metadata`]. Without it
-//! the payload is unchanged.
+//! the payload is unchanged. The same metadata can be read from the signer's
+//! own watch-only node instead; see [`wallet_source`].
 
 mod analysis;
+#[cfg(feature = "bitcoind-rpc")]
+pub mod bitcoind_rpc;
 #[cfg(feature = "cli-plugin")]
 pub mod cli_plugin;
 pub mod metadata;
+#[cfg(feature = "json")]
+mod metadata_json;
 mod scripts;
+pub mod wallet_source;
 
 #[cfg(feature = "cli-plugin")]
 pub use cli_plugin::{BitcoinArgs, BitcoinPlugin};
+#[cfg(all(feature = "cli-plugin", feature = "bitcoind-rpc"))]
+pub use cli_plugin::{BitcoinCommand, WalletCheckArgs};
 
 pub use analysis::BitcoinParserError;
-pub use metadata::{BitcoinMetadata, Classified, Ownership, OwnershipReport};
+pub use metadata::{
+    BitcoinMetadata, Classified, LocalNode, MetadataSource, NodeCheck, Ownership, OwnershipReport,
+};
 
 use analysis::{AmountSource, Analysis, Fee, InputInfo, OutputInfo};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
@@ -141,7 +151,17 @@ impl BitcoinVisualSignConverter {
         psbt: &Psbt,
         metadata: &BitcoinMetadata,
     ) -> Result<OwnershipReport, BitcoinParserError> {
-        self.analyze_with_metadata(psbt, metadata)
+        self.ownership_report_from(psbt, metadata, &MetadataSource::Request)
+    }
+
+    /// [`Self::ownership_report`] for metadata from `source`.
+    pub fn ownership_report_from(
+        &self,
+        psbt: &Psbt,
+        metadata: &BitcoinMetadata,
+        source: &MetadataSource,
+    ) -> Result<OwnershipReport, BitcoinParserError> {
+        self.analyze_with_metadata(psbt, metadata, source)
             .map(|(_, report)| report)
     }
 
@@ -154,10 +174,31 @@ impl BitcoinVisualSignConverter {
         options: VisualSignOptions,
         metadata: &BitcoinMetadata,
     ) -> Result<ConversionResult, VisualSignError> {
+        self.to_visual_sign_payload_with_metadata_from(
+            transaction_wrapper,
+            options,
+            metadata,
+            &MetadataSource::Request,
+        )
+    }
+
+    /// Convert with wallet metadata from `source`, which every row the
+    /// metadata contributes names.
+    pub fn to_visual_sign_payload_with_metadata_from(
+        &self,
+        transaction_wrapper: BitcoinTransactionWrapper,
+        options: VisualSignOptions,
+        metadata: &BitcoinMetadata,
+        source: &MetadataSource,
+    ) -> Result<ConversionResult, VisualSignError> {
         let (analysis, report) = self
-            .analyze_with_metadata(transaction_wrapper.inner(), metadata)
+            .analyze_with_metadata(transaction_wrapper.inner(), metadata, source)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
-        let payload = build_payload(&analysis, self.network, options, Some(&report))?;
+        let annotation = Annotation {
+            report: &report,
+            attribution: Attribution::new(source),
+        };
+        let payload = build_payload(&analysis, self.network, options, Some(&annotation))?;
         Ok(ConversionResult::new(payload))
     }
 
@@ -165,10 +206,11 @@ impl BitcoinVisualSignConverter {
         &self,
         psbt: &Psbt,
         metadata: &BitcoinMetadata,
+        source: &MetadataSource,
     ) -> Result<(Analysis, OwnershipReport), BitcoinParserError> {
-        let prepared = metadata::prepare(psbt, self.network, metadata)?;
+        let prepared = metadata::prepare(psbt, self.network, metadata, source)?;
         let analysis = analysis::analyze(&prepared.psbt, self.network)?;
-        let report = metadata::classify(&prepared, metadata);
+        let report = metadata::classify(&prepared, metadata, source);
         Ok((analysis, report))
     }
 }
@@ -218,11 +260,11 @@ fn build_payload(
     analysis: &Analysis,
     network: Network,
     options: VisualSignOptions,
-    report: Option<&OwnershipReport>,
+    annotation: Option<&Annotation>,
 ) -> Result<SignablePayload, VisualSignError> {
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
-    if let Some(report) = report {
-        fields.extend(summary_fields(analysis, report)?);
+    if let Some(a) = annotation {
+        fields.extend(summary_fields(analysis, a.report, &a.attribution)?);
     }
     fields.push(create_text_field(
         "Address Encoding",
@@ -230,11 +272,11 @@ fn build_payload(
     )?);
 
     for (i, input) in analysis.inputs.iter().enumerate() {
-        let classified = report.map(|r| &r.inputs[i]);
+        let classified = annotation.map(|a| (&a.report.inputs[i], &a.attribution));
         fields.push(input_field(i, input, analysis.version, classified)?);
     }
     for (i, output) in analysis.outputs.iter().enumerate() {
-        let classified = report.map(|r| &r.outputs[i]);
+        let classified = annotation.map(|a| (&a.report.outputs[i], &a.attribution));
         fields.push(output_field(i, output, classified)?);
     }
 
@@ -242,7 +284,11 @@ fn build_payload(
         Fee::Verified(fee) => fields.push(create_amount_field("Fee", &btc(*fee), "BTC")?),
         other => fields.push(create_text_field("Fee", &fee_text(other))?),
     }
-    if let Some(report) = report {
+    if let Some(Annotation {
+        report,
+        attribution,
+    }) = annotation
+    {
         let from_metadata: Vec<String> = report
             .inputs
             .iter()
@@ -254,8 +300,9 @@ fn build_payload(
             fields.push(create_text_field(
                 "Fee Source",
                 &format!(
-                    "previous transactions for input {} from wallet metadata",
-                    from_metadata.join(", ")
+                    "previous transactions for input {} {}",
+                    from_metadata.join(", "),
+                    attribution.from
                 ),
             )?);
         }
@@ -298,10 +345,10 @@ fn input_field(
     index: usize,
     input: &InputInfo,
     version: i32,
-    classified: Option<&Classified>,
+    classified: Option<(&Classified, &Attribution)>,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let mut expanded = match classified {
-        Some(c) => ownership_fields(c, false)?,
+        Some((c, attr)) => ownership_fields(c, false, attr)?,
         None => Vec::new(),
     };
     expanded.push(create_text_field(
@@ -350,16 +397,18 @@ fn input_field(
             "amount unknown".to_string()
         }
     };
-    let from_metadata = classified.is_some_and(|c| c.prev_tx_from_metadata);
+    let from_metadata = classified
+        .filter(|(c, _)| c.prev_tx_from_metadata)
+        .map(|(_, attr)| attr);
     expanded.push(create_text_field(
         "Amount Source",
-        match input.source {
-            AmountSource::Verified if from_metadata => {
-                "verified against previous transaction from wallet metadata"
+        &match (input.source, from_metadata) {
+            (AmountSource::Verified, Some(attr)) => {
+                format!("verified against previous transaction {}", attr.from)
             }
-            AmountSource::Verified => "verified against previous transaction",
-            AmountSource::Claimed => "claimed by witness_utxo only",
-            AmountSource::Missing => "missing",
+            (AmountSource::Verified, None) => "verified against previous transaction".to_string(),
+            (AmountSource::Claimed, _) => "claimed by witness_utxo only".to_string(),
+            (AmountSource::Missing, _) => "missing".to_string(),
         },
     )?);
     expanded.extend(script_fields(&input.scripts)?);
@@ -371,7 +420,7 @@ fn input_field(
         None => amount_text,
     };
     let subtitle = match classified {
-        Some(c) => format!("{} | {subtitle}", status_line(c, false)),
+        Some((c, attr)) => format!("{} | {subtitle}", status_line(c, false, attr)),
         None => subtitle,
     };
     Ok(create_preview_layout(
@@ -384,10 +433,10 @@ fn input_field(
 fn output_field(
     index: usize,
     output: &OutputInfo,
-    classified: Option<&Classified>,
+    classified: Option<(&Classified, &Attribution)>,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let mut expanded = match classified {
-        Some(c) => ownership_fields(c, true)?,
+        Some((c, attr)) => ownership_fields(c, true, attr)?,
         None => Vec::new(),
     };
     match &output.address {
@@ -405,7 +454,7 @@ fn output_field(
     };
     let subtitle = format!("{target} {} BTC", btc(output.amount));
     let subtitle = match classified {
-        Some(c) => format!("{} | {subtitle}", status_line(c, true)),
+        Some((c, attr)) => format!("{} | {subtitle}", status_line(c, true, attr)),
         None => subtitle,
     };
     Ok(create_preview_layout(
@@ -452,11 +501,49 @@ fn script_fields(
     Ok(fields)
 }
 
-/// Attribution appended to everything the metadata contributes.
+/// Attribution appended to everything request metadata contributes.
 const FROM_METADATA: &str = "from wallet metadata";
 
+/// An ownership report and how its rows name their source.
+struct Annotation<'a> {
+    report: &'a OwnershipReport,
+    attribution: Attribution,
+}
+
+/// How rows contributed by the metadata name where it came from.
+struct Attribution {
+    /// "from wallet metadata", appended to verified and labelled rows.
+    from: String,
+    /// "in wallet metadata", for rows that found nothing.
+    within: String,
+    /// The summary's "Ownership Source" row.
+    source: String,
+}
+
+impl Attribution {
+    fn new(source: &MetadataSource) -> Self {
+        match source {
+            MetadataSource::Request => Self {
+                from: FROM_METADATA.to_string(),
+                within: "in wallet metadata".to_string(),
+                source: "wallet metadata supplied with this request, checked against the PSBT"
+                    .to_string(),
+            },
+            MetadataSource::LocalNode(node) => {
+                let node = format!("your local node ({})", node.detail);
+                Self {
+                    from: format!("from {node}"),
+                    within: format!("on {node}"),
+                    source: format!("{node}: its public descriptors, re-derived against the PSBT"),
+                }
+            }
+        }
+    }
+}
+
 /// One-line ownership status of an input or output.
-fn ownership_line(c: &Classified, is_output: bool) -> String {
+fn ownership_line(c: &Classified, is_output: bool, attr: &Attribution) -> String {
+    let Attribution { from, within, .. } = attr;
     match &c.ownership {
         Ownership::OwnVerified { account, path } => {
             let change = path.as_ref().iter().rev().nth(1) == Some(&ChildNumber::from(1));
@@ -465,7 +552,7 @@ fn ownership_line(c: &Classified, is_output: bool) -> String {
                 (true, false) => "Returning to your account",
                 (false, _) => "From your account",
             };
-            format!("{role} - {account} (m/{path}) - verified {FROM_METADATA}")
+            format!("{role} - {account} (m/{path}) - verified {from}")
         }
         Ownership::ClaimedOwnUnverified { reason } if is_output => format!(
             "WARNING: claims to be your change but does not match your account ({reason}); counted as sending"
@@ -474,24 +561,52 @@ fn ownership_line(c: &Classified, is_output: bool) -> String {
             format!("WARNING: claims to be from your account but does not match it ({reason})")
         }
         Ownership::External if is_output => {
-            "External - not one of your accounts in wallet metadata".to_string()
+            format!("External - not one of your accounts {within}")
         }
-        Ownership::External => "Not from your accounts in wallet metadata".to_string(),
+        Ownership::External => format!("Not from your accounts {within}"),
     }
 }
 
-fn label_line(label: &str) -> String {
-    format!("{label} - label {FROM_METADATA}")
+/// The local node's `ismine` answer, if it gave one.
+fn node_line(c: &Classified, is_output: bool, attr: &Attribution) -> Option<String> {
+    let counted = if is_output {
+        "; counted as sending"
+    } else {
+        ""
+    };
+    match c.node {
+        NodeCheck::NotChecked => None,
+        NodeCheck::Agrees { ismine } => Some(format!("ismine={ismine}, agrees - {}", attr.from)),
+        NodeCheck::Disagrees { ismine: false } => {
+            let claim = match c.ownership {
+                Ownership::OwnVerified { .. } => "it re-derives from your account",
+                _ => "the PSBT claims it is yours",
+            };
+            Some(format!(
+                "WARNING: your local node says this is not yours (ismine=false), but {claim}{counted}"
+            ))
+        }
+        NodeCheck::Disagrees { ismine: true } => Some(format!(
+            "WARNING: your local node says this is yours (ismine=true), but the PSBT does not prove it{counted}"
+        )),
+    }
+}
+
+fn label_line(label: &str, attr: &Attribution) -> String {
+    format!("{label} - label {}", attr.from)
 }
 
 /// Ownership and label, for a preview subtitle.
-fn status_line(c: &Classified, is_output: bool) -> String {
-    let mut line = ownership_line(c, is_output);
+fn status_line(c: &Classified, is_output: bool, attr: &Attribution) -> String {
+    let mut line = ownership_line(c, is_output, attr);
     if let Some(label) = &c.label {
-        line.push_str(&format!(" | {}", label_line(label)));
+        line.push_str(&format!(" | {}", label_line(label, attr)));
     }
     if !c.warnings.is_empty() {
         line.push_str(" | WARNING: unusual derivation path");
+    }
+    if matches!(c.node, NodeCheck::Disagrees { .. }) {
+        line.push_str(" | WARNING: your local node disagrees");
     }
     line
 }
@@ -499,28 +614,36 @@ fn status_line(c: &Classified, is_output: bool) -> String {
 fn ownership_fields(
     c: &Classified,
     is_output: bool,
+    attr: &Attribution,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let mut fields = vec![create_text_field(
         "Ownership",
-        &ownership_line(c, is_output),
+        &ownership_line(c, is_output, attr),
     )?];
+    if let Some(line) = node_line(c, is_output, attr) {
+        fields.push(create_text_field("Node Check", &line)?);
+    }
     if let Some(label) = &c.label {
-        fields.push(create_text_field("Label", &label_line(label))?);
+        fields.push(create_text_field("Label", &label_line(label, attr))?);
     }
     for warning in &c.warnings {
         fields.push(create_text_field(
             "Derivation Warning",
-            &format!("WARNING: unusual derivation path: {warning} ({FROM_METADATA} check)"),
+            &format!(
+                "WARNING: unusual derivation path: {warning} ({} check)",
+                attr.from
+            ),
         )?);
     }
     Ok(fields)
 }
 
 /// "Sending / Returning / Fee" summary, then one top-level warning per false
-/// ownership claim.
+/// ownership claim and per disagreement with the local node.
 fn summary_fields(
     analysis: &Analysis,
     report: &OwnershipReport,
+    attr: &Attribution,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     let claimed: Vec<usize> = report
@@ -530,6 +653,14 @@ fn summary_fields(
         .filter(|(_, c)| matches!(c.ownership, Ownership::ClaimedOwnUnverified { .. }))
         .map(|(i, _)| i)
         .collect();
+    let disowned = report
+        .outputs
+        .iter()
+        .filter(|c| {
+            matches!(c.ownership, Ownership::OwnVerified { .. })
+                && matches!(c.node, NodeCheck::Disagrees { .. })
+        })
+        .count();
     let mut sending = format!(
         "{} BTC to {} output{} not verified as yours",
         btc(report.external_total),
@@ -542,11 +673,18 @@ fn summary_fields(
             claimed.len()
         ));
     }
+    if disowned > 0 {
+        sending.push_str(&format!(
+            " (includes {disowned} your local node says {} not yours)",
+            if disowned == 1 { "is" } else { "are" }
+        ));
+    }
     let returning = format!(
-        "{} BTC to {} output{} - verified {FROM_METADATA}",
+        "{} BTC to {} output{} - verified {}",
         btc(report.own_total),
         report.own_count,
-        plural(report.own_count)
+        plural(report.own_count),
+        attr.from
     );
     let fee = match &analysis.fee {
         Fee::Verified(fee) => format!("{} BTC", btc(*fee)),
@@ -564,10 +702,7 @@ fn summary_fields(
             create_text_field("Sending", &sending)?,
             create_text_field("Returning to your accounts", &returning)?,
             create_text_field("Fee", &fee)?,
-            create_text_field(
-                "Ownership Source",
-                "wallet metadata supplied with this request, checked against the PSBT",
-            )?,
+            create_text_field("Ownership Source", &attr.source)?,
         ],
     )];
     for i in claimed {
@@ -583,6 +718,26 @@ fn summary_fields(
             fields.push(create_text_field(
                 "Warning",
                 &format!("Input {i} claims to be from your account but does not match it"),
+            )?);
+        }
+    }
+    for (i, c) in report.outputs.iter().enumerate() {
+        if let NodeCheck::Disagrees { ismine } = c.node {
+            fields.push(create_text_field(
+                "Warning",
+                &format!(
+                    "Output {i}: your local node disagrees with the PSBT about ownership (ismine={ismine}); counted as sending"
+                ),
+            )?);
+        }
+    }
+    for (i, c) in report.inputs.iter().enumerate() {
+        if let NodeCheck::Disagrees { ismine } = c.node {
+            fields.push(create_text_field(
+                "Warning",
+                &format!(
+                    "Input {i}: your local node disagrees with the PSBT about ownership (ismine={ismine})"
+                ),
             )?);
         }
     }

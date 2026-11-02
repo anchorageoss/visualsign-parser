@@ -21,6 +21,12 @@
 //! that does not hash to its outpoint's txid, a label for an output that does
 //! not exist) rejects the whole request rather than being ignored.
 //!
+//! [`MetadataSource`] says where the metadata came from, and every row it
+//! contributes names that source. Metadata read from the signer's own node
+//! ([`crate::wallet_source`]) also carries the node's own `ismine` answer for
+//! each address, which is checked against the parser's re-derivation
+//! ([`NodeCheck`]).
+//!
 //! Proto wiring is not done yet. The intended shape is a `BitcoinMetadata
 //! bitcoin = 4;` entry in the `ChainMetadata` oneof of
 //! `proto/parser/parser.proto`, converted into [`BitcoinMetadata`] when
@@ -121,6 +127,41 @@ pub struct OutputLabel {
     pub label: String,
 }
 
+/// Where the metadata came from. Every row it contributes names this source.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub enum MetadataSource {
+    /// Supplied with the signing request.
+    #[default]
+    Request,
+    /// Read from the signer's own Bitcoin Core node.
+    LocalNode(LocalNode),
+}
+
+/// The signer's own node, and its independent answer on ownership.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LocalNode {
+    /// Shown after "your local node", e.g. "wallet airgap, no chain sync".
+    pub detail: String,
+    /// `getaddressinfo(..).ismine` for each input's prevout address. `None`
+    /// when the input's script is unknown or has no address.
+    pub inputs_ismine: Vec<Option<bool>>,
+    /// The same for each output.
+    pub outputs_ismine: Vec<Option<bool>>,
+}
+
+/// The node's `ismine` answer for one input or output, against the parser.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum NodeCheck {
+    /// No node answer: request metadata, or no address to ask about.
+    #[default]
+    NotChecked,
+    /// The node agrees with the parser's re-derivation.
+    Agrees { ismine: bool },
+    /// The node contradicts the parser's re-derivation or the PSBT's claim.
+    /// An output is counted as sending.
+    Disagrees { ismine: bool },
+}
+
 /// Whether an input or output belongs to one of the caller's accounts.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Ownership {
@@ -148,6 +189,8 @@ pub struct Classified {
     /// Inputs only: the previous transaction came from the metadata, not the
     /// PSBT.
     pub prev_tx_from_metadata: bool,
+    /// The local node's own answer, when the metadata came from one.
+    pub node: NodeCheck,
 }
 
 /// What the metadata says about a transaction, for display and for policy
@@ -156,7 +199,8 @@ pub struct Classified {
 pub struct OwnershipReport {
     pub inputs: Vec<Classified>,
     pub outputs: Vec<Classified>,
-    /// Outputs not verified as ours, including false claims.
+    /// Outputs not verified as ours, including false claims and outputs the
+    /// local node disowns.
     pub external_total: Amount,
     pub external_count: usize,
     /// Outputs verified as ours.
@@ -188,6 +232,19 @@ fn check_text(text: &str, what: &str) -> Result<(), BitcoinParserError> {
     }
     if !text.bytes().all(|b| (0x20..=0x7e).contains(&b)) {
         return Err(invalid(format!("{what} must be printable ASCII")));
+    }
+    Ok(())
+}
+
+fn check_source(source: &MetadataSource, tx: &Transaction) -> Result<(), BitcoinParserError> {
+    let MetadataSource::LocalNode(node) = source else {
+        return Ok(());
+    };
+    check_text(&node.detail, "node description")?;
+    if node.inputs_ismine.len() != tx.input.len() || node.outputs_ismine.len() != tx.output.len() {
+        return Err(invalid(
+            "node answers do not match the transaction's inputs and outputs",
+        ));
     }
     Ok(())
 }
@@ -227,6 +284,7 @@ pub(crate) fn prepare(
     psbt: &Psbt,
     network: Network,
     metadata: &BitcoinMetadata,
+    source: &MetadataSource,
 ) -> Result<Prepared, BitcoinParserError> {
     if metadata.network != network {
         return Err(invalid(format!(
@@ -237,6 +295,7 @@ pub(crate) fn prepare(
     for account in &metadata.accounts {
         check_account(account, network)?;
     }
+    check_source(source, &psbt.unsigned_tx)?;
 
     let tx = &psbt.unsigned_tx;
     let mut out = psbt.clone();
@@ -375,6 +434,9 @@ fn classify_script<C: Verification>(
     accounts: &[Account],
 ) -> (Ownership, Vec<String>) {
     let mut reason = None;
+    // "Outside account X" is the least specific reason: with several accounts
+    // under one fingerprint, the account the path lies under explains more.
+    let mut outside = None;
     for (fingerprint, path) in claims {
         for account in accounts {
             let AccountPolicy::SingleSig { key, script_type } = &account.policy;
@@ -383,11 +445,16 @@ fn classify_script<C: Verification>(
             }
             let shown = path_text(path);
             let why = match path.as_ref().strip_prefix(key.origin.as_ref()) {
-                None => format!(
-                    "path {shown} is outside account {} ({})",
-                    account.name,
-                    path_text(&key.origin)
-                ),
+                None => {
+                    outside.get_or_insert_with(|| {
+                        format!(
+                            "path {shown} is outside account {} ({})",
+                            account.name,
+                            path_text(&key.origin)
+                        )
+                    });
+                    continue;
+                }
                 Some([]) => format!("path {shown} is the account key itself"),
                 Some(rest) if rest.iter().any(ChildNumber::is_hardened) => {
                     format!("path {shown} has hardened steps below the account")
@@ -415,7 +482,7 @@ fn classify_script<C: Verification>(
             reason.get_or_insert(why);
         }
     }
-    match reason {
+    match reason.or(outside) {
         Some(reason) => (Ownership::ClaimedOwnUnverified { reason }, Vec::new()),
         None => (Ownership::External, Vec::new()),
     }
@@ -432,8 +499,23 @@ fn claims_of(
         .collect()
 }
 
+/// Compare the node's `ismine` with the parser. A false ownership claim is a
+/// disagreement whatever the node says: the PSBT and the node cannot both be
+/// right.
+fn node_check(ownership: &Ownership, ismine: Option<bool>) -> NodeCheck {
+    match (ownership, ismine) {
+        (_, None) => NodeCheck::NotChecked,
+        (Ownership::OwnVerified { .. }, Some(true)) | (Ownership::External, Some(false)) => {
+            NodeCheck::Agrees {
+                ismine: ismine == Some(true),
+            }
+        }
+        (_, Some(ismine)) => NodeCheck::Disagrees { ismine },
+    }
+}
+
 /// The script an input spends, as the PSBT (after [`prepare`]) gives it.
-fn prevout_script(psbt: &Psbt, index: usize) -> Option<&Script> {
+pub(crate) fn prevout_script(psbt: &Psbt, index: usize) -> Option<&Script> {
     let input = &psbt.inputs[index];
     let vout = usize::try_from(psbt.unsigned_tx.input[index].previous_output.vout).ok()?;
     match &input.non_witness_utxo {
@@ -446,10 +528,18 @@ fn prevout_script(psbt: &Psbt, index: usize) -> Option<&Script> {
 }
 
 /// Classify every input and output. `prepared.psbt` must already have passed
-/// analysis.
-pub(crate) fn classify(prepared: &Prepared, metadata: &BitcoinMetadata) -> OwnershipReport {
+/// analysis, and `source` [`prepare`].
+pub(crate) fn classify(
+    prepared: &Prepared,
+    metadata: &BitcoinMetadata,
+    source: &MetadataSource,
+) -> OwnershipReport {
     let secp = Secp256k1::verification_only();
     let psbt = &prepared.psbt;
+    let (inputs_ismine, outputs_ismine) = match source {
+        MetadataSource::LocalNode(node) => (&node.inputs_ismine[..], &node.outputs_ismine[..]),
+        MetadataSource::Request => (&[][..], &[][..]),
+    };
     let inputs = psbt
         .inputs
         .iter()
@@ -458,11 +548,13 @@ pub(crate) fn classify(prepared: &Prepared, metadata: &BitcoinMetadata) -> Owner
             let claims = claims_of(&input.bip32_derivation, &input.tap_key_origins);
             let (ownership, warnings) =
                 classify_script(&secp, prevout_script(psbt, i), &claims, &metadata.accounts);
+            let node = node_check(&ownership, inputs_ismine.get(i).copied().flatten());
             Classified {
                 ownership,
                 label: prepared.input_labels[i].clone(),
                 warnings,
                 prev_tx_from_metadata: prepared.prev_tx_from_metadata[i],
+                node,
             }
         })
         .collect();
@@ -489,8 +581,11 @@ pub(crate) fn classify(prepared: &Prepared, metadata: &BitcoinMetadata) -> Owner
             &claims,
             &metadata.accounts,
         );
+        let node = node_check(&ownership, outputs_ismine.get(i).copied().flatten());
         // Analysis has already bounded the output total by MAX_MONEY.
-        if matches!(ownership, Ownership::OwnVerified { .. }) {
+        let own = matches!(ownership, Ownership::OwnVerified { .. })
+            && !matches!(node, NodeCheck::Disagrees { .. });
+        if own {
             report.own_total += txout.value;
             report.own_count += 1;
         } else {
@@ -502,6 +597,7 @@ pub(crate) fn classify(prepared: &Prepared, metadata: &BitcoinMetadata) -> Owner
             label: prepared.output_labels[i].clone(),
             warnings,
             prev_tx_from_metadata: false,
+            node,
         });
     }
     report

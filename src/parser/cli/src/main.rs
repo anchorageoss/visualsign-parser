@@ -26,6 +26,10 @@ enum Command {
     /// Serve a directory of raw-transaction files via a local web UI.
     #[cfg(feature = "serve")]
     Serve(serve::ServeArgs),
+    /// Bitcoin-only tools. Their flags are scoped to the subcommand.
+    #[cfg(feature = "bitcoin")]
+    #[command(subcommand)]
+    Bitcoin(visualsign_bitcoin::BitcoinCommand),
 }
 
 /// Per-chain CLI args, flattened into every subcommand that builds plugins.
@@ -112,6 +116,8 @@ fn main() {
         }
         #[cfg(feature = "serve")]
         Command::Serve(serve_args) => serve::run(serve_args),
+        #[cfg(feature = "bitcoin")]
+        Command::Bitcoin(bitcoin) => bitcoin.run(),
     };
 
     if let Err(e) = result {

@@ -13,7 +13,8 @@ solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
 near = ["dep:visualsign-near", "visualsign-near/dev-signing"]
 tron = ["dep:visualsign-tron"]
-bitcoin = ["dep:visualsign-bitcoin"]
+# `bitcoind-rpc` adds `parser_cli bitcoin wallet-check`; parser_app does not enable it.
+bitcoin = ["dep:visualsign-bitcoin", "visualsign-bitcoin/bitcoind-rpc"]
 zcash = ["dep:visualsign-zcash"]
 diagnostics = [
     "visualsign/diagnostics",
