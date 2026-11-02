@@ -1,3 +1,4 @@
+use crate::core::priority_fee::{CommittedFee, FeeCap, committed_fee};
 use crate::core::txtypes::{
     create_address_lookup_table_field, decode_v0_instructions, decode_v0_transfers,
 };
@@ -13,13 +14,15 @@ use crate::idl::signature::{
     authorized_idl_signers, convert_proto_signature, validate_idl_signature,
 };
 use base64::{self, Engine};
-use solana_message::VersionedMessage;
+use solana_message::{Message as LegacyMessage, VersionedMessage};
 use solana_packet::PACKET_DATA_SIZE;
 use solana_pubkey::Pubkey;
 use solana_transaction::Transaction as SolanaTransaction;
 use solana_transaction::versioned::VersionedTransaction;
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use visualsign::encodings::escape_display_text;
+use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::signing::SignerAllowlist;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
@@ -49,6 +52,19 @@ const V1_MAX_TRANSACTION_SIZE: usize = 4096;
 /// `0x`; base64 is shorter. Sized for `v1` so an over-packet `v1` payload is
 /// still classified, not refused blind.
 const MAX_ENCODED_TRANSACTION_LEN: usize = 2 * V1_MAX_TRANSACTION_SIZE + 2;
+
+/// Longest off-chain message envelope (the JSON text, before it is parsed)
+/// worth decoding. Sign-in and similar messages are well under a kilobyte; the
+/// Solana off-chain message standard caps a message at 65515 bytes, so 64 KiB of
+/// envelope leaves room for that and for JSON escaping. Without a bound, the
+/// escape (up to 3x) and the two copies a text field stores turn one request at
+/// the transport limit into hundreds of megabytes of heap.
+const MAX_MESSAGE_ENVELOPE_LEN: usize = 64 * 1024;
+
+/// A message of this many bytes may be a SHA-256 prehash: NEP-413, SEP-53 and
+/// TON Connect verifiers check an ed25519 signature over a 32-byte digest, so a
+/// Solana wallet signing such a message as is produces a signature they accept.
+const PREHASH_LEN: usize = 32;
 
 /// Leading byte of a SIMD-0385 `v1` transaction (`0x80 | 1`).
 ///
@@ -96,12 +112,134 @@ fn append_diagnostics(
 pub enum SolanaTransactionWrapper {
     Legacy(SolanaTransaction),
     Versioned(VersionedTransaction),
+    /// An off-chain message under the raw-bytes `signMessage` convention that
+    /// Solana wallets use: the signature covers the message's UTF-8 bytes with
+    /// no header, so what renders here has to be exactly what gets signed. The
+    /// envelope also names the signing address, which renders but is not part
+    /// of the signed bytes.
+    ///
+    /// Adding this variant is a source-compatibility change for embedders: an
+    /// exhaustive `match` over the wrapper stops compiling (E0004) until it
+    /// handles `Message`. That is deliberate and the enum stays exhaustive (no
+    /// `#[non_exhaustive]`): a new kind of signable payload should force each
+    /// embedder to decide whether it signs it, not fall into a wildcard arm.
+    ///
+    /// Solana's off-chain message standard (`solana-offchain-message`) prefixes
+    /// a header that starts with the `\xffsolana offchain` signing domain. Such a
+    /// message never reaches this variant: the envelope carries the message as
+    /// a JSON string, which decodes to valid UTF-8, and a `0xff` byte is not.
+    Message(OffChainMessage),
+}
+
+/// An off-chain message envelope, after the fields are lifted out.
+///
+/// `signer_address` is the address the caller says will sign. The parser only
+/// checks that it is a well-formed Solana address and renders it as given; it
+/// does not compare it with any signing key, and has none to compare with. The
+/// consuming wallet must bind this address to the account it has selected for
+/// signing, and must sign exactly the original UTF-8 bytes of `message`, not
+/// the escaped text this parser displays.
+#[derive(Clone, Debug)]
+pub struct OffChainMessage {
+    pub message: String,
+    pub signer_address: String,
+}
+
+/// Decodes `{"message": ..., "signerAddress": ...}`. The envelope exists only to
+/// tell a message apart from a transaction on a wire that carries both.
+///
+/// Unknown fields are refused rather than ignored: an envelope carrying
+/// something this build does not understand is not one it can claim to have
+/// rendered in full. A repeated field is refused the same way: a JSON object
+/// with the same key twice has no single value to render, so accepting
+/// whichever one a generic parser happened to keep would let a signer approve
+/// a message that was never the one shown. A `signerAddress` that is not a
+/// well-formed Solana address (base58, 32 bytes) is refused. That is a format
+/// check only: an off-curve address (a PDA), which no key can sign for, passes.
+impl<'de> serde::Deserialize<'de> for OffChainMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct EnvelopeVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for EnvelopeVisitor {
+            type Value = OffChainMessage;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a Solana off-chain message envelope")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut message: Option<String> = None;
+                let mut signer_address: Option<String> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "message" if message.is_none() => message = Some(map.next_value()?),
+                        "signerAddress" if signer_address.is_none() => {
+                            signer_address = Some(map.next_value()?);
+                        }
+                        "message" | "signerAddress" => {
+                            return Err(serde::de::Error::custom(format!(
+                                "duplicate field {key:?}"
+                            )));
+                        }
+                        other => {
+                            return Err(serde::de::Error::custom(format!(
+                                "unexpected field {other:?}"
+                            )));
+                        }
+                    }
+                }
+                let message = message
+                    .ok_or_else(|| serde::de::Error::custom("envelope has no message field"))?;
+                let signer_address = signer_address.ok_or_else(|| {
+                    serde::de::Error::custom("envelope has no signerAddress field")
+                })?;
+                Pubkey::from_str(&signer_address).map_err(|_| {
+                    serde::de::Error::custom("signerAddress is not a Solana address")
+                })?;
+                Ok(OffChainMessage {
+                    message,
+                    signer_address,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(EnvelopeVisitor)
+    }
 }
 
 impl Transaction for SolanaTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
-        // Cheap bound on the encoded text, so an oversized blob is refused
-        // before base64/hex even allocates for it.
+        // A message envelope is JSON and a transaction is base64 or hex, so the
+        // two cannot collide: neither alphabet contains `{`. Tried first so a
+        // malformed envelope reports its own error rather than surfacing as a
+        // transaction decode failure.
+        let trimmed = data.trim();
+        if trimmed.starts_with('{') {
+            // Bounded before parsing: the transaction bound below does not
+            // apply to this branch.
+            if trimmed.len() > MAX_MESSAGE_ENVELOPE_LEN {
+                return Err(TransactionParseError::InvalidFormat(format!(
+                    "message envelope too large: {} bytes (max: {MAX_MESSAGE_ENVELOPE_LEN} bytes)",
+                    trimmed.len()
+                )));
+            }
+            let envelope = serde_json::from_str::<OffChainMessage>(trimmed).map_err(|e| {
+                TransactionParseError::DecodeError(format!(
+                    "input is JSON but not a Solana message envelope: {e}"
+                ))
+            })?;
+            return Ok(Self::Message(envelope));
+        }
+
+        // Cheap bound on the encoded transaction text, so an oversized blob is
+        // refused before base64/hex even allocates for it. A message envelope
+        // never gets here; it has its own bound above.
         if data.len() > MAX_ENCODED_TRANSACTION_LEN {
             return Err(TransactionParseError::InvalidFormat(format!(
                 "encoded transaction too large: {} chars (max: {MAX_ENCODED_TRANSACTION_LEN} \
@@ -204,6 +342,7 @@ impl Transaction for SolanaTransactionWrapper {
                 VersionedMessage::V0(_) => "Solana (V0)".to_string(),
                 VersionedMessage::V1(_) => "Solana (V1)".to_string(),
             },
+            Self::Message(_) => "Solana Message".to_string(),
         }
     }
 }
@@ -220,14 +359,21 @@ impl SolanaTransactionWrapper {
     pub fn inner_legacy(&self) -> Option<&SolanaTransaction> {
         match self {
             Self::Legacy(tx) => Some(tx),
-            Self::Versioned(_) => None,
+            Self::Versioned(_) | Self::Message(_) => None,
         }
     }
 
     pub fn inner_versioned(&self) -> Option<&VersionedTransaction> {
         match self {
-            Self::Legacy(_) => None,
             Self::Versioned(tx) => Some(tx),
+            Self::Legacy(_) | Self::Message(_) => None,
+        }
+    }
+
+    pub fn inner_message(&self) -> Option<&OffChainMessage> {
+        match self {
+            Self::Message(envelope) => Some(envelope),
+            Self::Legacy(_) | Self::Versioned(_) => None,
         }
     }
 }
@@ -450,6 +596,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
                 bincode::serialized_size(versioned_tx)
             }
+            // An off-chain message is not a transaction and never rides in a
+            // packet, so the packet bound does not apply to it.
+            SolanaTransactionWrapper::Message(_) => Ok(0),
         }
         .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
         if wire_bytes > PACKET_DATA_SIZE as u64 {
@@ -481,6 +630,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                     &lint_config,
                 )?
             }
+            SolanaTransactionWrapper::Message(envelope) => {
+                message_to_visual_sign_payload(envelope)?
+            }
         };
 
         // Only emit intermediate output when the caller opts in; otherwise the
@@ -502,6 +654,14 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
                 bincode::serialize(&versioned_tx.message)
             }
+            // An off-chain message has no transaction structure for an
+            // intermediate output to describe. Its bytes are the preimage the
+            // signature covers, not a serialized transaction message, so
+            // handing them to the transaction parser would at best decode to
+            // nothing and at worst attach instruction metadata to a payload
+            // that has no instructions, which a policy engine would read as
+            // real.
+            SolanaTransactionWrapper::Message(_) => return Ok(ConversionResult::new(payload)),
         }
         .map_err(|e| {
             VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
@@ -512,10 +672,14 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 
         let idl_registry = create_idl_registry_from_options(&options)?;
         let raw_simulated_instructions =
-            extract_raw_simulated_instructions(&options, &idl_registry)?;
+            extract_raw_simulated_instructions(&options, &idl_registry);
         Ok(
-            match build_intermediate_bytes(&message_hex, &idl_registry, raw_simulated_instructions)
-            {
+            match build_intermediate_bytes(
+                &message_hex,
+                &idl_registry,
+                raw_simulated_instructions,
+                fee_cap(&options).lamports,
+            ) {
                 Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
                 None => ConversionResult::new(payload),
             },
@@ -561,8 +725,9 @@ fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
     raw_simulated_instructions: Option<SimulationDecode>,
+    max_fee_lamports: u64,
 ) -> Option<Vec<u8>> {
-    match extract_solana_intermediate_output(message_hex, false, idl_registry) {
+    match extract_solana_intermediate_output(message_hex, false, idl_registry, max_fee_lamports) {
         Ok(mut output) => {
             // Simulation results are independent of static decode.
             if let Some((instructions, simulation_error)) = raw_simulated_instructions {
@@ -598,6 +763,19 @@ fn build_intermediate_bytes(
     }
 }
 
+/// The Solana branch of `options.metadata`, if the caller supplied one.
+fn solana_metadata(options: &VisualSignOptions) -> Option<&generated::parser::SolanaMetadata> {
+    match options.metadata.as_ref()?.metadata.as_ref()? {
+        generated::parser::chain_metadata::Metadata::Solana(solana) => Some(solana),
+        _ => None,
+    }
+}
+
+/// The caller's fee cap, or the parser default when the request carries none.
+fn fee_cap(options: &VisualSignOptions) -> FeeCap {
+    FeeCap::resolve(solana_metadata(options).and_then(|solana| solana.max_fee_lamports))
+}
+
 /// A supplied simulation's inner instructions, and why it could not be read.
 type SimulationDecode = (
     Vec<crate::intermediate::SolanaSimulatedInstruction>,
@@ -607,53 +785,25 @@ type SimulationDecode = (
 /// Pulls `simulated_transaction_result` out of `options.metadata`'s Solana
 /// branch, if present, and IDL-decodes it.
 ///
-/// `Ok(None)` only when no simulation was supplied. Once the field is present a
+/// `None` only when no simulation was supplied. Once the field is present a
 /// failure to read it comes back as a `SolanaSimulationError`, not an absence.
-///
-/// A build without the `simulation` feature cannot read the field, so it
-/// refuses the request rather than emit intermediate output without it.
 fn extract_raw_simulated_instructions(
     options: &VisualSignOptions,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<Option<SimulationDecode>, VisualSignError> {
-    let Some(generated::parser::chain_metadata::Metadata::Solana(solana)) = options
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.metadata.as_ref())
-    else {
-        return Ok(None);
+) -> Option<SimulationDecode> {
+    let raw_json_b64 =
+        solana_metadata(options).and_then(|solana| solana.simulated_transaction_result.as_ref())?;
+    let raw_json = match base64::engine::general_purpose::STANDARD.decode(raw_json_b64) {
+        Ok(raw_json) => raw_json,
+        Err(e) => {
+            tracing::warn!(error = %e, "simulated_transaction_result is not valid base64");
+            return Some((
+                Vec::new(),
+                Some(crate::intermediate::SolanaSimulationError::InvalidBase64),
+            ));
+        }
     };
-    let Some(raw_json_b64) = solana.simulated_transaction_result.as_ref() else {
-        return Ok(None);
-    };
-    #[cfg(not(feature = "simulation"))]
-    {
-        // Unread without the feature.
-        let _ = (raw_json_b64, idl_registry);
-        Err(VisualSignError::ParseError(
-            TransactionParseError::InvalidFormat(
-                "simulated_transaction_result supplied, but this parser was built without \
-                 the `simulation` feature"
-                    .to_string(),
-            ),
-        ))
-    }
-    #[cfg(feature = "simulation")]
-    {
-        let raw_json = match base64::engine::general_purpose::STANDARD.decode(raw_json_b64) {
-            Ok(raw_json) => raw_json,
-            Err(e) => {
-                tracing::warn!(error = %e, "simulated_transaction_result is not valid base64");
-                return Ok(Some((
-                    Vec::new(),
-                    Some(crate::intermediate::SolanaSimulationError::InvalidBase64),
-                )));
-            }
-        };
-        Ok(Some(
-            crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry),
-        ))
-    }
+    Some(crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry))
 }
 
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
@@ -707,6 +857,15 @@ fn convert_to_visual_sign_payload(
 ) -> Result<SignablePayload, VisualSignError> {
     let message = &transaction.message;
 
+    // Checked before any decoding, so an over-cap or undecodable request is refused early.
+    let cap = fee_cap(options);
+    let committed = committed_fee(
+        message.header.num_required_signatures,
+        &message.instructions,
+        &message.account_keys,
+    )?;
+    committed.check_cap(cap.lamports)?;
+
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
 
@@ -754,6 +913,7 @@ fn convert_to_visual_sign_payload(
         );
         decoded.summary
     };
+    let summary = with_priority_fee(summary, committed)?;
 
     // Decode and sort accounts using the dedicated function
     let accounts = decode_accounts(message)?;
@@ -766,13 +926,14 @@ fn convert_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &decode_result);
 
-    let (title, subtitle) = apply_transaction_summary(
+    let (title, subtitle, header_end) = apply_transaction_summary(
         &mut fields,
         title,
         summary,
         message.account_keys.first(),
         "Solana Transaction",
     )?;
+    insert_max_fee(&mut fields, header_end, cap)?;
     Ok(SignablePayload::new(
         0,
         title,
@@ -782,22 +943,23 @@ fn convert_to_visual_sign_payload(
     ))
 }
 
-/// Applies the adopted [`TransactionSummary`]: a caller-supplied title always wins; otherwise
-/// the summary names the transaction and a From row plus its rows are inserted after Network.
+/// Applies the adopted [`TransactionSummary`]: a caller title wins; otherwise a From row plus the
+/// summary rows go after Network. Also returns the index just past those header rows.
 fn apply_transaction_summary(
     fields: &mut Vec<SignablePayloadField>,
     caller_title: Option<String>,
     summary: Option<TransactionSummary>,
     fee_payer: Option<&Pubkey>,
     default_title: &str,
-) -> Result<(String, Option<String>), VisualSignError> {
+) -> Result<(String, Option<String>, usize), VisualSignError> {
+    let after_network = fields.len().min(1);
     if let Some(title) = caller_title {
-        return Ok((title, None));
+        return Ok((title, None, after_network));
     }
     // Without a fee payer there is no From row to anchor the hoisted rows, so the whole
     // summary is dropped rather than leaving a title the body does not back up.
     let (Some(summary), Some(fee_payer)) = (summary, fee_payer) else {
-        return Ok((default_title.to_string(), None));
+        return Ok((default_title.to_string(), None, after_network));
     };
     let mut rows = vec![instructions::create_from_field(fee_payer)?.signable_payload_field];
     rows.extend(
@@ -806,10 +968,130 @@ fn apply_transaction_summary(
             .iter()
             .map(|f| f.signable_payload_field.clone()),
     );
-    let after_network = fields.len().min(1);
+    let header_end = after_network + rows.len();
     fields.splice(after_network..after_network, rows);
-    Ok((summary.title, summary.subtitle))
+    Ok((summary.title, summary.subtitle, header_end))
 }
+
+/// Appends the committed priority fee, if any, to the adopted summary's hoisted rows.
+fn with_priority_fee(
+    summary: Option<TransactionSummary>,
+    committed: CommittedFee,
+) -> Result<Option<TransactionSummary>, VisualSignError> {
+    let Some(mut summary) = summary else {
+        return Ok(None);
+    };
+    if let Some(estimate) = committed.priority() {
+        summary.fields.push(estimate.field()?);
+    }
+    Ok(Some(summary))
+}
+
+/// Adds the fee cap, already checked against the committed fee, as a "Max Fee" row after the
+/// header rows. The intermediate output carries the same value.
+fn insert_max_fee(
+    fields: &mut Vec<SignablePayloadField>,
+    header_end: usize,
+    cap: FeeCap,
+) -> Result<(), VisualSignError> {
+    fields.insert(header_end, cap.field()?.signable_payload_field);
+    Ok(())
+}
+
+/// Refuse message bytes whose signature means something other than "signed
+/// this text".
+///
+/// A Solana wallet's `signMessage` signs the bytes as they are, with no domain
+/// prefix, so the signature is valid wherever an ed25519 signature over those
+/// exact bytes is checked:
+///
+/// - Bytes that are a serialized legacy or versioned transaction message: the
+///   signature is a transaction signature. (v0 and later start with a byte of
+///   `0x80` or more, which is never the first byte of UTF-8 text, so only a
+///   legacy message can occur in practice. Both are checked.)
+/// - Exactly [`PREHASH_LEN`] bytes: the signature may satisfy a verifier that
+///   checks a 32-byte SHA-256 prehash, such as NEAR Intents' NEP-413, SEP-53 and
+///   TON Connect paths. Such a message is accepted only when every byte is
+///   ASCII alphanumeric: a digest falls in that set with probability about
+///   2^-65, so finding one that does is impractical.
+fn check_message_domain(message: &[u8]) -> Result<(), VisualSignError> {
+    let refuse = |why: String| Err(TransactionParseError::DecodeError(why).into());
+    if message.len() == PREHASH_LEN && !message.iter().all(u8::is_ascii_alphanumeric) {
+        return refuse(format!(
+            "refusing a {PREHASH_LEN}-byte message that is not all ASCII letters and digits: \
+             it may be the hash another protocol verifies a signature over (NEP-413, SEP-53, \
+             TON Connect), so signing it could authorize more than the text shown"
+        ));
+    }
+    let round_trips = |encoded: Result<Vec<u8>, bincode::Error>| {
+        encoded.is_ok_and(|bytes| bytes.as_slice() == message)
+    };
+    let legacy = bincode::deserialize::<LegacyMessage>(message)
+        .is_ok_and(|m| round_trips(bincode::serialize(&m)));
+    let versioned = bincode::deserialize::<VersionedMessage>(message)
+        .is_ok_and(|m| round_trips(bincode::serialize(&m)));
+    if legacy || versioned {
+        return refuse(
+            "refusing a message whose bytes are a serialized Solana transaction message: \
+             signing it would sign that transaction"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Render an off-chain message.
+///
+/// The text is escaped before it renders: it is caller-supplied and reaches a
+/// signer's screen, where an unescaped line separator could forge a second
+/// field.
+fn message_to_visual_sign_payload(
+    envelope: &OffChainMessage,
+) -> Result<SignablePayload, VisualSignError> {
+    // `OffChainMessage` has public fields, so an embedder can build the wrapper
+    // without the envelope decoder. Check the address here too, so a
+    // non-address never renders as the signer on either path.
+    if Pubkey::from_str(&envelope.signer_address).is_err() {
+        return Err(TransactionParseError::DecodeError(
+            "signerAddress is not a Solana address".to_string(),
+        )
+        .into());
+    }
+    // Here rather than at decode, so a directly built wrapper is held to it too.
+    check_message_domain(envelope.message.as_bytes())?;
+    Ok(SignablePayload::new(
+        0,
+        "Solana Message".to_string(),
+        None,
+        vec![
+            create_text_field("Message", &escape_display_text(&envelope.message))?
+                .signable_payload_field,
+            // Not escaped: checked above to be a base58 Solana address, and
+            // base58 has no character that needs escaping.
+            create_address_field(
+                SIGNING_ADDRESS_LABEL,
+                &envelope.signer_address,
+                None,
+                None,
+                None,
+                None,
+            )?
+            .signable_payload_field,
+        ],
+        MESSAGE_PAYLOAD_TYPE.to_string(),
+    ))
+}
+
+/// `payload_type` for an off-chain message: what the signature covers is a
+/// message, not a transaction, whatever the message carries. Transactions keep
+/// `"SolanaTx"`. See "payload_type names the chain and what is signed" in
+/// CLAUDE.md.
+const MESSAGE_PAYLOAD_TYPE: &str = "SolanaMessage";
+
+/// Label of the field carrying the Solana address that signs a message. Kept
+/// the same on every message render, so a wallet binding it to the selected
+/// account always finds a Solana address under it.
+pub const SIGNING_ADDRESS_LABEL: &str = "Signing Address";
 
 /// Convert versioned Solana transaction to visual sign payload
 fn convert_versioned_to_visual_sign_payload(
@@ -869,6 +1151,15 @@ fn convert_v0_to_visual_sign_payload(
     // from the caller; until that lands we render with graceful degradation --
     // ALT-backed accounts surface as placeholders via decode_v0_instructions.
     // TODO: re-introduce ALT-aware rendering once ALT data is supplied.
+
+    // Checked before any decoding, so an over-cap or undecodable request is refused early.
+    let cap = fee_cap(options);
+    let committed = committed_fee(
+        v0_message.header.num_required_signatures,
+        &v0_message.instructions,
+        &v0_message.account_keys,
+    )?;
+    committed.check_cap(cap.lamports)?;
 
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
@@ -935,6 +1226,7 @@ fn convert_v0_to_visual_sign_payload(
             None
         }
     };
+    let summary = with_priority_fee(summary, committed)?;
 
     // Process V0 transfer decoding using solana-parser
     if decode_transfers {
@@ -968,13 +1260,14 @@ fn convert_v0_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &v0_result);
 
-    let (title, subtitle) = apply_transaction_summary(
+    let (title, subtitle, header_end) = apply_transaction_summary(
         &mut fields,
         title,
         summary,
         v0_message.account_keys.first(),
         "Solana V0 Transaction",
     )?;
+    insert_max_fee(&mut fields, header_end, cap)?;
     Ok(SignablePayload::new(
         0,
         title,
@@ -990,11 +1283,13 @@ fn convert_v0_to_visual_sign_payload(
 #[cfg_attr(not(feature = "simulation"), allow(unused_imports))]
 mod tests {
     use super::*;
+    use crate::core::priority_fee::{DEFAULT_MAX_FEE_LAMPORTS, PriorityFee};
     use crate::intermediate::{
         RegisteredSource, SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput,
     };
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
+    use base64::Engine;
     use solana_compute_budget_interface::ComputeBudgetInstruction;
     use solana_instruction::{AccountMeta, Instruction};
     use solana_message::Message;
@@ -1012,11 +1307,11 @@ mod tests {
             .map(|r| r.payload)
     }
 
-    /// A build without `simulation` cannot read a supplied simulation, so it
-    /// refuses the request instead of emitting intermediate output without it.
+    /// A build without `simulation` cannot read a supplied simulation. The intermediate
+    /// output says so instead of the request being refused.
     #[cfg(not(feature = "simulation"))]
     #[test]
-    fn supplied_simulation_is_refused_without_the_simulation_feature() {
+    fn supplied_simulation_is_marked_unsupported_without_the_simulation_feature() {
         let message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
         let wrapper = SolanaTransactionWrapper::from_string(
             &create_transaction_with_empty_signatures(message),
@@ -1034,20 +1329,23 @@ mod tests {
                         simulated_transaction_result: Some(
                             base64::engine::general_purpose::STANDARD.encode("{}"),
                         ),
+                        max_fee_lamports: None,
                     },
                 )),
             }),
             ..VisualSignOptions::default()
         };
-        let result = SolanaVisualSignConverter.to_visual_sign_payload(wrapper, options);
-        assert!(
-            matches!(
-                result,
-                Err(VisualSignError::ParseError(TransactionParseError::InvalidFormat(ref msg)))
-                    if msg.contains("simulation")
-            ),
-            "got {result:?}"
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .expect("converts");
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(result.intermediate_output.as_deref().expect("emitted"))
+                .expect("decodes");
+        assert_eq!(
+            decoded.simulation_error,
+            Some(crate::intermediate::SolanaSimulationError::SimulationUnsupported)
         );
+        assert!(decoded.simulated_instructions.is_empty());
     }
 
     /// End-to-end exercise of the opt-in intermediate-output path: a known
@@ -1091,6 +1389,7 @@ mod tests {
         let decoded: SolanaIntermediateOutput =
             borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
         assert_eq!(decoded.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
+        assert_eq!(decoded.max_fee_lamports, DEFAULT_MAX_FEE_LAMPORTS);
 
         // Cross-check (drift guard): the intermediate's transfer amount must
         // agree with the human-readable SignablePayload. The known tx transfers
@@ -1138,6 +1437,7 @@ mod tests {
                         network_id: None,
                         idl: None,
                         idl_mappings: Default::default(),
+                        max_fee_lamports: None,
                         simulated_transaction_result: Some(
                             base64::engine::general_purpose::STANDARD.encode(
                                 serde_json::json!({
@@ -1358,7 +1658,8 @@ mod tests {
         // must fail and the helper must return `None`.
         let registry = IdlRegistry::new();
         assert!(
-            build_intermediate_bytes("deadbeef", &registry, None).is_none(),
+            build_intermediate_bytes("deadbeef", &registry, None, DEFAULT_MAX_FEE_LAMPORTS)
+                .is_none(),
             "undecodable input must degrade to None, not panic or error"
         );
     }
@@ -1484,10 +1785,13 @@ mod tests {
         println!("✅ Contains Jupiter content: {has_jupiter_content}");
     }
 
+    /// A V0 transaction that uses an address lookup table.
+    const V0_TRANSACTION_B64: &str = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAIEMb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hO9VYqgvLR5aQ58r++KhUxAMArXNUFouJhkNfk91xcdpfsw70khoY/pDZ7PZ6Utif//vUHTgWKYb1IOp28C3laonif5pJDmoFCEZLLM1jDQoBxbAzIjAnxzfida8KF8loqQWTFLbxtR33pCcsa4g/5IpH2dQ+PHkoCbIQgfspGmC7Pda2pnGc3R0WktKvNfpBJorRv4iVoUOTn784IlhxGbzCdMmWMCSVCNq8frVXYTEFUunuZBu0Welvi993TLZB9fJvij+ef7p3Rw8UE+ZQpngRVksq5ZjmYhxu6tmLviIDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAR51VvyMcBu7nTFbs5oFQf9sbLeo/SOUQKxzaJWvBOPBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqUcn0nz5UKgy0QJ34xepN6SZQQ1LggwZ6QPHCYVaRRN9tD/6J/XX9kp0wJsfKVh53ksJqzbfyd1RSzIap7OM5ei1w1W367Ykl8/1heeE1Ct6pgMZQ89eFMSv0TWee6UaMMzWwUztGQ+UwdGRAWmsk+hsxTf7GSUoTLwaPEtoWnCSmZVQM4qi8IJmCZXye+3lj/svGc+s43La9Kg4Nwso+h0DCAAJAwQXAQAAAAAACRULAAIECQoJDQkODAUPAwcAAgQGAQsj5RfLl3rjrSoBAAAAMGQAAUBCDwAAAAAAhBlJAAAAAAAyAAALAwQAAAEJAA==";
+
     #[test]
     fn test_v0_transaction() {
         // V0 transaction from the user's request
-        let v0_transaction = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAIEMb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hO9VYqgvLR5aQ58r++KhUxAMArXNUFouJhkNfk91xcdpfsw70khoY/pDZ7PZ6Utif//vUHTgWKYb1IOp28C3laonif5pJDmoFCEZLLM1jDQoBxbAzIjAnxzfida8KF8loqQWTFLbxtR33pCcsa4g/5IpH2dQ+PHkoCbIQgfspGmC7Pda2pnGc3R0WktKvNfpBJorRv4iVoUOTn784IlhxGbzCdMmWMCSVCNq8frVXYTEFUunuZBu0Welvi993TLZB9fJvij+ef7p3Rw8UE+ZQpngRVksq5ZjmYhxu6tmLviIDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAR51VvyMcBu7nTFbs5oFQf9sbLeo/SOUQKxzaJWvBOPBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqUcn0nz5UKgy0QJ34xepN6SZQQ1LggwZ6QPHCYVaRRN9tD/6J/XX9kp0wJsfKVh53ksJqzbfyd1RSzIap7OM5ei1w1W367Ykl8/1heeE1Ct6pgMZQ89eFMSv0TWee6UaMMzWwUztGQ+UwdGRAWmsk+hsxTf7GSUoTLwaPEtoWnCSmZVQM4qi8IJmCZXye+3lj/svGc+s43La9Kg4Nwso+h0DCAAJAwQXAQAAAAAACRULAAIECQoJDQkODAUPAwcAAgQGAQsj5RfLl3rjrSoBAAAAMGQAAUBCDwAAAAAAhBlJAAAAAAAyAAALAwQAAAEJAA==";
+        let v0_transaction = V0_TRANSACTION_B64;
 
         let solana_tx_result = SolanaTransactionWrapper::from_string(v0_transaction);
         assert!(solana_tx_result.is_ok());
@@ -1619,7 +1923,7 @@ mod tests {
     #[test]
     fn test_v0_transfer_decoding() {
         // Test the V0 transfer decoding function directly
-        let v0_transaction = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAIEMb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hO9VYqgvLR5aQ58r++KhUxAMArXNUFouJhkNfk91xcdpfsw70khoY/pDZ7PZ6Utif//vUHTgWKYb1IOp28C3laonif5pJDmoFCEZLLM1jDQoBxbAzIjAnxzfida8KF8loqQWTFLbxtR33pCcsa4g/5IpH2dQ+PHkoCbIQgfspGmC7Pda2pnGc3R0WktKvNfpBJorRv4iVoUOTn784IlhxGbzCdMmWMCSVCNq8frVXYTEFUunuZBu0Welvi993TLZB9fJvij+ef7p3Rw8UE+ZQpngRVksq5ZjmYhxu6tmLviIDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAR51VvyMcBu7nTFbs5oFQf9sbLeo/SOUQKxzaJWvBOPBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqUcn0nz5UKgy0QJ34xepN6SZQQ1LggwZ6QPHCYVaRRN9tD/6J/XX9kp0wJsfKVh53ksJqzbfyd1RSzIap7OM5ei1w1W367Ykl8/1heeE1Ct6pgMZQ89eFMSv0TWee6UaMMzWwUztGQ+UwdGRAWmsk+hsxTf7GSUoTLwaPEtoWnCSmZVQM4qi8IJmCZXye+3lj/svGc+s43La9Kg4Nwso+h0DCAAJAwQXAQAAAAAACRULAAIECQoJDQkODAUPAwcAAgQGAQsj5RfLl3rjrSoBAAAAMGQAAUBCDwAAAAAAhBlJAAAAAAAyAAALAwQAAAEJAA==";
+        let v0_transaction = V0_TRANSACTION_B64;
 
         let solana_tx_result = SolanaTransactionWrapper::from_string(v0_transaction);
         assert!(solana_tx_result.is_ok());
@@ -1899,7 +2203,7 @@ mod tests {
     #[test]
     fn test_transaction_auto_detection_v0_vs_legacy() {
         // Test the auto-detection logic in from_string() - V0 should be detected first
-        let v0_transaction = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAIEMb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hO9VYqgvLR5aQ58r++KhUxAMArXNUFouJhkNfk91xcdpfsw70khoY/pDZ7PZ6Utif//vUHTgWKYb1IOp28C3laonif5pJDmoFCEZLLM1jDQoBxbAzIjAnxzfida8KF8loqQWTFLbxtR33pCcsa4g/5IpH2dQ+PHkoCbIQgfspGmC7Pda2pnGc3R0WktKvNfpBJorRv4iVoUOTn784IlhxGbzCdMmWMCSVCNq8frVXYTEFUunuZBu0Welvi993TLZB9fJvij+ef7p3Rw8UE+ZQpngRVksq5ZjmYhxu6tmLviIDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAR51VvyMcBu7nTFbs5oFQf9sbLeo/SOUQKxzaJWvBOPBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqUcn0nz5UKgy0QJ34xepN6SZQQ1LggwZ6QPHCYVaRRN9tD/6J/XX9kp0wJsfKVh53ksJqzbfyd1RSzIap7OM5ei1w1W367Ykl8/1heeE1Ct6pgMZQ89eFMSv0TWee6UaMMzWwUztGQ+UwdGRAWmsk+hsxTf7GSUoTLwaPEtoWnCSmZVQM4qi8IJmCZXye+3lj/svGc+s43La9Kg4Nwso+h0DCAAJAwQXAQAAAAAACRULAAIECQoJDQkODAUPAwcAAgQGAQsj5RfLl3rjrSoBAAAAMGQAAUBCDwAAAAAAhBlJAAAAAAAyAAALAwQAAAEJAA==";
+        let v0_transaction = V0_TRANSACTION_B64;
 
         // Test that V0 is detected correctly
         let v0_wrapper = SolanaTransactionWrapper::from_string(v0_transaction).unwrap();
@@ -2616,6 +2920,7 @@ mod tests {
                         idl: None,
                         idl_mappings: idl_mappings.into_iter().collect(),
                         simulated_transaction_result: None,
+                        max_fee_lamports: None,
                     },
                 )),
             }),
@@ -2965,19 +3270,20 @@ mod tests {
     #[test]
     fn apply_transaction_summary_without_fee_payer_keeps_default_title() {
         let mut fields = vec![network_row()];
-        let (title, subtitle) =
+        let (title, subtitle, header_end) =
             apply_transaction_summary(&mut fields, None, Some(sample_summary()), None, "Default")
                 .expect("apply");
         assert_eq!(title, "Default");
         assert_eq!(subtitle, None);
         assert_eq!(fields.len(), 1, "no rows hoisted without a fee payer");
+        assert_eq!(header_end, 1);
     }
 
     #[test]
     fn apply_transaction_summary_inserts_rows_after_network() {
         let payer = Pubkey::new_unique();
         let mut fields = vec![network_row(), network_row()];
-        let (title, subtitle) = apply_transaction_summary(
+        let (title, subtitle, header_end) = apply_transaction_summary(
             &mut fields,
             None,
             Some(sample_summary()),
@@ -2989,13 +3295,14 @@ mod tests {
         assert_eq!(subtitle.as_deref(), Some("Program"));
         let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
         assert_eq!(labels, ["Network", "From", "Amount", "Network"]);
+        assert_eq!(header_end, 3, "header ends after the hoisted rows");
     }
 
     #[test]
     fn apply_transaction_summary_caller_title_disables_it() {
         let payer = Pubkey::new_unique();
         let mut fields = vec![network_row()];
-        let (title, subtitle) = apply_transaction_summary(
+        let (title, subtitle, header_end) = apply_transaction_summary(
             &mut fields,
             Some("Caller".to_string()),
             Some(sample_summary()),
@@ -3006,6 +3313,413 @@ mod tests {
         assert_eq!(title, "Caller");
         assert_eq!(subtitle, None);
         assert_eq!(fields.len(), 1);
+        assert_eq!(header_end, 1);
+    }
+
+    fn options_with_max_fee(max_fee_lamports: Option<u64>) -> VisualSignOptions {
+        VisualSignOptions {
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: None,
+                        idl: None,
+                        idl_mappings: Default::default(),
+                        simulated_transaction_result: None,
+                        max_fee_lamports,
+                    },
+                )),
+            }),
+            ..VisualSignOptions::default()
+        }
+    }
+
+    #[test]
+    fn max_fee_row_follows_the_hoisted_rows() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row(), network_row()];
+        let (_, _, header_end) = apply_transaction_summary(
+            &mut fields,
+            None,
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        insert_max_fee(&mut fields, header_end, FeeCap::resolve(Some(5_105_000))).expect("insert");
+        let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(labels, ["Network", "From", "Amount", "Max Fee", "Network"]);
+        assert_eq!(fields[3].fallback_text(), "0.005105 SOL");
+    }
+
+    #[test]
+    fn max_fee_row_follows_network_without_a_summary() {
+        let mut fields = vec![network_row(), network_row()];
+        insert_max_fee(&mut fields, 1, FeeCap::resolve(None)).expect("insert");
+        let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(labels, ["Network", "Max Fee (default)", "Network"]);
+        assert_eq!(fields[1].fallback_text(), "0.1 SOL");
+    }
+
+    /// No caller cap, no metadata at all, or a cap of zero: the value in force is explicit.
+    #[test]
+    fn max_fee_defaults_when_the_caller_supplies_none() {
+        let default = fee_cap(&options_with_max_fee(None));
+        assert_eq!(default.lamports, DEFAULT_MAX_FEE_LAMPORTS);
+        assert!(!default.caller_supplied);
+        assert_eq!(fee_cap(&VisualSignOptions::default()), default);
+        let caller = fee_cap(&options_with_max_fee(Some(5_000)));
+        assert_eq!((caller.lamports, caller.caller_supplied), (5_000, true));
+        assert_eq!(fee_cap(&options_with_max_fee(Some(0))).lamports, 0);
+    }
+
+    /// `requests` compiled as compute-budget instructions of a one-signature message.
+    fn committed_with(requests: &[ComputeBudgetInstruction]) -> CommittedFee {
+        let keys = [solana_sdk_ids::compute_budget::id()];
+        let instructions: Vec<_> = requests
+            .iter()
+            .map(
+                |request| solana_message::compiled_instruction::CompiledInstruction {
+                    program_id_index: 0,
+                    accounts: vec![],
+                    data: borsh::to_vec(request).expect("encodes"),
+                },
+            )
+            .collect();
+        PriorityFee::from_instructions(&instructions, &keys)
+            .expect("decodes")
+            .committed(1)
+            .expect("no repeated request")
+    }
+
+    /// Infrastructure still costs the fee payer the priority fee, so the adopted summary gets
+    /// a SOL row for it: exact with a unit limit, an upper bound without one.
+    #[test]
+    fn priority_fee_row_is_appended_to_the_adopted_summary() {
+        let exact = committed_with(&[
+            ComputeBudgetInstruction::SetComputeUnitLimit(300_000),
+            ComputeBudgetInstruction::SetComputeUnitPrice(50_000),
+        ]);
+        let summary = with_priority_fee(Some(sample_summary()), exact)
+            .expect("renders")
+            .expect("kept");
+        let labels: Vec<&str> = summary
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.label().as_str())
+            .collect();
+        assert_eq!(labels, ["Amount", "Priority fee"]);
+        assert_eq!(
+            summary.fields[1].signable_payload_field.fallback_text(),
+            "0.000015 SOL"
+        );
+
+        // One compute budget instruction: 3_000 default units at 1_000 lamports each.
+        let bound = committed_with(&[ComputeBudgetInstruction::SetComputeUnitPrice(1_000_000_000)]);
+        let summary = with_priority_fee(Some(sample_summary()), bound)
+            .expect("renders")
+            .expect("kept");
+        assert_eq!(
+            summary.fields[1].signable_payload_field.label(),
+            "Maximum priority fee"
+        );
+        assert_eq!(
+            summary.fields[1].signable_payload_field.fallback_text(),
+            "0.003 SOL"
+        );
+    }
+
+    /// A limit alone or a zero price costs nothing beyond the base fee: no row. No summary,
+    /// no row either.
+    #[test]
+    fn priority_fee_row_needs_a_positive_price_and_a_summary() {
+        let base_only = committed_with(&[
+            ComputeBudgetInstruction::SetComputeUnitLimit(300_000),
+            ComputeBudgetInstruction::SetComputeUnitPrice(0),
+        ]);
+        let summary = with_priority_fee(Some(sample_summary()), base_only)
+            .expect("renders")
+            .expect("kept");
+        assert_eq!(summary.fields.len(), 1);
+
+        let priced = committed_with(&[ComputeBudgetInstruction::SetComputeUnitPrice(1)]);
+        assert!(with_priority_fee(None, priced).expect("renders").is_none());
+    }
+
+    /// End to end: the row is rendered from caller metadata on a transaction whose
+    /// transfer blocks any summary, so it lands right after Network.
+    #[test]
+    fn max_fee_is_rendered_from_chain_metadata() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let transaction = create_transaction_with_empty_signatures(solana_transfer_message);
+        let wrapper = SolanaTransactionWrapper::from_string(&transaction).expect("parses");
+
+        let payload = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper.clone(), options_with_max_fee(Some(5_105_000)))
+            .expect("converts")
+            .payload;
+        payload.validate_charset().expect("ASCII only");
+        let labels: Vec<&str> = payload.fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(&labels[..2], ["Network", "Max Fee"], "layout: {labels:?}");
+        assert_eq!(payload.fields[1].fallback_text(), "0.005105 SOL");
+
+        // Without a caller cap the default takes the same place, and the label says so.
+        let without = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper.clone(), options_with_max_fee(None))
+            .expect("converts")
+            .payload;
+        assert_eq!(without.fields[1].label(), "Max Fee (default)");
+        assert_eq!(without.fields[1].fallback_text(), "0.1 SOL");
+
+        // Two required signatures commit to a 10_000 lamport base fee.
+        assert!(matches!(
+            to_payload(wrapper.clone(), options_with_max_fee(Some(9_999))),
+            Err(VisualSignError::ValidationError(_))
+        ));
+        to_payload(wrapper, options_with_max_fee(Some(10_000)))
+            .expect("a cap equal to the base fee passes");
+    }
+
+    /// The V0 converter places the row the same way as the legacy one.
+    #[test]
+    fn max_fee_is_rendered_for_v0_transactions() {
+        let wrapper = SolanaTransactionWrapper::from_string(V0_TRANSACTION_B64).expect("parses");
+        assert_eq!(wrapper.transaction_type(), "Solana (V0)");
+        let payload = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper.clone(), options_with_max_fee(Some(5_105_000)))
+            .expect("converts")
+            .payload;
+        payload.validate_charset().expect("ASCII only");
+        let labels: Vec<&str> = payload.fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(&labels[..2], ["Network", "Max Fee"], "layout: {labels:?}");
+        assert_eq!(payload.fields[1].fallback_text(), "0.005105 SOL");
+
+        // One signature plus a 71_428 micro-lamport unit price with no limit: the default
+        // limit is 403_000 units (two program instructions and the request), 28_786 lamports.
+        assert!(matches!(
+            to_payload(wrapper.clone(), options_with_max_fee(Some(33_785))),
+            Err(VisualSignError::ValidationError(_))
+        ));
+        to_payload(wrapper, options_with_max_fee(Some(33_786)))
+            .expect("a cap equal to the bound passes");
+    }
+
+    fn legacy_b64(instructions: &[Instruction], payer: &Pubkey) -> String {
+        let tx = SolanaTransaction::new_unsigned(Message::new(instructions, Some(payer)));
+        base64::engine::general_purpose::STANDARD
+            .encode(bincode::serialize(&tx).expect("serialize"))
+    }
+
+    fn v0_b64(instructions: &[Instruction], payer: &Pubkey) -> String {
+        let message = solana_message::v0::Message::try_compile(
+            payer,
+            instructions,
+            &[],
+            solana_hash::Hash::default(),
+        )
+        .expect("compile");
+        let tx = VersionedTransaction {
+            signatures: vec![solana_signature::Signature::default()],
+            message: VersionedMessage::V0(message),
+        };
+        base64::engine::general_purpose::STANDARD
+            .encode(bincode::serialize(&tx).expect("serialize"))
+    }
+
+    /// A unit price cut short: the runtime rejects it and the parser cannot read it, so the
+    /// fee is unknown and every cap is refused in every build.
+    fn truncated_unit_price() -> Instruction {
+        Instruction {
+            program_id: solana_sdk_ids::compute_budget::id(),
+            accounts: vec![],
+            data: vec![3, 0x40, 0x42],
+        }
+    }
+
+    /// A unit price with a trailing byte: the runtime ignores the byte and charges the price,
+    /// so the parser reads it the same way and renders the instruction.
+    fn unit_price_with_trailing_byte() -> Instruction {
+        Instruction {
+            program_id: solana_sdk_ids::compute_budget::id(),
+            accounts: vec![],
+            data: vec![3, 0x40, 0x42, 0x0f, 0, 0, 0, 0, 0, 0xff],
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_in_a_compute_budget_request_are_charged() {
+        let payer = Pubkey::new_unique();
+        let wrapper = SolanaTransactionWrapper::from_string(&legacy_b64(
+            &[unit_price_with_trailing_byte()],
+            &payer,
+        ))
+        .expect("parses");
+        // One signature plus 3_000 default units at 1_000_000 micro-lamports each: 8_000.
+        assert!(matches!(
+            to_payload(wrapper.clone(), options_with_max_fee(Some(7_999))),
+            Err(VisualSignError::ValidationError(_))
+        ));
+        let payload = to_payload(wrapper, options_with_max_fee(Some(8_000)))
+            .expect("a cap at the bound passes");
+        assert!(
+            payload.fields.iter().any(|f| f.label() == "Instruction 1"),
+            "the request renders like any other: {:?}",
+            payload.fields.iter().map(|f| f.label()).collect::<Vec<_>>()
+        );
+    }
+
+    /// The base fee also covers the signatures a precompile instruction verifies.
+    #[test]
+    fn max_fee_counts_precompile_signatures() {
+        let payer = Pubkey::new_unique();
+        let verify_two = Instruction {
+            program_id: solana_sdk_ids::ed25519_program::id(),
+            accounts: vec![],
+            data: vec![2, 0, 0, 0],
+        };
+        let wrapper = SolanaTransactionWrapper::from_string(&legacy_b64(&[verify_two], &payer))
+            .expect("parses");
+        // One transaction signature plus two verified ones: 15_000 lamports.
+        assert!(matches!(
+            to_payload(wrapper.clone(), options_with_max_fee(Some(14_999))),
+            Err(VisualSignError::ValidationError(_))
+        ));
+        to_payload(wrapper, options_with_max_fee(Some(15_000)))
+            .expect("a cap equal to the base fee passes");
+    }
+
+    /// The fee is unknown, so neither a caller cap nor the default can be checked. The check
+    /// runs before any decoding, so both converters and both builds answer the same way.
+    #[test]
+    fn truncated_compute_budget_refuses_every_cap() {
+        let payer = Pubkey::new_unique();
+        for encoded in [
+            legacy_b64(&[truncated_unit_price()], &payer),
+            v0_b64(&[truncated_unit_price()], &payer),
+        ] {
+            let wrapper = SolanaTransactionWrapper::from_string(&encoded).expect("parses");
+            for options in [
+                options_with_max_fee(Some(5_000)),
+                options_with_max_fee(None),
+            ] {
+                assert!(matches!(
+                    to_payload(wrapper.clone(), options),
+                    Err(VisualSignError::ValidationError(_))
+                ));
+            }
+        }
+    }
+
+    /// A repeated unit price fails the transaction on chain, so the fee is unknown and the
+    /// default cap is refused like a caller's, in both converters.
+    #[test]
+    fn repeated_compute_budget_request_refuses_every_cap() {
+        let payer = Pubkey::new_unique();
+        let twice = [
+            ComputeBudgetInstruction::set_compute_unit_price(1),
+            ComputeBudgetInstruction::set_compute_unit_price(2),
+        ];
+        for encoded in [legacy_b64(&twice, &payer), v0_b64(&twice, &payer)] {
+            let wrapper = SolanaTransactionWrapper::from_string(&encoded).expect("parses");
+            for options in [
+                options_with_max_fee(None),
+                options_with_max_fee(Some(u64::MAX)),
+            ] {
+                assert!(matches!(
+                    to_payload(wrapper.clone(), options),
+                    Err(VisualSignError::ValidationError(_))
+                ));
+            }
+        }
+    }
+
+    /// A failure in another program's instruction leaves the fee known: the V0 converter adds
+    /// its decoding note and the cap is still checked and rendered.
+    #[test]
+    fn v0_decoding_failure_elsewhere_keeps_the_max_fee_row() {
+        let payer = Pubkey::new_unique();
+        let garbage = Instruction {
+            program_id: solana_sdk_ids::system_program::id(),
+            accounts: vec![],
+            data: vec![0xff; 4],
+        };
+        let instructions = [
+            ComputeBudgetInstruction::set_compute_unit_price(1_000),
+            garbage,
+        ];
+        let wrapper =
+            SolanaTransactionWrapper::from_string(&v0_b64(&instructions, &payer)).expect("parses");
+        let payload = to_payload(wrapper.clone(), options_with_max_fee(None)).expect("renders");
+        assert_eq!(payload.fields[1].label(), "Max Fee (default)");
+        assert_eq!(payload.fields[1].fallback_text(), "0.1 SOL");
+
+        // One signature plus 6_000 default units (two builtin instructions) at 1_000
+        // micro-lamports each: 5_006 lamports.
+        assert!(matches!(
+            to_payload(wrapper.clone(), options_with_max_fee(Some(5_005))),
+            Err(VisualSignError::ValidationError(_))
+        ));
+        to_payload(wrapper, options_with_max_fee(Some(5_006))).expect("a cap at the bound passes");
+    }
+
+    /// A committed fee above the default needs a caller cap that covers it.
+    #[test]
+    fn committed_fee_above_the_default_needs_a_caller_cap() {
+        let payer = Pubkey::new_unique();
+        // 1.4M units at 100 lamports each: 0.14 SOL of priority fee on top of the base fee.
+        let instructions = [
+            ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+            ComputeBudgetInstruction::set_compute_unit_price(100_000_000),
+        ];
+        let wrapper = SolanaTransactionWrapper::from_string(&legacy_b64(&instructions, &payer))
+            .expect("parses");
+        let Err(VisualSignError::ValidationError(message)) =
+            to_payload(wrapper.clone(), options_with_max_fee(None))
+        else {
+            panic!("the default cap must refuse a 0.14 SOL fee");
+        };
+        assert!(
+            message.starts_with(&format!(
+                "max fee of {DEFAULT_MAX_FEE_LAMPORTS} lamports is below"
+            )),
+            "{message}"
+        );
+
+        let payload = to_payload(wrapper, options_with_max_fee(Some(140_005_000)))
+            .expect("a caller cap covering the fee passes");
+        assert_eq!(payload.fields[1].label(), "Max Fee");
+        assert_eq!(payload.fields[1].fallback_text(), "0.140005 SOL");
+    }
+
+    /// The intermediate output carries the cap the payload renders: the caller's when given,
+    /// the default otherwise.
+    #[test]
+    fn intermediate_output_carries_the_max_fee() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let transaction = create_transaction_with_empty_signatures(solana_transfer_message);
+        let wrapper = SolanaTransactionWrapper::from_string(&transaction).expect("parses");
+        for (caller_cap, expected, label, rendered) in [
+            (
+                None,
+                DEFAULT_MAX_FEE_LAMPORTS,
+                "Max Fee (default)",
+                "0.1 SOL",
+            ),
+            (Some(5_105_000), 5_105_000, "Max Fee", "0.005105 SOL"),
+        ] {
+            let options = VisualSignOptions {
+                include_intermediate_output: true,
+                ..options_with_max_fee(caller_cap)
+            };
+            let result = SolanaVisualSignConverter
+                .to_visual_sign_payload(wrapper.clone(), options)
+                .expect("converts");
+            let bytes = result.intermediate_output.as_deref().expect("emitted");
+            let decoded: SolanaIntermediateOutput = borsh::from_slice(bytes).expect("decodes");
+            assert_eq!(decoded.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
+            assert_eq!(decoded.max_fee_lamports, expected);
+            assert_eq!(result.payload.fields[1].label(), label);
+            assert_eq!(result.payload.fields[1].fallback_text(), rendered);
+        }
     }
 
     /// The packet-size gate runs before either decoder, so an oversized
@@ -3125,7 +3839,9 @@ mod tests {
             let wrapper = SolanaTransactionWrapper::new_legacy(transaction(0, 4_000));
             let versioned = VersionedTransaction::from(match wrapper {
                 SolanaTransactionWrapper::Legacy(tx) => tx,
-                SolanaTransactionWrapper::Versioned(_) => unreachable!(),
+                SolanaTransactionWrapper::Versioned(_) | SolanaTransactionWrapper::Message(_) => {
+                    unreachable!()
+                }
             });
             let err = SolanaVisualSignConverter
                 .to_visual_sign_payload(
@@ -3168,5 +3884,486 @@ mod tests {
             assert!(ratio > 30.0, "expected ~50x amplification, got {ratio:.1}x");
             assert!(blob.len() < 128 * 1024, "a legal packet stays bounded");
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_message_tests {
+    use super::*;
+    use visualsign::encodings::unescape_display_text;
+
+    fn render(envelope: &str) -> SignablePayload {
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload
+    }
+
+    /// A signer address the envelope needs but the case under test does not
+    /// vary. Base58, 32 bytes, so a renderer treating the value as an address
+    /// has nothing to object to.
+    const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
+
+    /// A well-formed envelope around one message. The message is embedded as
+    /// written, so a case needing a JSON escape passes the escape.
+    fn envelope(message: &str) -> String {
+        format!(r#"{{"message":"{message}","signerAddress":"{SIGNER}"}}"#)
+    }
+
+    fn render_message(message: &str) -> SignablePayload {
+        render(&envelope(message))
+    }
+
+    fn field_text(payload: &SignablePayload, label: &str) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
+                    Some(address_v2.address.clone())
+                }
+                _ => None,
+            })
+            // A static message: CodeQL reads a panic as a log sink and treats
+            // anything derived from the rendered payload as tainted, a length
+            // included, so the label is not interpolated.
+            .expect("no field with the requested label")
+    }
+
+    fn message_text(payload: &SignablePayload) -> String {
+        field_text(payload, "Message")
+    }
+
+    #[test]
+    fn message_envelope_decodes_as_a_message() {
+        let tx = SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com"))
+            .expect("decode");
+        let envelope = tx.inner_message().expect("a message envelope");
+        assert_eq!(envelope.message, "Sign in to app.example.com");
+        assert_eq!(envelope.signer_address, SIGNER);
+        assert_eq!(tx.transaction_type(), "Solana Message");
+        assert!(tx.inner_legacy().is_none() && tx.inner_versioned().is_none());
+    }
+
+    /// An off-chain message has no transaction for an intermediate output to
+    /// describe, so opting in must emit none, and must not change the payload:
+    /// a policy engine reading a blob here would treat a message as having
+    /// instructions.
+    #[test]
+    fn a_message_never_emits_intermediate_output() {
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com"))
+                    .expect("decode"),
+                options,
+            )
+            .expect("convert with intermediate output opted in");
+
+        assert!(
+            result.intermediate_output.is_none(),
+            "a message must not carry an intermediate output"
+        );
+        assert_eq!(
+            serde_json::to_string(&result.payload).expect("serialize"),
+            serde_json::to_string(&render_message("Sign in to app.example.com"))
+                .expect("serialize"),
+            "opting in must not change what a message renders"
+        );
+    }
+
+    /// A message has no fee, so the transaction fee cap never applies to it: no
+    /// "Max Fee" row, not even the default, and a caller cap that would refuse
+    /// any transaction does not refuse a message.
+    #[test]
+    fn a_message_never_carries_a_max_fee() {
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: None,
+                        idl: None,
+                        idl_mappings: Default::default(),
+                        simulated_transaction_result: None,
+                        max_fee_lamports: Some(1),
+                    },
+                )),
+            }),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com"))
+                    .expect("decode"),
+                options,
+            )
+            .expect("a fee cap must not refuse a message");
+
+        assert!(result.intermediate_output.is_none());
+        let rendered = serde_json::to_string(&result.payload).expect("serialize");
+        assert!(
+            !rendered.contains("Max Fee"),
+            "a message must not render a Max Fee row"
+        );
+        assert_eq!(
+            rendered,
+            serde_json::to_string(&render_message("Sign in to app.example.com"))
+                .expect("serialize"),
+            "a fee cap must not change what a message renders"
+        );
+    }
+
+    /// A transaction is base64 or hex and an envelope is JSON, so neither
+    /// alphabet can produce the other. The transaction path must be untouched.
+    #[test]
+    fn a_transaction_still_decodes_as_a_transaction() {
+        // A minimal legacy transaction: one signature, an empty message body.
+        let tx_b64 = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let decoded = SolanaTransactionWrapper::from_string(tx_b64)
+            .expect("a valid base64 transaction must still decode");
+        assert!(
+            decoded.inner_message().is_none(),
+            "base64 input must never be read as a message envelope"
+        );
+    }
+
+    /// An envelope carrying a field this build does not understand has not been
+    /// rendered in full, so it is refused rather than partially shown.
+    #[test]
+    fn unknown_envelope_fields_are_refused() {
+        let result = SolanaTransactionWrapper::from_string(&format!(
+            r#"{{"message":"hi","signerAddress":"{SIGNER}","extra":1}}"#
+        ));
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for an unknown field");
+        };
+        assert!(
+            message.contains("extra"),
+            "the refusal must name the field: {message}"
+        );
+    }
+
+    /// A JSON object with the same key twice has no single value to render. A
+    /// generic parser resolves it to whichever value it happened to keep,
+    /// which would let a signer approve a message that was never the one
+    /// shown, so it is refused rather than silently resolved.
+    #[test]
+    fn duplicate_envelope_fields_are_refused() {
+        let result = SolanaTransactionWrapper::from_string(&format!(
+            r#"{{"message":"A","message":"B","signerAddress":"{SIGNER}"}}"#
+        ));
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for a duplicate field");
+        };
+        assert!(
+            message.contains("message"),
+            "the refusal must name the field: {message}"
+        );
+    }
+
+    #[test]
+    fn message_renders_as_text() {
+        let payload = render_message("Sign in to app.example.com");
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(payload.payload_type, "SolanaMessage");
+        assert_eq!(message_text(&payload), "Sign in to app.example.com");
+    }
+
+    /// The text is caller-supplied and reaches a signer's screen, so a character
+    /// that could forge a line break is escaped.
+    #[test]
+    fn message_text_escapes_what_cannot_render() {
+        let payload = render_message(r"innocent\nTo: attacker.sol");
+        assert_eq!(message_text(&payload), "innocent%0ATo: attacker.sol");
+    }
+
+    /// Escaping rather than deleting is what keeps two different messages from
+    /// rendering identically -- a signer comparing them has to be able to tell
+    /// them apart.
+    #[test]
+    fn distinct_messages_stay_distinct() {
+        let with_break = message_text(&render_message(r"innocent\nTo: attacker.sol"));
+        let without = message_text(&render_message("innocentTo: attacker.sol"));
+        assert_ne!(with_break, without);
+
+        // A single marker character cannot carry this. The marker is itself
+        // renderable, so a message containing one literally would render the
+        // same as one whose separator was replaced by it.
+        let literal_marker = message_text(&render_message("innocent?To: attacker.sol"));
+        assert_ne!(with_break, literal_marker);
+    }
+
+    /// A message carrying a literal `%` must not be able to produce the same
+    /// render as one carrying the character that escape stands for.
+    #[test]
+    fn a_literal_percent_cannot_forge_an_escape() {
+        let forged = message_text(&render_message("a%0Ab"));
+        let real = message_text(&render_message(r"a\nb"));
+        assert_eq!(real, "a%0Ab");
+        assert_eq!(forged, "a%250Ab");
+        assert_ne!(forged, real);
+    }
+
+    /// Non-ASCII text escapes byte by byte, so it stays reversible.
+    #[test]
+    fn non_ascii_escapes_as_utf8_bytes() {
+        // The envelope embeds the message as written, so this is the JSON
+        // escape for U+00E9.
+        let payload = render_message(r"caf\u00e9");
+        assert_eq!(message_text(&payload), "caf%C3%A9");
+    }
+
+    /// Every rendered message must survive the payload charset validation the
+    /// parser runs before returning a payload. The validator refuses JSON
+    /// containing backslash escapes such as `\u` or `\t`, so an escape that
+    /// used a backslash, or a literal backslash passed through, would get the
+    /// whole message refused rather than shown.
+    #[test]
+    fn rendered_messages_pass_charset_validation() {
+        for message in [
+            "plain text",
+            r"line\nbreak",
+            r"tab\there",
+            r"carriage\rreturn",
+            r"backslash \\u0041 and \\/ and \\t",
+            "50% off",
+            r"caf\u00e9 \u202e \ud83d\ude00",
+            r#"quote \" inside"#,
+        ] {
+            render_message(message)
+                .validate_charset()
+                .unwrap_or_else(|e| panic!("message {message:?} was refused: {e}"));
+        }
+    }
+
+    /// The signer address renders alongside the message, exactly as the
+    /// caller supplied it. Binding it to the signing key is the wallet's job.
+    #[test]
+    fn the_signer_address_renders() {
+        let payload = render_message("Sign in to app.example.com");
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+        assert!(
+            payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::AddressV2 { common, .. }
+                    if common.label == SIGNING_ADDRESS_LABEL
+            )),
+            "the signing address renders as an address field"
+        );
+    }
+
+    /// The address check holds when an embedder builds the wrapper itself
+    /// rather than decoding an envelope: the parser's only claim about the
+    /// signer is that it is a well-formed address, so it makes that claim on
+    /// both paths. A line break must not be able to forge a second field.
+    #[test]
+    fn a_directly_built_message_with_a_non_address_signer_is_refused() {
+        let wrapper = SolanaTransactionWrapper::Message(OffChainMessage {
+            message: "hi".to_string(),
+            signer_address: format!("{SIGNER}\nMessage: approve everything"),
+        });
+        let err = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, VisualSignOptions::default())
+            .expect_err("a signer that is not an address must not render");
+        assert!(err.to_string().contains("signerAddress"), "{err}");
+
+        let wrapper = SolanaTransactionWrapper::Message(OffChainMessage {
+            message: "hi".to_string(),
+            signer_address: SIGNER.to_string(),
+        });
+        let payload = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, VisualSignOptions::default())
+            .expect("a well-formed address renders")
+            .payload;
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+    }
+
+    /// An envelope naming no signer is refused rather than rendered without
+    /// one: a signer screen missing the address cannot show who signs.
+    #[test]
+    fn an_envelope_with_no_signer_is_refused() {
+        let result =
+            SolanaTransactionWrapper::from_string(r#"{"message":"Sign in to app.example.com"}"#);
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for a missing signerAddress");
+        };
+        assert!(
+            message.contains("signerAddress"),
+            "the refusal must name the missing field: {message}"
+        );
+    }
+
+    /// The address reaches the same screen as the message. Anything that is not
+    /// a Solana address is refused at decode, so text posing as an address
+    /// (here, one that forges a second line) never reaches the screen.
+    #[test]
+    fn a_signer_that_is_not_an_address_is_refused() {
+        for bad in [r"addr\nSigner: attacker.sol", "x", ""] {
+            let result = SolanaTransactionWrapper::from_string(&format!(
+                r#"{{"message":"hi","signerAddress":"{bad}"}}"#
+            ));
+            let Err(TransactionParseError::DecodeError(message)) = result else {
+                panic!("expected a DecodeError for a non-address signer");
+            };
+            assert!(
+                message.contains("signerAddress"),
+                "the refusal must name the field: {message}"
+            );
+        }
+    }
+
+    /// The envelope bound applies before the JSON is parsed: the transaction
+    /// size bound does not cover this branch.
+    #[test]
+    fn an_oversized_envelope_is_refused_before_parsing() {
+        let at_limit = envelope(&"a".repeat(MAX_MESSAGE_ENVELOPE_LEN - envelope("").len()));
+        assert_eq!(at_limit.len(), MAX_MESSAGE_ENVELOPE_LEN);
+        SolanaTransactionWrapper::from_string(&at_limit).expect("an envelope at the bound decodes");
+
+        let over = envelope(&"a".repeat(5 * 1024 * 1024));
+        let Err(TransactionParseError::InvalidFormat(message)) =
+            SolanaTransactionWrapper::from_string(&over)
+        else {
+            panic!("expected an InvalidFormat for an oversized envelope");
+        };
+        assert!(message.contains("too large"), "{message}");
+
+        // Not JSON-valid past the bound either: the size is checked first.
+        let malformed = format!("{{{}", "x".repeat(MAX_MESSAGE_ENVELOPE_LEN));
+        assert!(matches!(
+            SolanaTransactionWrapper::from_string(&malformed),
+            Err(TransactionParseError::InvalidFormat(_))
+        ));
+    }
+
+    fn convert_message(message: &str) -> Result<SignablePayload, VisualSignError> {
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::Message(OffChainMessage {
+                    message: message.to_string(),
+                    signer_address: SIGNER.to_string(),
+                }),
+                VisualSignOptions::default(),
+            )
+            .map(|result| result.payload)
+    }
+
+    /// A 32-byte message may be the SHA-256 prehash a NEP-413, SEP-53 or TON
+    /// Connect verifier checks a signature over, so it is refused unless it is
+    /// all ASCII letters and digits, a set a digest essentially never falls in.
+    #[test]
+    fn a_32_byte_message_outside_the_narrow_charset_is_refused() {
+        for message in [
+            "Sign in to app.example.com 12345",
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+            "0123456789abcdef0123456789abcde\u{7f}",
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+        ] {
+            assert_eq!(message.len(), PREHASH_LEN, "{message:?}");
+            let err = convert_message(message).expect_err("a possible prehash must not render");
+            assert!(err.to_string().contains("32-byte"), "{err}");
+        }
+        // Decoded from an envelope, the same rule holds.
+        let tx =
+            SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com 12345"))
+                .expect("the envelope itself is well-formed");
+        assert!(
+            SolanaVisualSignConverter
+                .to_visual_sign_payload(tx, VisualSignOptions::default())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_32_byte_alphanumeric_message_and_other_lengths_render() {
+        for message in [
+            "SignIn0123456789abcdefABCDEF9876",
+            "Sign in to app.example.com 1234",
+            "Sign in to app.example.com 123456",
+        ] {
+            let payload = convert_message(message).expect("renders");
+            assert_eq!(
+                unescape_display_text(&message_text(&payload)).as_deref(),
+                Some(message)
+            );
+        }
+    }
+
+    /// A legacy transaction message whose bytes are all valid UTF-8: a System
+    /// transfer of 0x7f7f7f7f7f lamports between ASCII-only keys, with an
+    /// ASCII blockhash. Its serialized bytes fit in a JSON string, and a
+    /// signature over them is a signature over the transaction.
+    fn utf8_transfer_message() -> LegacyMessage {
+        let mut data = 2u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&0x7f_7f7f_7f7f_u64.to_le_bytes());
+        LegacyMessage {
+            header: solana_message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            account_keys: vec![
+                Pubkey::new_from_array([b'A'; 32]),
+                Pubkey::new_from_array([b'B'; 32]),
+                Pubkey::default(),
+            ],
+            recent_blockhash: solana_hash::Hash::new_from_array([b'H'; 32]),
+            instructions: vec![solana_message::compiled_instruction::CompiledInstruction {
+                program_id_index: 2,
+                accounts: vec![0, 1],
+                data,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_message_that_is_a_serialized_transaction_message_is_refused() {
+        let bytes = bincode::serialize(&utf8_transfer_message()).expect("serialize");
+        let text = String::from_utf8(bytes).expect("the message is built to be UTF-8");
+        let json = serde_json::to_string(&text).expect("a JSON string");
+        let tx = SolanaTransactionWrapper::from_string(&format!(
+            r#"{{"message":{json},"signerAddress":"{SIGNER}"}}"#
+        ))
+        .expect("the envelope itself is well-formed");
+        let err = SolanaVisualSignConverter
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect_err("transaction bytes must not render as a message");
+        assert!(err.to_string().contains("transaction message"), "{err}");
+
+        // The same bytes with anything appended are not that transaction, so
+        // they are only text.
+        convert_message(&format!("{text} ")).expect("not a transaction message");
+    }
+
+    /// A versioned (v0) message starts with 0x80, which no UTF-8 text does, so
+    /// it cannot reach the message path through an envelope; the check still
+    /// refuses it on raw bytes, which is what a directly built caller sees.
+    #[test]
+    fn versioned_transaction_message_bytes_are_refused() {
+        let v0 = VersionedMessage::V0(solana_message::v0::Message {
+            header: utf8_transfer_message().header,
+            account_keys: utf8_transfer_message().account_keys,
+            recent_blockhash: utf8_transfer_message().recent_blockhash,
+            instructions: utf8_transfer_message().instructions,
+            address_table_lookups: vec![],
+        });
+        let bytes = bincode::serialize(&v0).expect("serialize");
+        assert!(check_message_domain(&bytes).is_err());
+        let legacy = bincode::serialize(&utf8_transfer_message()).expect("serialize");
+        assert!(check_message_domain(&legacy).is_err());
+        assert!(check_message_domain(b"Sign in to app.example.com").is_ok());
     }
 }

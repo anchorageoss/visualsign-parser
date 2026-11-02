@@ -51,6 +51,11 @@ pub fn create_registry(
         visualsign::registry::Chain::Near,
         visualsign_near::NearVisualSignConverter::new(),
     );
+    #[cfg(feature = "zcash")]
+    registry.register::<visualsign_zcash::ZcashTransactionWrapper, _>(
+        visualsign::registry::Chain::Zcash,
+        visualsign_zcash::ZcashVisualSignConverter,
+    );
     #[cfg(feature = "unspecified")]
     registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
         visualsign::registry::Chain::Unspecified,
@@ -184,5 +189,29 @@ mod tests {
             rendered.contains(CUSTOM_FOO_SELECTOR),
             "dropping the ABI must leave the raw selector {CUSTOM_FOO_SELECTOR}, got: {rendered}"
         );
+    }
+}
+
+#[cfg(all(test, feature = "zcash"))]
+mod zcash_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use visualsign::registry::Chain;
+    use visualsign::vsptrait::VisualSignOptions;
+
+    /// Orchard send fixture from `visualsign-zcash`, converted through the real
+    /// registry so a missing or mis-wired registration fails here.
+    const ORCHARD_SEND_PCZT_HEX: &str = include_str!(
+        "../../../chain_parsers/visualsign-zcash/tests/fixtures/orchard_send_v5.input"
+    );
+
+    #[test]
+    fn registry_decodes_zcash() {
+        let registry = super::create_registry(&crate::config::ParserConfig::accept_unsigned());
+        let pczt = ORCHARD_SEND_PCZT_HEX.trim();
+        let options = VisualSignOptions::default();
+        let result = registry
+            .convert_transaction(&Chain::Zcash, pczt, options)
+            .expect("fixture PCZT must convert");
+        assert_eq!(result.payload.payload_type, "ZcashTx");
     }
 }

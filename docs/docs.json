@@ -63,7 +63,8 @@
           {
             "group": "Chain Guides",
             "pages": [
-              "wallet-integration/chains/ethereum"
+              "wallet-integration/chains/ethereum",
+              "wallet-integration/chains/solana"
             ]
           },
           {
@@ -106,7 +107,8 @@
               "chains/sui",
               "chains/tron",
               "chains/bitcoin",
-              "chains/near"
+              "chains/near",
+              "chains/zcash"
             ]
           },
           {

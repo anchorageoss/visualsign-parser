@@ -474,10 +474,14 @@ fn segwit_v0_without_prev_tx_flags_fee_unverified() {
 
 #[test]
 fn all_taproot_inputs_bind_the_fee() {
+    // witness_utxo amounts only: shown, but as enforced by the BIP-341
+    // signature rather than verified.
     let json = json_of(&p2tr_single_sig());
     assert!(!json.contains("unverified: input amounts"), "{json}");
     assert!(
-        json.contains(r#""FallbackText":"0.00001000 BTC""#),
+        json.contains(
+            r#""FallbackText":"0.00001000 BTC (claimed; enforced by BIP-341 signature)","Label":"Fee""#
+        ),
         "{json}"
     );
     assert!(!json.contains("claims change"));
@@ -748,14 +752,16 @@ fn anyonecanpay_leaves_prev_tx_verified_fees_unverified() {
 }
 
 #[test]
-fn explicit_all_and_default_sighashes_keep_taproot_fee_verified() {
+fn explicit_all_and_default_sighashes_keep_taproot_fee_signature_bound() {
     for sighash in [TapSighashType::Default, TapSighashType::All] {
         let mut p = p2tr_single_sig();
         p.inputs[0].sighash_type = Some(sighash.into());
         let json = json_of(&p);
         assert!(!json.contains("unverified:"), "{json}");
         assert!(
-            json.contains(r#""FallbackText":"0.00001000 BTC","Label":"Fee""#),
+            json.contains(
+                r#""FallbackText":"0.00001000 BTC (claimed; enforced by BIP-341 signature)","Label":"Fee""#
+            ),
             "{json}"
         );
     }
@@ -954,8 +960,14 @@ fn review_money_range_is_enforced_for_values_and_totals() {
         previous_output: OutPoint::new(Txid::all_zeros(), 1),
         ..p.unsigned_tx.input[0].clone()
     });
+    let segwit_script = p.inputs[0]
+        .witness_utxo
+        .as_ref()
+        .unwrap()
+        .script_pubkey
+        .clone();
     p.inputs.push(bitcoin::psbt::Input {
-        witness_utxo: Some(txout(ScriptBuf::new(), 1)),
+        witness_utxo: Some(txout(segwit_script, 1)),
         ..Default::default()
     });
     assert!(

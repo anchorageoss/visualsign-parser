@@ -28,3 +28,8 @@
   - changed-files:
       - any-glob-to-any-file:
           - 'src/chain_parsers/visualsign-sui/**'
+
+"chain:zcash":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-zcash/**'

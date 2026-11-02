@@ -29,6 +29,12 @@ pub struct SolanaArgs {
     /// `innerInstructions: true`.
     #[arg(long = "simulated-tx-result", value_name = "BASE64")]
     pub simulated_tx_result: Option<String>,
+
+    /// Maximum total fee allowed, in lamports; the parser default (0.1 SOL) applies when omitted.
+    /// Rendered as the "Max Fee" row ("Max Fee (default)" when omitted); rejected when the
+    /// transaction commits to more.
+    #[arg(long = "max-fee-lamports", value_name = "LAMPORTS")]
+    pub max_fee_lamports: Option<u64>,
 }
 
 /// [`parser_cli_core::ChainPlugin`] implementation for Solana.
@@ -60,6 +66,7 @@ impl parser_cli_core::ChainPlugin for SolanaPlugin {
         Ok(create_chain_metadata(
             &self.args.idl_json_mappings,
             self.args.simulated_tx_result.as_deref(),
+            self.args.max_fee_lamports,
         ))
     }
 }
@@ -98,14 +105,15 @@ fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<Stri
     )
 }
 
-/// Creates Solana chain metadata from IDL mappings and/or a simulation result.
-/// Returns `None` if neither is provided.
+/// Creates Solana chain metadata from IDL mappings, a simulation result, and/or a
+/// max fee. Returns `None` if none is provided.
 #[must_use]
 pub(crate) fn create_chain_metadata(
     idl_json_mappings: &[String],
     simulated_tx_result: Option<&str>,
+    max_fee_lamports: Option<u64>,
 ) -> Option<ChainMetadata> {
-    if idl_json_mappings.is_empty() && simulated_tx_result.is_none() {
+    if idl_json_mappings.is_empty() && simulated_tx_result.is_none() && max_fee_lamports.is_none() {
         return None;
     }
 
@@ -128,6 +136,7 @@ pub(crate) fn create_chain_metadata(
             idl: None,
             idl_mappings: idl_mappings.into_iter().collect(),
             simulated_transaction_result: simulated_tx_result.map(str::to_string),
+            max_fee_lamports,
         })),
     })
 }
@@ -143,7 +152,18 @@ mod tests {
 
     #[test]
     fn test_create_chain_metadata_empty_returns_none() {
-        assert!(create_chain_metadata(&[], None).is_none());
+        assert!(create_chain_metadata(&[], None, None).is_none());
+    }
+
+    #[test]
+    fn test_create_chain_metadata_with_max_fee_only() {
+        let meta = create_chain_metadata(&[], None, Some(5_105_000)).expect("should return Some");
+        let Metadata::Solana(sol) = meta.metadata.unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert_eq!(sol.max_fee_lamports, Some(5_105_000));
+        assert!(sol.idl_mappings.is_empty());
+        assert!(sol.simulated_transaction_result.is_none());
     }
 
     #[test]
@@ -154,7 +174,7 @@ mod tests {
             path.display()
         )];
 
-        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -175,7 +195,7 @@ mod tests {
     fn test_create_chain_metadata_invalid_file_skipped() {
         let mappings =
             vec!["Bad:/nonexistent/idl.json:11111111111111111111111111111111".to_string()];
-        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -194,7 +214,7 @@ mod tests {
             ),
         ];
 
-        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -217,7 +237,7 @@ mod tests {
             path.display()
         )];
 
-        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -237,7 +257,7 @@ mod tests {
             "Also:/missing/file.json:BadProg".to_string(),
         ];
 
-        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };

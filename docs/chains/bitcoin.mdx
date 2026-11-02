@@ -29,9 +29,12 @@ The parser holds no keys. It checks what a PSBT can prove on its own and flags t
 |---|---|
 | `non_witness_utxo` does not hash to the prevout txid, or the output index is out of range | Rejected |
 | `witness_utxo` disagrees with `non_witness_utxo` | Rejected |
+| `redeem_script` does not hash to the prevout script | Rejected (BIP-174 signer check) |
+| `witness_utxo` (without `non_witness_utxo`) for an input whose spent script is not a witness program, such as P2PKH | Rejected (BIP-174 signer check) |
+| `witness_script` does not hash to the P2WSH script being spent (the prevout, or the `redeem_script` for P2SH-P2WSH) | Rejected (BIP-174 signer check) |
 | Duplicate input outpoints, input/output values or totals above `MAX_MONEY` (21 million BTC), or outputs exceed the fully known input total | Rejected |
 | Every input amount verified through its previous transaction, with only ALL / DEFAULT sighashes | `Fee` shown as an amount |
-| Every input spends a taproot output, with only ALL / DEFAULT sighashes | `Fee` shown as an amount (a BIP-341 ALL / DEFAULT signature without ANYONECANPAY commits to all input amounts and outputs) |
+| Every input spends a taproot output and some amounts are known only from `witness_utxo`, with only ALL / DEFAULT sighashes | `Fee` shown as `X BTC (claimed; enforced by BIP-341 signature)`, not as a verified amount. A BIP-341 ALL / DEFAULT signature without ANYONECANPAY commits to every input amount, so a signature over a wrong amount is invalid on-chain, provided the signer computes the sighash from the PSBT's amounts (see below). Bitcoin Core omits `non_witness_utxo` for taproot inputs, so its taproot PSBTs are shown this way. |
 | Any other input amount known only from `witness_utxo` | `Fee` shown as `unknown (claimed X BTC; unverified: ...)`. A segwit v0 signature commits only to its own input amount, so a wrong `witness_utxo` can hide a large fee. |
 | An input has no UTXO data, or the PSBT has zero inputs | `Fee` shown as `unknown` |
 | An output carries `bip32_derivation` or `tap_key_origins` | Displayed as an ordinary output. Derivation metadata alone cannot establish a change claim or ownership. |
@@ -40,7 +43,15 @@ The parser holds no keys. It checks what a PSBT can prove on its own and flags t
 | Input requests NONE, SINGLE, either mode with ANYONECANPAY, or an invalid sighash | Rejected: this preview requires a commitment to every displayed output. This also refuses the legacy out-of-range SINGLE constant-hash case. |
 | Input requests ALL with ANYONECANPAY | Accepted with a `Sighash Type` field and `Fee` shown as `unknown (claimed X BTC; unverified: ...)`: every output is committed, but other inputs can change. |
 
-Change verification (deriving a change key from an account xpub) needs wallet context the parser does not have, and belongs in the signer. The signer must enforce the PSBT sighash requests when producing signatures. The parser does not validate existing signatures or query the chain to confirm that inputs are unspent.
+Change verification (deriving a change key from an account xpub) needs wallet context the parser does not have, and belongs in the signer. The parser does not validate existing signatures or query the chain to confirm that inputs are unspent.
+
+### What the signer must do
+
+The preview is only as good as the signer's agreement with it. A signer pairing with this parser must:
+
+- **Compute every sighash from the PSBT it previewed.** In particular, a taproot signer must take the BIP-341 prevout amounts and scripts from the PSBT's `witness_utxo` / `non_witness_utxo`, not from its own UTXO index or wallet. The `claimed; enforced by BIP-341 signature` fee relies on this: if the PSBT understates an input amount, a signature made over the PSBT's amounts is invalid and cannot be broadcast. A signer that substitutes the real amounts (Bitcoin Core does this when it signs inputs from its own wallet) produces a valid signature while the user was shown a wrong fee. Such a signer must instead refuse a PSBT whose amounts disagree with its own.
+- **Enforce the PSBT's sighash requests.** Every displayed output is only committed to under ALL / DEFAULT (or ALL|ANYONECANPAY, which the preview flags).
+- **Apply the BIP-174 signer checks itself.** The parser refuses the cases above, but the signer is what actually produces the signature.
 
 ## Using parser_cli
 
@@ -55,6 +66,8 @@ cargo run --bin parser_cli -- decode \
 ## Test vectors
 
 Fixtures live in `src/chain_parsers/visualsign-bitcoin/tests/fixtures/`. The `bip174-*` and `bip371-*` files are copied from the test vectors in [BIP-174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki) and [BIP-371](https://github.com/bitcoin/bips/blob/master/bip-0371.mediawiki); the `synthetic-*` files are built by the test suite from the BIP-84/BIP-86 test-vector keys.
+
+`tests/vectors_test.rs` replays every test vector from BIP-174, BIP-370 and BIP-371 (`tests/fixtures/vectors/bip_vectors.json`, extracted from the BIP text at a pinned commit). Invalid vectors and all PSBTv2 vectors must be rejected. The four valid BIP-174 vectors that a signer must refuse (a witness UTXO for a non-witness input, two `redeemScript` mismatches, and a `witnessScript` mismatch) must each be rejected for their specific reason. Every other valid vector is compared with rust-bitcoin's view of the same bytes. `tests/mainnet_test.rs` replays mainnet transactions checked against a block explorer, and `tests/regtest.rs` (requires `bitcoind`) builds, signs and mempool-accepts PSBTs with Bitcoin Core.
 
 ## Implementation details
 

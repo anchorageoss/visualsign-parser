@@ -139,6 +139,7 @@ pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> Visu
                 network_id: None,
                 idl: None,
                 simulated_transaction_result: None,
+                max_fee_lamports: None,
             })),
         }),
         ..VisualSignOptions::default()

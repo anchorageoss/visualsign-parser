@@ -316,6 +316,10 @@ mod tests {
                 r#"{"chain":"CHAIN_SOLANA","networkId":"SOLANA_MAINNET","simulatedTransactionResult":"eyJmb28iOiJiYXIifQ=="}"#,
             ),
             (
+                r#"{"solana":{"networkId":"SOLANA_MAINNET","maxFeeLamports":5105000}}"#,
+                r#"{"chain":"CHAIN_SOLANA","networkId":"SOLANA_MAINNET","maxFeeLamports":5105000}"#,
+            ),
+            (
                 r#"{"ethereum":{"networkId":"ETHEREUM_MAINNET","abiMappings":{"0xabc":{"value":"[]"}}}}"#,
                 r#"{"chain":"CHAIN_ETHEREUM","networkId":"ETHEREUM_MAINNET","abiMappings":{"0xabc":{"value":"[]"}}}"#,
             ),
@@ -331,6 +335,36 @@ mod tests {
                 bytes,
                 vec![0u8],
                 "{oneof} decoded to ChainMetadata {{ None }}"
+            );
+        }
+    }
+
+    /// protojson writes `uint64` as a decimal string and serde as a number; both
+    /// must decode to the same `max_fee_lamports`, or the digests diverge.
+    #[test]
+    fn solana_max_fee_lamports_accepts_number_and_string() {
+        let number = r#"{"solana":{"maxFeeLamports":5105000}}"#;
+        let string = r#"{"solana":{"maxFeeLamports":"5105000"}}"#;
+        assert_eq!(metadata_digest_bytes(number), metadata_digest_bytes(string));
+        let ChainMetadataInput::Solana(solana) = serde_json::from_str(string).unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert_eq!(solana.max_fee_lamports, Some(5_105_000));
+
+        let absent = r#"{"solana":{"networkId":"SOLANA_MAINNET"}}"#;
+        let ChainMetadataInput::Solana(solana) = serde_json::from_str(absent).unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert_eq!(solana.max_fee_lamports, None);
+
+        for bad in [
+            r#"{"solana":{"maxFeeLamports":"-1"}}"#,
+            r#"{"solana":{"maxFeeLamports":"abc"}}"#,
+            r#"{"solana":{"maxFeeLamports":1.5}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<ChainMetadataInput>(bad).is_err(),
+                "{bad} must be rejected"
             );
         }
     }

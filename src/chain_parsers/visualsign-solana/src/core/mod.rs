@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
-use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_pubkey::Pubkey;
 
@@ -19,6 +18,10 @@ mod visualsign;
 pub use accounts::*;
 pub use arg_rendering::format_arg_value;
 pub use instructions::*;
+#[cfg(test)]
+pub(crate) use priority_fee::BASE_FEE_LAMPORTS_PER_SIGNATURE;
+pub use priority_fee::DEFAULT_MAX_FEE_LAMPORTS;
+pub(crate) use priority_fee::decode_compute_budget_request;
 pub use txtypes::*;
 pub use visualsign::*;
 
@@ -351,11 +354,6 @@ pub trait InstructionVisualizer {
         false
     }
 
-    /// The compute-budget request, if any; the summary gate hoists the resulting priority fee.
-    fn compute_budget(&self, _context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
-        None
-    }
-
     fn can_handle(&self, context: &VisualizerContext) -> bool {
         let Some(config) = self.get_config() else {
             return false;
@@ -377,8 +375,6 @@ pub struct VisualizeResult {
     pub summary: Option<TransactionSummary>,
     /// The handling visualizer's [`InstructionVisualizer::is_infrastructure`].
     pub infrastructure: bool,
-    /// The handling visualizer's [`InstructionVisualizer::compute_budget`].
-    pub compute_budget: Option<ComputeBudgetInstruction>,
 }
 
 /// Tries multiple visualizers in order, returning the first successful visualization.
@@ -398,7 +394,6 @@ pub fn visualize_with_any(
                     kind: v.kind(),
                     summary: v.transaction_summary(context),
                     infrastructure: v.is_infrastructure(context),
-                    compute_budget: v.compute_budget(context),
                 }),
         )
     })
