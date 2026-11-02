@@ -1128,7 +1128,15 @@ fn message_to_visual_sign_payload(
     if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
         let mut fields = rendered.fields;
         fields.push(
-            create_text_field("Signing Address", &envelope.signer_address)?.signable_payload_field,
+            create_address_field(
+                SIGNING_ADDRESS_LABEL,
+                &envelope.signer_address,
+                None,
+                None,
+                None,
+                None,
+            )?
+            .signable_payload_field,
         );
         return Ok(SignablePayload::new(
             0,
@@ -4846,6 +4854,9 @@ mod solana_intents_message_tests {
                 SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
                     Some(text_v2.text.clone())
                 }
+                SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
+                    Some(address_v2.address.clone())
+                }
                 _ => None,
             })
             // A static message: CodeQL treats anything derived from the payload
@@ -4864,7 +4875,7 @@ mod solana_intents_message_tests {
             labels.iter().any(|l| l == "Intent"),
             "not rendered as intents: {labels:?}"
         );
-        assert_eq!(field_text(&payload, "Signing Address"), SIGNER);
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
         assert_eq!(field_text(&payload, "Signer"), "alice.near");
         // What the signature covers is a message, whatever it carries.
         assert_eq!(payload.payload_type, "SolanaMessage");
@@ -4950,7 +4961,7 @@ mod solana_intents_message_tests {
     fn a_plain_message_still_renders_as_text() {
         let payload = render("Sign in to app.example.com");
         assert_eq!(payload.title, "Solana Message");
-        assert_eq!(field_text(&payload, "Signer"), SIGNER);
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
     }
 
     /// A message that is intent-shaped (a JSON object naming `intents`) but does
