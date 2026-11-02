@@ -3983,6 +3983,49 @@ mod solana_message_tests {
         );
     }
 
+    /// A message has no fee, so the transaction fee cap never applies to it: no
+    /// "Max Fee" row, not even the default, and a caller cap that would refuse
+    /// any transaction does not refuse a message.
+    #[test]
+    fn a_message_never_carries_a_max_fee() {
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: None,
+                        idl: None,
+                        idl_mappings: Default::default(),
+                        simulated_transaction_result: None,
+                        max_fee_lamports: Some(1),
+                    },
+                )),
+            }),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com"))
+                    .expect("decode"),
+                options,
+            )
+            .expect("a fee cap must not refuse a message");
+
+        assert!(result.intermediate_output.is_none());
+        let rendered = serde_json::to_string(&result.payload).expect("serialize");
+        assert!(
+            !rendered.contains("Max Fee"),
+            "a message must not render a Max Fee row"
+        );
+        assert_eq!(
+            rendered,
+            serde_json::to_string(&render_message("Sign in to app.example.com"))
+                .expect("serialize"),
+            "a fee cap must not change what a message renders"
+        );
+    }
+
     /// A transaction is base64 or hex and an envelope is JSON, so neither
     /// alphabet can produce the other. The transaction path must be untouched.
     #[test]
