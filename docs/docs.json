@@ -188,6 +188,12 @@
             "pages": [
               "rfcs/btc/vsp-btc-1"
             ]
+          },
+          {
+            "group": "Core",
+            "pages": [
+              "rfcs/core/vsp-core-1"
+            ]
           }
         ]
       },

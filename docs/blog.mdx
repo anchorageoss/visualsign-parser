@@ -5,6 +5,10 @@ description: "Concept exploration, design pieces, and deeper dives from the Visu
 
 <Icon icon="rss" /> [Subscribe](/blog/rss.xml) · Posts are tagged by chain, theme, and audience. Each entry below is a stub — click through for the full essay.
 
+<Update label="2026-11-03 — RFC VSP-CORE-1: chain-scoped commands for parser_cli" tags={["Core", "RFC", "Contributors"]}>
+  `parser_cli` accepts every chain's flags on every command, so Solana's `--simulated-tx-result` parses when you decode Ethereum, and Bitcoin needs its own `--bitcoin-network` next to the shared `--network`. VSP-CORE-1 proposes `parser_cli <chain> <command>`: each chain owns its flags, its network values and its tools, while `decode --chain` keeps working with identical output during a deprecation window. [Read the RFC](/rfcs/core/vsp-core-1).
+</Update>
+
 <Update label="2026-11-02 — RFC VSP-BTC-1: telling your coins from theirs" tags={["Bitcoin", "RFC", "Security"]}>
   A PSBT shows every output as a bare address, so an approver can't tell change from a payment. VSP-BTC-1 proposes signed wallet metadata that the parser checks against the transaction: an output is shown as yours only when its script re-derives from your account, fake change is flagged and counted as sending, and every added row names who signed it. It also covers how same-format forks such as Pearl get their own network family. [Read the RFC](/rfcs/btc/vsp-btc-1).
 </Update>
