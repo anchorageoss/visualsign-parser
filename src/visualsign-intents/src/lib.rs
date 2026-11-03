@@ -66,11 +66,8 @@ pub enum NearIntentsError {
     /// request.
     #[error("{0}")]
     NetworkMismatch(String),
-    /// The input decodes as a `DefusePayload` but carries a top-level key the
-    /// type does not declare. Kept distinct from [`Self::InputNotJson`]: a
-    /// caller that falls back to rendering a non-intents message as text must
-    /// not do so here, because this message is intents with something extra
-    /// that would be signed without being shown.
+    /// Decodes as a `DefusePayload` but has an undeclared top-level key. Distinct
+    /// from [`Self::InputNotJson`] so a caller does not fall back to showing text.
     #[error("{0}")]
     UndeclaredFields(String),
     /// The input is [intent-shaped](is_intent_shaped), so it is meant as a
