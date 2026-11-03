@@ -1101,21 +1101,10 @@ const WEBAUTHN_MIN_AUTHENTICATOR_DATA_LEN: usize = 37;
 const WEBAUTHN_FLAGS_INDEX: usize = 32;
 
 /// Whether a signature over `message` can also be a NEAR Intents `webauthn`
-/// signature from the same ed25519 key.
-///
-/// defuse (`near/intents` tag `defuse/v0.4.2`, `webauthn/src/lib.rs:25-59`)
-/// verifies a COSE EdDSA (-8) signature directly over
-/// `authenticator_data || sha256(client_data_json)`, with no prehash. Of those
-/// bytes it checks only the length of the authenticator data (at least 37) and
-/// its flags byte at index 32 (`verify_flags`, `:68-92`, called with
-/// `require_user_verification = false` by `core/src/payload/webauthn.rs:27`):
-/// UP must be set, and BS must not be set without BE. It never compares the
-/// rpIdHash, and the `origin` in the client data is free text. So any message
-/// of at least 37 + 32 bytes whose byte 32 passes that flags check can be the
-/// signed bytes of a WebAuthn authorization: the last 32 bytes can be a
-/// SHA-256 digest the dApp ground to look like text. No length or charset
-/// rule rules this out, so the message is flagged rather than refused, and
-/// this matches defuse's checks exactly rather than estimating.
+/// signature for the same key. Mirrors defuse's `verify_flags` (`near/intents`
+/// `defuse/v0.4.2`): at least 37 + 32 bytes, and byte 32 has UP set and not BS
+/// without BE. defuse checks neither the rpIdHash nor the origin, so no length or
+/// charset rule excludes this; the message is flagged, not refused.
 fn is_webauthn_shaped(message: &[u8]) -> bool {
     const UP: u8 = 1 << 0;
     const BE: u8 = 1 << 3;
@@ -1159,21 +1148,10 @@ fn message_to_visual_sign_payload(
     // Here rather than at decode, so a directly built wrapper is held to it too.
     check_message_domain(envelope.message.as_bytes())?;
 
-    // A message carrying NEAR Intents renders the intents. A signer approving a
-    // token movement has to see the movement, not the JSON that encodes it.
-    //
-    // The envelope's address renders here too: it is the Solana address the
-    // caller says will sign, which the intents alone do not show (the wallet,
-    // not this parser, binds it to the key that signs). It carries the same
-    // label as on the plain-message path, [`SIGNING_ADDRESS_LABEL`], so a
-    // wallet always finds the Solana key under it; the intents' own "Signer"
-    // is the payload's `signer_id`, a NEAR account, not the signing key.
-    //
-    // Not checked for the WebAuthn shape (see [`is_webauthn_shaped`]): the
-    // last 32 bytes of a payload that decodes under the strict key set end in
-    // JSON closing bytes (at least `"}]}` after a string, the loosest place a
-    // digest could sit), and the rest must be valid inside a JSON string, so
-    // making them a chosen SHA-256 digest costs far more than for free text.
+    // Render the intents, not the JSON that encodes them. The envelope's Solana
+    // address keeps the plain-message label ([`SIGNING_ADDRESS_LABEL`]); the
+    // intents' "Signer" is the NEAR `signer_id`. No WebAuthn-shape check: a payload
+    // that decodes ends in JSON closing bytes, so a chosen trailing digest is impractical.
     #[cfg(feature = "intents")]
     if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
         let mut fields = rendered.fields;
@@ -1254,11 +1232,8 @@ fn message_to_visual_sign_payload(
     ))
 }
 
-/// Whether a message is shaped like a NEAR Intents `DefusePayload`, by the same
-/// rule as `visualsign_intents::is_intent_shaped`: a JSON object with an
-/// `intents` key or every required envelope key. Kept here so a build without
-/// the `intents` feature, which links no decoder, can still refuse one; a test
-/// under the feature checks the two agree.
+/// Same rule as `visualsign_intents::is_intent_shaped`, kept here so a build
+/// without the `intents` feature can still refuse one; a test checks they agree.
 #[cfg(any(not(feature = "intents"), test))]
 fn looks_like_intents(message: &[u8]) -> bool {
     const REQUIRED: [&str; 4] = ["signer_id", "verifying_contract", "deadline", "nonce"];
@@ -4344,14 +4319,8 @@ mod tests {
     }
 }
 
-/// A message shaped like a NEAR Intents WebAuthn payload: a signature over its
-/// bytes is also a valid `webauthn` signature for the `DefusePayload` here.
-///
-/// defuse's Ed25519 WebAuthn check (`near/intents` `defuse/v0.4.2`,
-/// `webauthn/src/lib.rs:25-59`) verifies the signature directly over
-/// `authenticator_data || sha256(client_data_json)`. It checks the flags byte
-/// and the challenge, but not the rpIdHash in bytes 0..32 or the origin, so
-/// any text can stand in for the authenticator data.
+/// A message whose signature is also a valid `webauthn` signature for the
+/// `DefusePayload` here, since defuse checks neither the rpIdHash nor the origin.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod webauthn_vector {
@@ -4368,10 +4337,8 @@ mod webauthn_vector {
     #[cfg(feature = "intents")]
     pub(super) const PAYLOAD: &str = r#"{"signer_id":"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c","verifying_contract":"intents.near","deadline":"2030-01-01T00:00:00Z","nonce":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","intents":[{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1000000000000000000000000"}}]}"#;
 
-    /// The client data for [`PAYLOAD`]: `challenge` is its SHA-256, base64url.
-    /// The number in `origin` was found by trying values until the SHA-256 of
-    /// this text was valid UTF-8 (about 2^25 tries), so the message fits in a
-    /// JSON string.
+    /// Client data for [`PAYLOAD`]. The number in `origin` was ground until the
+    /// SHA-256 of this text was valid UTF-8, so the message fits a JSON string.
     pub(super) const CLIENT_DATA_JSON: &str = r#"{"type":"webauthn.get","challenge":"tuGYunE2dMgi_4ikey50MfmnPil7VzPyCIAn_IgDqq8","origin":"https://example.app/26657251"}"#;
 
     /// The ed25519 seed of the key that signs.
@@ -4800,10 +4767,7 @@ mod solana_message_tests {
         String::from_utf8(bytes).expect("ASCII")
     }
 
-    /// A message whose signature is also a NEAR Intents WebAuthn signature
-    /// still renders as a message, with a warning first. Built the same way
-    /// with or without the `intents` feature, since either way the bytes can
-    /// be signed as text.
+    /// A WebAuthn-shaped message still renders as a message, with a warning first.
     #[test]
     fn a_webauthn_shaped_message_renders_with_a_warning() {
         let message = webauthn_vector::message();
@@ -5178,10 +5142,8 @@ mod solana_intents_message_tests {
         render(INTENTS).validate_charset().expect("charset");
     }
 
-    /// A message that is intents but carries an undeclared key is refused
-    /// rather than shown as text: the extra key would be signed without being
-    /// shown, and falling back to the raw JSON would show a payload the parser
-    /// partly understood.
+    /// Intents with an undeclared key are refused, not shown as text: the key would
+    /// be signed unseen.
     #[test]
     fn intents_with_an_undeclared_key_are_refused() {
         let mut intents: serde_json::Value = serde_json::from_str(INTENTS).expect("json");
@@ -5198,10 +5160,8 @@ mod solana_intents_message_tests {
         assert!(err.to_string().contains("\"memo\""), "{err}");
     }
 
-    /// A key inside an intent that its kind does not declare is refused, not
-    /// dropped: `native_withdraw` has no `memo`, so the typed decode ignores
-    /// it and the structured preview, which replaces the message, would never
-    /// show what was signed.
+    /// A key an intent's kind does not declare (`memo` on `native_withdraw`) is
+    /// refused, not dropped.
     #[test]
     fn an_intent_with_an_undeclared_key_is_refused() {
         let message = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000","memo":"hidden"}]}"#;
@@ -5216,10 +5176,8 @@ mod solana_intents_message_tests {
         assert!(err.to_string().contains("\"memo\""), "{err}");
     }
 
-    /// An `auth_call` with an attached deposit previews differently with an
-    /// explicit `min_gas` of `"0"` than with the field absent: they are
-    /// different signed payloads, and the deposit is not refunded if the call
-    /// fails for lack of gas.
+    /// An explicit `min_gas` of `"0"` and an absent one preview differently: they are
+    /// different signed payloads.
     #[test]
     fn auth_call_min_gas_zero_and_absent_preview_differently() {
         let auth = |min_gas: &str| {
@@ -5246,10 +5204,8 @@ mod solana_intents_message_tests {
         assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
     }
 
-    /// A message that is intent-shaped (a JSON object naming `intents`) but does
-    /// not decode is refused, not shown as a "Solana Message": an unknown intent
-    /// kind and `intents: null` both. JSON that names no `intents` is ordinary
-    /// text and still renders.
+    /// Intent-shaped JSON that does not decode (an unknown kind, `intents: null`) is
+    /// refused; JSON that names no `intents` still renders as text.
     #[test]
     fn intent_shaped_messages_that_do_not_decode_are_refused() {
         for malformed in [
@@ -5273,11 +5229,8 @@ mod solana_intents_message_tests {
         assert_eq!(payload.title, "Solana Message");
     }
 
-    /// A payload with no intents only spends its nonce, which is how a user
-    /// cancels a pending signed quote or order, so it must be signable from a
-    /// Solana wallet too. `intents` is optional: the absent and the empty form
-    /// both render as a cancel with the signer, verifying contract, deadline,
-    /// nonce and the Solana signing address.
+    /// A payload with no intents (absent or empty) renders as a cancel: it only
+    /// spends the nonce.
     #[test]
     fn a_payload_without_intents_renders_as_a_cancel() {
         for message in [
