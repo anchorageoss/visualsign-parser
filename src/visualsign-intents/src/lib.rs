@@ -114,17 +114,13 @@ pub fn is_intent_shaped(json: &[u8]) -> bool {
     })
 }
 
-/// The keys every intents message inside a NEP-413 envelope must carry. The
-/// envelope supplies the rest: `extract_defuse_payload` takes the verifying
-/// contract from `recipient` and the nonce from the envelope's `nonce`. As in
-/// [`REQUIRED_ENVELOPE_KEYS`], `intents` is optional.
+/// The keys an intents message inside a NEP-413 envelope must carry; the
+/// envelope supplies `recipient` and `nonce`, and `intents` is optional.
 pub const REQUIRED_NEP413_MESSAGE_KEYS: [&str; 2] = ["signer_id", "deadline"];
 
-/// [`is_intent_shaped`] for the `message` of a NEP-413 envelope: a JSON object
-/// with an `intents` key, or every [required NEP-413 message
-/// key](REQUIRED_NEP413_MESSAGE_KEYS). `{"signer_id", "deadline"}` with no
-/// `intents` extracts as a payload that only spends the nonce, a cancel, so it
-/// is intents, not free text.
+/// [`is_intent_shaped`] for a NEP-413 `message`: a JSON object with an `intents`
+/// key or every [required key](REQUIRED_NEP413_MESSAGE_KEYS) (the latter alone is
+/// a cancel).
 #[must_use]
 pub fn is_nep413_message_intent_shaped(json: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(json).is_ok_and(|value| {
