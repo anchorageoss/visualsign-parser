@@ -49,7 +49,7 @@
       "Type": "text_v2"
     }
   ],
-  "PayloadType": "NearTx",
+  "PayloadType": "NearMessage",
   "Title": "Cancel: invalidate nonce",
   "Version": "0"
 }

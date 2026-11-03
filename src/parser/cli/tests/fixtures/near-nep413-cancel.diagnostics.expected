@@ -1,0 +1,3 @@
+[
+  { "rule": "empty-intents", "level": "warn" }
+]

@@ -1,0 +1,114 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "NEAR Mainnet",
+                label: "Network",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "NEAR Mainnet",
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "intents.near",
+                label: "NEP-413 Recipient",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "intents.near",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+                label: "NEP-413 Nonce",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "alice.near",
+                label: "Signer",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "alice.near",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "intents.near",
+                label: "Verifying Contract",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "intents.near",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "2999-01-01T00:00:00+00:00",
+                label: "Deadline",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "2999-01-01T00:00:00+00:00",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+                label: "Nonce",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "FT Withdraw",
+                label: "Intent",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "FT Withdraw",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "wrap.near",
+                label: "Token",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "wrap.near",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "bob.near",
+                label: "To",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "bob.near",
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "1 wNEAR",
+                label: "Amount",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "1",
+                abbreviation: Some(
+                    "wNEAR",
+                ),
+            },
+        },
+    ],
+    payload_type: "NearMessage",
+    subtitle: None,
+    title: "NEAR Intent: FT Withdraw",
+    version: "0",
+}

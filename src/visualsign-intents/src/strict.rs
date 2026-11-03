@@ -5,7 +5,9 @@
 //! the bytes the signature covers but never renders, and a misspelled key (a
 //! snake_case `callback_url` for NEP-413's `callbackUrl`) silently drops a field
 //! the wallet does sign. Every chain that renders these payloads decodes the
-//! typed value first, so serde still reports malformed input and repeated keys,
+//! typed value first, so serde still reports malformed input and repeated struct
+//! fields (a repeated key inside a map-valued field keeps its last value, as in
+//! the contract),
 //! then refuses any top-level key outside the type's declared set and, for an
 //! intents payload, any key an intent's own kind does not declare.
 
