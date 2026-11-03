@@ -1262,36 +1262,14 @@ async fn parser_near_intent_envelope_e2e() {
     integration::Builder::new().execute(test).await
 }
 
-/// Every hop of a NEAR Intents round trip, through the real parser.
+/// Every hop of a NEAR Intents round trip (wrap, deposit, signed swap,
+/// withdraw) through the real parser: each hop names itself and shows its
+/// amounts. Exact shapes are pinned by the single-transaction tests above.
 ///
-/// Wrap NEAR into wNEAR, deposit it into the verifier, sign the swap, withdraw
-/// the proceeds. Three of the four are borsh transactions and one is an
-/// off-chain message, so the run also covers the parser telling those apart from
-/// the same `CHAIN_NEAR` identity by input format alone.
-///
-/// Asserted on the fields a signer reads rather than on whole payloads: four
-/// exact-JSON comparisons would be long enough to obscure the thing under test,
-/// which is that each hop names itself and shows its amounts. The
-/// single-transaction tests above already pin exact shapes.
-///
-/// The transaction hex is generated, not hand-written. To regenerate, build a
-/// `Transaction::V0` in `visualsign-near` (which has near-primitives) and print
-/// `hex::encode(borsh::to_vec(&tx))`: signer `alice.near`,
-/// `PublicKey::empty(KeyType::ED25519)`, nonce 1, `CryptoHash::default()`, and
-/// one `FunctionCall` to the named receiver with the named method and JSON
-/// args, 30 Tgas, and the deposit noted on each (1 NEAR for the wrap, 1
-/// yoctoNEAR for the NEP-141 calls). `intents_tx_hex` in
-/// `visualsign-near/src/cli_plugin.rs` builds the same `Transaction::V0`.
-///
-/// The hops are independent constants: the amounts agree (1 wNEAR wrapped,
-/// deposited and swapped; 998 usdc.near received and withdrawn) because they
-/// were built that way, and nothing derives one hop from another. Change them
-/// together.
-///
-/// Unwrapping (`near_withdraw` on wrap.near) is not a hop here: the wNEAR is
-/// swapped away, so the journey never unwraps. Its title and amount are
-/// covered by the wrap preset's unit tests and the `near-wrap-withdraw` CLI
-/// fixture.
+/// The transaction hex is generated like `intents_tx_hex` in
+/// `visualsign-near/src/cli_plugin.rs`: a `Transaction::V0` from `alice.near`,
+/// nonce 1, 30 Tgas, with the deposit noted on each hop. The hops' amounts are
+/// independent constants; change them together.
 #[tokio::test]
 async fn parser_near_intents_journey_e2e() {
     async fn test(test_args: TestArgs) {
@@ -1348,8 +1326,7 @@ async fn parser_near_intents_journey_e2e() {
             field(payload, label)["FallbackText"].as_str().unwrap()
         }
 
-        /// A typed amount: its numeric value and its unit, as the wallet
-        /// renders them, plus the fallback text that must agree with both.
+        /// A typed amount's value and unit, plus fallback text that must agree.
         fn assert_amount(payload: &serde_json::Value, label: &str, amount: &str, unit: &str) {
             let field = field(payload, label);
             assert_eq!(field["Type"], "amount_v2", "{label}: {field}");
@@ -1358,21 +1335,16 @@ async fn parser_near_intents_journey_e2e() {
             assert_eq!(field["FallbackText"], format!("{amount} {unit}"), "{label}");
         }
 
-        // 1. Wrap 1 NEAR. The amount rides as the attached deposit; what the
-        //    preset adds is a title that says what the call does.
+        // 1. Wrap 1 NEAR (the amount is the attached deposit).
         let wrapped = hop(&mut client, WRAP).await;
         assert_eq!(wrapped["Title"], "Wrap", "{wrapped}");
         assert_eq!(text(&wrapped, "To"), "wrap.near");
         assert_eq!(text(&wrapped, "Method"), "near_deposit");
         assert_amount(&wrapped, "Deposit", "1", "NEAR");
 
-        // 2. Deposit the 1 wNEAR (10^24 base units) into the verifier.
-        //    ft_transfer_call is a NEP-141 standard method, so it is decoded by
-        //    method name on any token contract; the on-chain path does not
-        //    resolve token metadata here, so the amount is base units, labelled
-        //    as such. This hop does not exercise the wrap preset. If wrap.near's
-        //    NEP-141 calls later render in wNEAR (as near_withdraw already
-        //    does), this assertion changes on purpose, not as a regression.
+        // 2. Deposit the 1 wNEAR (10^24 base units) into the verifier. A
+        //    standard NEP-141 call with no token metadata, so base units; this
+        //    changes on purpose if wrap.near's NEP-141 calls render in wNEAR.
         let deposited = hop(&mut client, DEPOSIT).await;
         assert_eq!(text(&deposited, "To"), "wrap.near");
         assert_eq!(text(&deposited, "Method"), "ft_transfer_call");
@@ -1385,21 +1357,15 @@ async fn parser_near_intents_journey_e2e() {
         );
         assert_amount(&deposited, "Deposit", "0.000000000000000000000001", "NEAR");
 
-        // 3. The swap: 1 wNEAR for 998 base units of usdc.near. A message, not
-        //    a transaction, and the intents inside it render rather than showing
-        //    the signer an escaped JSON string.
+        // 3. The swap: 1 wNEAR for 998 base units of usdc.near, as a message.
         let swap = hop(&mut client, SWAP).await;
         assert_eq!(swap["Title"], "NEAR Intent: Token Diff", "{swap}");
         assert_eq!(text(&swap, "Intent"), "Token Diff");
         assert_eq!(text(&swap, "Signer"), "alice.near");
-        // The side being spent resolves through the compiled-in seed table, so
-        // the signer reads a symbol and a scaled amount rather than an asset id
-        // and base units.
+        // The spent side resolves through the seed table: symbol, scaled amount.
         assert_amount(&swap, "Send", "1", "wNEAR");
-        // The side being received does not resolve here, and the unresolved form
-        // still names the asset and says so. An asset the parser cannot resolve
-        // must be visible as itself, not omitted or silently rendered as raw
-        // units that look scaled.
+        // The received side does not resolve, so it must render as its asset
+        // id, marked unresolved, never as units that look scaled.
         assert_eq!(text(&swap, "Receive"), "998 (unresolved nep141:usdc.near)");
         assert!(
             !swap.to_string().contains("signer_id"),
