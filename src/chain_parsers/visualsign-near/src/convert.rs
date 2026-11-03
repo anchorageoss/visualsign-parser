@@ -570,9 +570,8 @@ fn title_for(actions: &[Action], receiver_id: &str) -> String {
         [single] if crate::actions::is_partially_decoded(single) => {
             crate::actions::partially_decoded_label(single)
         }
-        // A recognized contract call names itself, so a signer reads "Wrap"
-        // rather than "Function Call". The preset returns None unless the args
-        // decoded, so the title never outruns the fields.
+        // A recognized contract call names itself ("Wrap"); the preset returns
+        // None unless the args decoded.
         [single] => crate::actions::receiver_action_label(single, receiver_id).to_string(),
         _ => "NEAR Transaction".to_string(),
     }
@@ -705,9 +704,7 @@ mod tests {
         )
     }
 
-    /// The NEAR leg of the intents journey: wrapping NEAR into wNEAR. The amount
-    /// rides as the attached deposit, which the FunctionCall render already
-    /// shows; what the preset adds is a title that names the operation.
+    /// A `wrap.near` deposit is titled "Wrap", not "Function Call".
     #[test]
     fn a_wrap_names_itself_rather_than_rendering_as_a_function_call() {
         let payload = NearVisualSignConverter::new()
@@ -743,9 +740,8 @@ mod tests {
         assert!(json.contains("wNEAR"), "an unwrap moves wNEAR: {json}");
     }
 
-    /// In a multi-action transaction each wrap call names itself in its
-    /// `Action` boundary as the single-action title does, and a call the preset
-    /// does not recognize keeps the generic label.
+    /// Each wrap call in a multi-action transaction names its `Action` boundary;
+    /// an unrecognized call keeps the generic label.
     #[test]
     fn wraps_name_themselves_in_multi_action_boundaries() {
         let call = |method: &str, args: &str| {
@@ -779,8 +775,7 @@ mod tests {
         assert_eq!(payload.title, "NEAR Transaction");
     }
 
-    /// The same method name on another contract is not a wrap, so the title
-    /// stays generic and the args render as raw data.
+    /// `near_withdraw` on another contract is not a wrap: generic title, raw args.
     #[test]
     fn the_same_method_on_another_contract_is_not_titled_a_wrap() {
         let tx = near_tx_as(

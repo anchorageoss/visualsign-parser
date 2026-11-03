@@ -73,9 +73,8 @@ fn render_action_with(
             fields.push(
                 create_text_field("Method", &charset_safe(&fc.method_name))?.signable_payload_field,
             );
-            // The contract-keyed decoder is tried first: wrap.near names its
-            // own methods, so the receiver decides what they mean, where
-            // ft_transfer and ft_withdraw mean one thing on every token.
+            // Contract-keyed decoder first: there the receiver decides what a
+            // method means, unlike the standard NEP-141 methods.
             let preset = match receiver_id {
                 Some(receiver_id) => {
                     crate::presets::wrap::decode_args(receiver_id, &fc.method_name, &fc.args)?
@@ -370,10 +369,8 @@ fn push_amount_and_notes(
     Ok(())
 }
 
-/// The label for `action` sent to `receiver_id`: a call a contract preset
-/// fully understands names itself ("Wrap"), anything else takes its generic
-/// [`action_label`]. The preset returns a label only when the args decoded,
-/// so neither the title nor a boundary claims more than the fields show.
+/// The label for `action` sent to `receiver_id`: a preset's label ("Wrap") when
+/// its args decoded, else the generic [`action_label`].
 pub(crate) fn receiver_action_label(action: &Action, receiver_id: &str) -> &'static str {
     match action {
         Action::FunctionCall(fc) => {
