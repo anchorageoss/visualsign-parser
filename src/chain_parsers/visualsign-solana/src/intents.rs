@@ -33,9 +33,10 @@
 //!   `authenticator_data || sha256(client_data_json)` and checks neither the
 //!   rpIdHash nor the origin, so a dApp can grind the trailing digest to look
 //!   like text. No length or charset rule bounds this. The message path flags
-//!   such a message with a warning (see `is_webauthn_shaped`), and the wallet
-//!   must treat a flagged message as do-not-sign unless it means to make a
-//!   NEAR Intents WebAuthn authorization.
+//!   such a message with a warning (see `is_webauthn_shaped`). The trigger is
+//!   one bit pattern in byte 32, so about 3 in 8 long texts are flagged; how to
+//!   present the warning is the wallet's call. The flag covers the message path
+//!   only, not other signing paths such as transactions.
 //!
 //! Only the wallet, which sees what the dApp asked for, can rule either out.
 
