@@ -20,10 +20,12 @@ const FIXTURE: &str = include_str!("aggregated_test_data.json");
 const PREVIOUS_DEPLOYMENT: &str = include_str!("previous_deployment_test_data.json");
 const EDGE_CASES: &str = include_str!("edge_case_test_data.json");
 
-// Real transactions against Fluid's previous vaults package, whose `operate` takes the
+// Real transactions against Fluid's previous vaults packages, whose `operate` takes the
 // same arguments; `repoint` sends them to the current package.
-const PREVIOUS_VAULTS_PACKAGE: &str =
-    "0xf0f5a9c105384d5b79e212a9c9d3adfa5d030ef4c0cf9e22fa48674f9ad3652a";
+const PREVIOUS_VAULTS_PACKAGES: [&str; 2] = [
+    "0xf0f5a9c105384d5b79e212a9c9d3adfa5d030ef4c0cf9e22fa48674f9ad3652a",
+    "0x2e39b917ac7e580fb015308843144eb335625c4784f92847fbb09236e055f19f",
+];
 
 const OTHER_ADDRESS: [u8; 32] = [0x77; 32];
 
@@ -83,20 +85,22 @@ fn sdk_transaction(tx: &TransactionData) -> sui_sdk_types::Transaction {
 }
 
 fn repoint(mut tx: TransactionData) -> TransactionData {
-    let previous = ObjectID::from_hex_literal(PREVIOUS_VAULTS_PACKAGE).unwrap();
     let current = ObjectID::from_hex_literal(DEPLOYMENTS[0].vaults_package).unwrap();
-    for command in &mut programmable(&mut tx).commands {
-        if let Command::MoveCall(call) = command {
-            if call.package == previous {
-                call.package = current;
-            }
-            for type_argument in &mut call.type_arguments {
-                let tag = type_argument
-                    .to_type_tag()
-                    .unwrap()
-                    .to_canonical_string(true)
-                    .replace(&previous.to_hex(), &current.to_hex());
-                *type_argument = sui_types::parse_sui_type_tag(&tag).unwrap().into();
+    for previous in PREVIOUS_VAULTS_PACKAGES {
+        let previous = ObjectID::from_hex_literal(previous).unwrap();
+        for command in &mut programmable(&mut tx).commands {
+            if let Command::MoveCall(call) = command {
+                if call.package == previous {
+                    call.package = current;
+                }
+                for type_argument in &mut call.type_arguments {
+                    let tag = type_argument
+                        .to_type_tag()
+                        .unwrap()
+                        .to_canonical_string(true)
+                        .replace(&previous.to_hex(), &current.to_hex());
+                    *type_argument = sui_types::parse_sui_type_tag(&tag).unwrap().into();
+                }
             }
         }
     }
@@ -415,7 +419,7 @@ fn every_fixture_emits_intermediate_output_listing_each_command() {
             "{digest} lists no user::operate call"
         );
     }
-    assert_eq!(digests.len(), 14);
+    assert_eq!(digests.len(), 20);
 }
 
 #[test]
