@@ -13,7 +13,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 use visualsign::encodings::escape_display_text;
 
-use crate::actions::render_action;
+use crate::actions::render_action_for_receiver;
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
     NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
@@ -306,7 +306,11 @@ impl NearVisualSignConverter {
 
         let total_actions = tx.actions().len();
         for action in tx.actions() {
-            fields.extend(render_action(action, total_actions)?);
+            fields.extend(render_action_for_receiver(
+                action,
+                total_actions,
+                tx.receiver_id().as_str(),
+            )?);
             fields.extend(decode_intents(
                 tx.receiver_id().as_str(),
                 action,
@@ -318,7 +322,7 @@ impl NearVisualSignConverter {
 
         Ok(ConversionResult::new(SignablePayload::new(
             PAYLOAD_VERSION,
-            title_for(tx.actions()),
+            title_for(tx.actions(), tx.receiver_id().as_str()),
             None,
             fields,
             PAYLOAD_TYPE.to_string(),
@@ -561,12 +565,15 @@ fn render_intent_envelope(
 /// label. An action whose fields are only partially decoded carries the same
 /// qualifier in the title as in its field, so the headline does not claim more
 /// than the body.
-fn title_for(actions: &[Action]) -> String {
+fn title_for(actions: &[Action], receiver_id: &str) -> String {
     match actions {
         [single] if crate::actions::is_partially_decoded(single) => {
             crate::actions::partially_decoded_label(single)
         }
-        [single] => crate::actions::action_label(single).to_string(),
+        // A recognized contract call names itself, so a signer reads "Wrap"
+        // rather than "Function Call". The preset returns None unless the args
+        // decoded, so the title never outruns the fields.
+        [single] => crate::actions::receiver_action_label(single, receiver_id).to_string(),
         _ => "NEAR Transaction".to_string(),
     }
 }
@@ -685,20 +692,128 @@ mod tests {
             .count()
     }
 
+    fn wrap_call(method: &str, args: &str, deposit_yocto: u128) -> NearTransaction {
+        near_tx_as(
+            "alice.near",
+            "wrap.near",
+            vec![Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: method.to_string(),
+                args: args.as_bytes().to_vec(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(deposit_yocto),
+            }))],
+        )
+    }
+
+    /// The NEAR leg of the intents journey: wrapping NEAR into wNEAR. The amount
+    /// rides as the attached deposit, which the FunctionCall render already
+    /// shows; what the preset adds is a title that names the operation.
+    #[test]
+    fn a_wrap_names_itself_rather_than_rendering_as_a_function_call() {
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(
+                wrap_call("near_deposit", "", 1_000_000_000_000_000_000_000_000),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload;
+        assert_eq!(payload.title, "Wrap");
+        let json = payload.to_json().expect("json");
+        assert!(
+            json.contains("Deposit"),
+            "the wrapped amount must render: {json}"
+        );
+    }
+
+    #[test]
+    fn an_unwrap_names_itself_and_renders_its_amount_in_wnear() {
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(
+                wrap_call(
+                    "near_withdraw",
+                    r#"{"amount":"1000000000000000000000000"}"#,
+                    0,
+                ),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload;
+        assert_eq!(payload.title, "Unwrap");
+        let json = payload.to_json().expect("json");
+        assert!(json.contains("wNEAR"), "an unwrap moves wNEAR: {json}");
+    }
+
+    /// In a multi-action transaction each wrap call names itself in its
+    /// `Action` boundary as the single-action title does, and a call the preset
+    /// does not recognize keeps the generic label.
+    #[test]
+    fn wraps_name_themselves_in_multi_action_boundaries() {
+        let call = |method: &str, args: &str| {
+            Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: method.to_string(),
+                args: args.as_bytes().to_vec(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(1),
+            }))
+        };
+        let tx = near_tx_as(
+            "alice.near",
+            "wrap.near",
+            vec![
+                call("near_deposit", ""),
+                call("near_withdraw", r#"{"amount":"1000000000000000000000000"}"#),
+                call("storage_deposit", ""),
+            ],
+        );
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect("convert")
+            .payload;
+        let boundaries: Vec<&str> = payload
+            .fields
+            .iter()
+            .filter(|f| f.label() == "Action")
+            .map(field_text)
+            .collect();
+        assert_eq!(boundaries, ["Wrap", "Unwrap", "Function Call"]);
+        assert_eq!(payload.title, "NEAR Transaction");
+    }
+
+    /// The same method name on another contract is not a wrap, so the title
+    /// stays generic and the args render as raw data.
+    #[test]
+    fn the_same_method_on_another_contract_is_not_titled_a_wrap() {
+        let tx = near_tx_as(
+            "alice.near",
+            "token.example.near",
+            vec![Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "near_withdraw".to_string(),
+                args: br#"{"amount":"1000000000000000000000000"}"#.to_vec(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(0),
+            }))],
+        );
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect("convert")
+            .payload;
+        assert_eq!(payload.title, "Function Call");
+    }
+
     #[test]
     fn title_single_action_uses_action_name() {
-        assert_eq!(title_for(&[transfer()]), "Transfer");
+        assert_eq!(title_for(&[transfer()], "receiver.near"), "Transfer");
     }
 
     #[test]
     fn title_multi_action_is_generic() {
         let actions = [Action::CreateAccount(CreateAccountAction {}), transfer()];
-        assert_eq!(title_for(&actions), "NEAR Transaction");
+        assert_eq!(title_for(&actions, "receiver.near"), "NEAR Transaction");
     }
 
     #[test]
     fn title_no_action_is_generic() {
-        assert_eq!(title_for(&[]), "NEAR Transaction");
+        assert_eq!(title_for(&[], "receiver.near"), "NEAR Transaction");
     }
 
     #[test]
