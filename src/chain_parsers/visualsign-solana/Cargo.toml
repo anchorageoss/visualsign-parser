@@ -7,7 +7,16 @@ rust-version.workspace = true
 [features]
 default    = ["cli-plugin", "simulation", "stake-pool"]
 cli-plugin = ["dep:clap", "dep:parser_cli_core"]
-diagnostics = ["visualsign/diagnostics"]
+# Forwarded weakly to visualsign-intents: when `intents` is also on, its soft
+# findings (an expired deadline) render as Diagnostic fields, not Warning text.
+diagnostics = ["visualsign/diagnostics", "visualsign-intents?/diagnostics"]
+# Render NEAR Intents carried in an off-chain message. Off by default, and a
+# real cost to turn on: visualsign-intents depends on near-sdk, which pulls
+# near-crypto -> secp256k1 -> secp256k1-sys (C, built by a build script), plus
+# the defuse crates. With it off, this crate links none of them, so a
+# `--no-default-features` build stays free of C (#575). With it off, a message
+# shaped like an intents payload is refused, never shown as text.
+intents = ["dep:visualsign-intents"]
 # Solana's `jsonParsed` decoder for native programs, used by the intermediate
 # output. Pulls solana-transaction-status 2.x (solana-sdk 2.x, openssl-sys,
 # zstd-sys), which does not build for iOS. Off: native instructions in the
@@ -30,6 +39,7 @@ tracing = { workspace = true }
 # anchorageoss/solana-parser once that PR merges.
 solana_parser = { git = "https://github.com/iqlusioninc/solana-parser.git", rev = "f269037acaf697233048394e5ecae09320b442bf" }
 visualsign = { workspace = true }
+visualsign-intents = { path = "../../visualsign-intents", optional = true }
 generated = { path = "../../generated" }
 serde = { workspace = true }
 serde_json = { workspace = true }

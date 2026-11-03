@@ -7,6 +7,8 @@ pub use cli_plugin::{SolanaArgs, SolanaPlugin};
 mod core;
 mod idl;
 mod integrations;
+#[cfg(feature = "intents")]
+pub mod intents;
 /// Chain-specific structured decode emitted as
 /// `ParsedTransactionPayload.intermediate_output`. Published so downstream
 /// consumers can `borsh::from_slice` into the same schema the parser produces.
