@@ -1,0 +1,129 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "NEAR Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "NEAR Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "alice.near",
+      "Label": "Signer",
+      "TextV2": {
+        "Text": "alice.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "intents.near",
+      "Label": "Verifying Contract",
+      "TextV2": {
+        "Text": "intents.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2100-01-01T00:00:00+00:00",
+      "Label": "Deadline",
+      "TextV2": {
+        "Text": "2100-01-01T00:00:00+00:00"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1 of 2: FT Withdraw",
+      "Label": "Intent",
+      "TextV2": {
+        "Text": "1 of 2: FT Withdraw"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "wrap.near",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "wrap.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "bob.near",
+      "Label": "To",
+      "TextV2": {
+        "Text": "bob.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "wNEAR",
+        "Amount": "1"
+      },
+      "FallbackText": "1 wNEAR",
+      "Label": "Amount",
+      "Type": "amount_v2"
+    },
+    {
+      "FallbackText": "invoice 7%0ATo: mallory.near caf%C3%A9",
+      "Label": "Memo",
+      "TextV2": {
+        "Text": "invoice 7%0ATo: mallory.near caf%C3%A9"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0 Tgas",
+      "Label": "Min Gas",
+      "TextV2": {
+        "Text": "0 Tgas"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2 of 2: FT Withdraw",
+      "Label": "Intent",
+      "TextV2": {
+        "Text": "2 of 2: FT Withdraw"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "wrap.near",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "wrap.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "bob.near",
+      "Label": "To",
+      "TextV2": {
+        "Text": "bob.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "wNEAR",
+        "Amount": "0.000000000000000000000001"
+      },
+      "FallbackText": "0.000000000000000000000001 wNEAR",
+      "Label": "Amount",
+      "Type": "amount_v2"
+    }
+  ],
+  "PayloadType": "NearTx",
+  "Title": "NEAR Intent",
+  "Version": "0"
+}
