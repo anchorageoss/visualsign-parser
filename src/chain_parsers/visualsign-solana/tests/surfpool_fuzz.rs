@@ -5,9 +5,11 @@
 //! The roundtrip (decode an IDL, build a synthetic transaction from its first
 //! instruction's discriminator, convert it, assert a non-empty payload) reads
 //! nothing from chain, so the `idl_tests!` pairs and `preset_idls_roundtrip`
-//! are plain tests that run on every `cargo test`. Only `surfpool_lifecycle`
-//! and the manual `surfpool_idl_from_env` start a `surfpool` mainnet fork
-//! (they need the `surfpool` binary on `$PATH`) and are `#[ignore]`:
+//! are plain tests that run on every `cargo test`. Only `surfpool_lifecycle`,
+//! `surfpool_program_executable` (which reads a program account to prove the
+//! fork serves mainnet state) and the manual `surfpool_idl_from_env` start a
+//! `surfpool` mainnet fork (they need the `surfpool` binary on `$PATH`) and are
+//! `#[ignore]`:
 //!
 //! ```bash
 //! HELIUS_API_KEY=<key> cargo test \
@@ -61,6 +63,37 @@ async fn surfpool_lifecycle() {
     assert!(
         !version.solana_core.is_empty(),
         "solana_core version string must not be empty"
+    );
+}
+
+/// Jupiter Aggregator V6, a long-lived upgradeable program on mainnet.
+const JUPITER_AGG_V6_PROGRAM_ID: &str = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+/// Owner of every upgradeable program account, [`JUPITER_AGG_V6_PROGRAM_ID`] included.
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID: &str = "BPFLoaderUpgradeab1e11111111111111111111111";
+
+/// Asserts the fork serves real mainnet state: a dead fork or a bad datasource
+/// fails here instead of passing because the RPC answered `getVersion`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn surfpool_program_executable() {
+    let manager = SurfpoolManager::start(SurfpoolConfig::default())
+        .await
+        .expect("surfpool should start");
+
+    let program_id = JUPITER_AGG_V6_PROGRAM_ID
+        .parse()
+        .expect("hardcoded pubkey literal should parse");
+    let account = manager
+        .get_account(&program_id)
+        .await
+        .expect("get_account should succeed")
+        .expect("Jupiter Aggregator V6 should exist on the mainnet fork");
+
+    assert!(account.executable, "program account must be executable");
+    assert_eq!(
+        account.owner.to_string(),
+        BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+        "program account should be owned by the BPF Loader Upgradeable program"
     );
 }
 
