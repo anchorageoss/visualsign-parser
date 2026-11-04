@@ -1,0 +1,34 @@
+[package]
+name = "visualsign-ethereum-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+hex = "=0.4.3"
+libfuzzer-sys = "=0.4.12"
+serde_json = "=1.0.148"
+visualsign = { path = "../../../visualsign" }
+
+[dependencies.visualsign-ethereum]
+path = ".."
+default-features = false
+
+[[bin]]
+name = "fuzz_calldata"
+path = "fuzz_targets/fuzz_calldata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_transaction_string"
+path = "fuzz_targets/fuzz_transaction_string.rs"
+test = false
+doc = false
+bench = false
