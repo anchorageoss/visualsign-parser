@@ -54,8 +54,10 @@ jobs:
           fi
           jq -e --arg l "$LANE_LABEL" 'index($l)' <<<"$LABELS" >/dev/null && decide true "PR has $LANE_LABEL"
           # Capture before matching: piping into `grep -q` would SIGPIPE `gh`
-          # and, under pipefail, read as "no match". Fail toward running.
-          files="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')" \
+          # and, under pipefail, read as "no match". Fail toward running. A
+          # rename lists its source as previous_filename: moving a watched file
+          # out of a watched path must still run the lane.
+          files="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)')" \
             || decide true "could not list changed files"
           grep -qE "$LANE_PATHS" <<<"$files" && decide true "PR touches the Bitcoin crate or this lane"
           decide false "no Bitcoin changes and no $LANE_LABEL label"
