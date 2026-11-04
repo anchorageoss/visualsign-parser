@@ -11,7 +11,7 @@ base64 = { workspace = true }
 
 bcs = "0.1.6"
 borsh = { version = "1.5.5", features = ["derive"] }
-bech32 = "0.9.1"
+bech32 = "0.11.1"
 hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
