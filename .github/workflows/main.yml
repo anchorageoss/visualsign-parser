@@ -57,11 +57,9 @@ jobs:
             git --no-pager diff
             exit 1
           fi
-      # `make lint` includes `lint-shell`; force its pinned shellcheck image
-      # rather than whatever shellcheck the runner image happens to ship.
+      # `make lint` includes `lint-shell`, which runs its digest-pinned
+      # shellcheck image rather than whatever the runner image ships.
       - name: Run linters
-        env:
-          SHELLCHECK_IN_DOCKER: "1"
         run: make -C src lint
       # The Rust cache above doesn't cover ~/.cargo/bin, so cache the pinned
       # binary separately instead of rebuilding it on every run.

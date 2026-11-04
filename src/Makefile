@@ -100,14 +100,12 @@ fmt-check: check-preset-sources
 unused-deps:
 	cargo machete . ../tools/tvc-deploy
 
-# shellcheck, pinned by digest. `lint-shell` uses a `shellcheck` already on
-# PATH when there is one, and otherwise runs this image, so nothing needs
-# installing on the host. SHELLCHECK_IN_DOCKER=1 forces the pinned image (CI
-# sets it so the gate does not drift with the runner's shellcheck version);
-# SHELLCHECK=<cmd> overrides both.
-SHELLCHECK_IMAGE := koalaman/shellcheck:v0.10.0@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb
-SHELLCHECK_DOCKER := docker run --rm --network none -v "$(ROOT)":/mnt:ro -w /mnt $(SHELLCHECK_IMAGE)
-SHELLCHECK ?= $(if $(filter 1,$(SHELLCHECK_IN_DOCKER)),$(SHELLCHECK_DOCKER),$(if $(shell command -v shellcheck 2>/dev/null),shellcheck,$(SHELLCHECK_DOCKER)))
+# shellcheck, pinned by digest. `lint-shell` always runs this image, locally
+# and in CI, so both apply the same rule set and nothing is installed on the
+# host. A `shellcheck` on PATH is never picked up implicitly: it may be a
+# different release. SHELLCHECK=shellcheck opts into it explicitly.
+SHELLCHECK_IMAGE := koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+SHELLCHECK ?= docker run --rm --network none -v "$(ROOT)":/mnt:ro -w /mnt $(SHELLCHECK_IMAGE)
 
 .PHONY: lint-shell
 # Every tracked `*.sh`, plus tracked files whose first line is an sh/bash/dash/ksh
