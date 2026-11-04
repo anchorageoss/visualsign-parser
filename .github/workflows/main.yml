@@ -57,6 +57,8 @@ jobs:
             git --no-pager diff
             exit 1
           fi
+      # `make lint` includes `lint-shell`, which runs its digest-pinned
+      # shellcheck image rather than whatever the runner image ships.
       - name: Run linters
         run: make -C src lint
       # The Rust cache above doesn't cover ~/.cargo/bin, so cache the pinned
