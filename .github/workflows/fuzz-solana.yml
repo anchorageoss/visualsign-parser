@@ -26,7 +26,8 @@ jobs:
         with:
           toolchain: ${{ steps.nightly.outputs.version }}
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # An exact version; keep in step with CARGO_FUZZ_VERSION in fuzz-nightly.yml.
+        run: cargo install cargo-fuzz --locked --version =0.13.1
       - name: Cache Rust dependencies
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:

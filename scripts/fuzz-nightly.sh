@@ -36,13 +36,14 @@ validate() {
 }
 
 bump() {
-    local cur candidate back tried=0
+    local cur candidate back newer=0 tried=0
     cur=$(current)
     # Newest first; the pin moves only to a nightly that passed validate, so a rerun
     # never finds an unvalidated pin already in place.
     for back in 0 1 2 3 4 5 6; do
         candidate="nightly-$(date -u -d "$back days ago" +%F)"
         [[ $candidate > $cur ]] || break
+        newer=$((newer + 1))
         rustup toolchain install "$candidate" --profile minimal >/dev/null 2>&1 || continue
         tried=$((tried + 1))
         if validate "$candidate"; then
@@ -56,11 +57,18 @@ bump() {
         echo "error: no nightly newer than $cur built and fuzzed cleanly" >&2
         return 1
     fi
+    # Newer nightlies exist but none installed (network or dist outage): nothing was
+    # checked, so the job must not go green.
+    if ((newer > 0)); then
+        echo "error: none of the $newer nightlies newer than $cur could be installed" >&2
+        return 1
+    fi
     echo "already on $cur"
 }
 
 case "${1:-}" in
     check-needed) check_needed ;;
     bump) bump ;;
-    *) echo "usage: $0 check-needed|bump" >&2; exit 2 ;;
+    current) current ;;
+    *) echo "usage: $0 check-needed|bump|current" >&2; exit 2 ;;
 esac

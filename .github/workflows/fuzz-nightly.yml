@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # An exact version, as docs/contributor-guides/best-practices.mdx requires; keep in step with fuzz-solana.yml.
+  CARGO_FUZZ_VERSION: "0.13.1"
+
 jobs:
   nightly-still-needed:
     runs-on: ubuntu-latest
@@ -22,10 +26,32 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup toolchain install stable --profile minimal
-      - run: cargo install cargo-fuzz --locked
+      - run: cargo install cargo-fuzz --locked --version "=$CARGO_FUZZ_VERSION"
       - run: scripts/fuzz-nightly.sh check-needed
 
-  bump-nightly:
+  # Builds and fuzzes candidate nightlies, which runs every dependency's build.rs and proc macros. It holds
+  # no write token: it only reports the validated nightly for open-bump-pr to apply.
+  validate-nightly:
+    runs-on: ubuntu-latest
+    outputs:
+      nightly: ${{ steps.pin.outputs.nightly }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: cargo install cargo-fuzz --locked --version "=$CARGO_FUZZ_VERSION"
+      - run: scripts/fuzz-nightly.sh bump
+      - name: Report the new pin
+        id: pin
+        run: |
+          git diff --quiet && exit 0
+          echo "nightly=$(scripts/fuzz-nightly.sh current)" >> "$GITHUB_OUTPUT"
+
+  # Holds the write token and runs no repository code: it re-applies validate-nightly's pin with sed,
+  # then commits and pushes.
+  open-bump-pr:
+    needs: validate-nightly
+    if: needs.validate-nightly.outputs.nightly != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -33,22 +59,29 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          # The job pushes the bump branch with this token.
+          # This job pushes the bump branch with this token.
           persist-credentials: true
-      - run: cargo install cargo-fuzz --locked
-      - run: scripts/fuzz-nightly.sh bump
       - name: Open or update the bump PR
         env:
           GH_TOKEN: ${{ github.token }}
+          NEW: ${{ needs.validate-nightly.outputs.nightly }}
         run: |
-          git diff --quiet && exit 0
-          new=$(sed -n 's/^channel = "\(nightly-[0-9-]*\)"/\1/p' src/chain_parsers/visualsign-solana/fuzz/rust-toolchain.toml)
+          set -euo pipefail
+          pin=src/chain_parsers/visualsign-solana/fuzz/rust-toolchain.toml
+          [[ "$NEW" =~ ^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "error: unexpected nightly '$NEW'" >&2; exit 1; }
+          sed -i "s/^channel = \"nightly-[0-9-]*\"/channel = \"$NEW\"/" "$pin"
+          git diff --quiet && { echo "pin already $NEW"; exit 0; }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c bot/fuzz-nightly-bump
-          git commit -am "ci(fuzz): bump the fuzz nightly to $new"
+          git commit -am "ci(fuzz): bump the fuzz nightly to $NEW"
           git push --force origin bot/fuzz-nightly-bump
-          if [ -z "$(gh pr list --head bot/fuzz-nightly-bump --json number --jq '.[0].number')" ]; then
-            gh pr create --base main --head bot/fuzz-nightly-bump --title "ci(fuzz): bump the fuzz nightly to $new" \
-              --body "Weekly bump. \`scripts/fuzz-nightly.sh bump\` built both fuzz targets and fuzzed each for 20s on $new. Run \`Fuzz Testing: Solana\` on this PR before merging."
+          title="ci(fuzz): bump the fuzz nightly to $NEW"
+          body="Weekly bump. \`scripts/fuzz-nightly.sh bump\` built both fuzz targets and fuzzed each for 20s on $NEW. Run \`Fuzz Testing: Solana\` on this PR before merging."
+          existing=$(gh pr list --head bot/fuzz-nightly-bump --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            gh pr create --base main --head bot/fuzz-nightly-bump --title "$title" --body "$body"
+          else
+            # The force-push moved the open PR to a newer nightly; keep its title and body in step.
+            gh pr edit "$existing" --title "$title" --body "$body"
           fi
