@@ -2,7 +2,8 @@ name: "Bitcoin PSBT: regtest"
 
 # Validates the Bitcoin PSBT parser against a live Bitcoin Core node, like the
 # Solana surfpool lane does against a mainnet fork. Runs automatically on PRs
-# that touch the Bitcoin crate or this lane's own files, on any PR carrying the
+# that touch the Bitcoin crate, the core `visualsign` crate it renders through,
+# or this lane's own files, on any PR carrying the
 # `test:bitcoin-regtest` label, or by hand. The offline half (BIP vectors and
 # replayed mainnet transactions) runs in the normal `make test`.
 #
@@ -42,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           LANE_LABEL=test:bitcoin-regtest
-          LANE_PATHS='^(src/chain_parsers/visualsign-bitcoin/|\.github/workflows/bitcoin-regtest\.yml$|\.github/bitcoind\.env$|scripts/install-bitcoind\.sh$)'
+          LANE_PATHS='^(src/chain_parsers/visualsign-bitcoin/|src/visualsign/|\.github/workflows/bitcoin-regtest\.yml$|\.github/bitcoind\.env$|scripts/install-bitcoind\.sh$)'
           decide() { echo "run=$1" >> "$GITHUB_OUTPUT"; echo "run=$1: $2"; exit 0; }
 
           [[ "$EVENT" == workflow_dispatch ]] && decide true "manual dispatch"
@@ -62,6 +63,12 @@ jobs:
   regtest:
     needs: gate
     if: needs.gate.outputs.run == 'true'
+    # On the job, not the workflow: a run whose gate decides false (say, an
+    # unrelated label) must not cancel a regtest run already in progress. A
+    # new push that does run the lane supersedes the older one.
+    concurrency:
+      group: bitcoin-regtest-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest-4-cores
     timeout-minutes: 45
     steps:
