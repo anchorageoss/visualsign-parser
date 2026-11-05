@@ -14,6 +14,13 @@ pub mod intermediate;
 mod presets;
 pub mod utils;
 
+/// The preset IDL JSON compiled into this crate, the same set the parse path
+/// loads. Exposed for the `idl_cache` bench, not as a stable API.
+#[doc(hidden)]
+pub fn compiled_in_preset_idl_jsons() -> impl Iterator<Item = &'static str> {
+    idl::builtin_programs::preset_idl_jsons()
+}
+
 pub use core::*;
 pub use utils::*;
 
