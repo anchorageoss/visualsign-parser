@@ -1,0 +1,46 @@
+{
+  "description": "Token 2022 TransferChecked (mainnet, legacy transaction, all accounts static)",
+  "source": "https://solscan.io/tx/16asyNq6KhsbG4ER6XuYLX8AeXppH4vGBeQp3komNvhySHSMb635Y2fqCuUfNucxqSRhnLfnwpp9oP4yzR6oywh",
+  "signature": "16asyNq6KhsbG4ER6XuYLX8AeXppH4vGBeQp3komNvhySHSMb635Y2fqCuUfNucxqSRhnLfnwpp9oP4yzR6oywh",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "Fetched keylessly with getTransaction from api.mainnet-beta.solana.com (slot 461646007). Amount: 20 (20000000 raw units, 6 decimals). full_transaction_base64 is the whole signed transaction as returned by the RPC.",
+  "instruction_index": 3,
+  "instruction_data": "g75WwQvhbPQ37",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "Ffeie177PRngys3SwNH44AYdT9yExm63GAmTXHdmL1k1",
+      "signer": false,
+      "writable": true,
+      "description": "Source token account"
+    },
+    {
+      "pubkey": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+      "signer": false,
+      "writable": false,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "GEFkvD3qyn2pBmThZLBfLE2yqFvxd2wymTReACxwVWku",
+      "signer": false,
+      "writable": true,
+      "description": "Destination token account"
+    },
+    {
+      "pubkey": "fr6yQkDmWy6R6pecbUsxXaw6EvRJznZ2HsK5frQgud8",
+      "signer": true,
+      "writable": true,
+      "description": "Authority (owner)"
+    }
+  ],
+  "expected_fields": {
+    "amount": "20",
+    "raw_amount": "20000000",
+    "decimals": "6",
+    "source": "Ffeie177PRngys3SwNH44AYdT9yExm63GAmTXHdmL1k1",
+    "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+    "destination": "GEFkvD3qyn2pBmThZLBfLE2yqFvxd2wymTReACxwVWku",
+    "owner/delegate": "fr6yQkDmWy6R6pecbUsxXaw6EvRJznZ2HsK5frQgud8"
+  },
+  "full_transaction_base64": "AQAVQTfVSDFy6Ii5VsKl3hJRaouSXWKfWmbOa/Ibs8FiEm2wTqsA7k+Dv0r6hZLnEc7lLFSWm0X9TG4ES+gBfwQBAAQHCfOXdse5myFvAyFj7MwKCAVhX+oOCqiG2K7/VlE8ZSfZ6lXhqpWjPj5qjX0inAfAUPpr2cbFl/bKcMpJWGFw9uJEill/Gf/XGqP/bmltqY3gS05XJ8Wdb2hg8bXSfkpmAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAFSlNamSkhBk0k6HFg2jh8fDW13bySu4HkH6hAQQVEjQbd9uHudY/eGEJdvORszdq2GvxNg7kNJ/69+SjYoYv8F5JIO2yKKoe3Rx2BT5WR+TlchAqc49n01bp9OkuKdJ7yzi0GMLnrgE+RVFPPpkiaACKWgppirEnD+FNZfddghQQDAAUCiIQCAAMACQNkAAAAAAAAAAQBACRlMzU3N2Y1ZS1lMWY0LTQwYjgtOTIwYy02YzRiZTIwZGE1ZWEFBAEGAgAKDAAtMQEAAAAABg=="
+}

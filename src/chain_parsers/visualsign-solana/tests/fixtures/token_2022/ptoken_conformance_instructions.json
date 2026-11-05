@@ -1,0 +1,3777 @@
+{
+ "description": "Instruction data and account metas from the SPL Token (p-token) conformance fuzz fixtures. Token-2022 shares the base instruction set and discriminators 0-24; the fixtures were executed against SPL Token, so spl_token_program_result is SPL Token's result, not Token-2022's.",
+ "source": "https://github.com/solana-program/token/tree/57bd873fdec3f6c7585068b190f6122e998cd4df/pinocchio/program/fuzz/json",
+ "license": "Apache-2.0 (solana-program/token)",
+ "extraction": "data = input.data; accounts = input.instr_accounts (index into the fixture's account list, signer and writable flags); duplicates of (data, accounts) dropped",
+ "cases": [
+  {
+   "fixture": "instr-13kJHreWFcSxEAqD4Zg2RBdANXAYVeaXqe9dggQ5EWn6",
+   "data": "036400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-263NMCsSrSCmLNkgU311rFLENm5AXrhunqDDHwoqmLNu",
+   "data": "01",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2AL533yf1JFbA2N1w5gKJurhBq3WwCg3pr3PDar8StAf",
+   "data": "046400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2BkE7XPnNvUyoSU6YRcCFmAnoGQMCwo5FEuEFxPB4U37",
+   "data": "14020000003e36f0f9ee9e8294916245e1b94c9efc5e7648c71fb67dda1a37a636b6010000003e36f0f9ee9e8294916245e1b94c9efc5e7648c71fb67dda1a37a636b6",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2G9grVgR7jeZ6PAzqKN7VXRz7BhWKZFAwdWktwtWTS2M",
+   "data": "07e803000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2HkLPBYsmmxsN4Fi7CKDcF53C8Nx6GAoyeMwN8Nv7rB5",
+   "data": "072a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2K9NNkFRgtYL9q47zZG3X3FDSAV8EimRvBpi39LVp1H2",
+   "data": "0a",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2L8iNar3M8nsiE99qXUMyFR3H6rdcSSW2L5y4azMDw6c",
+   "data": "18",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 8589934592
+  },
+  {
+   "fixture": "instr-2LgC2LHRHzwbMA18XvDViu9EEtPxz4oCGahRtX1ubCDa",
+   "data": "05",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2UpYJvEL8SPyqGik2fwjZt5cF2MYVPcCsAaYXFjwzDZN",
+   "data": "082a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2YFxSjzuStdxdt4QEN6qF5sEcfYtqYtMV3o5vtv6stSN",
+   "data": "05",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 17
+  },
+  {
+   "fixture": "instr-2ZUAApdL7hkZMZjJ4nyFCKTzw76PE2hgQ1gKWZMFcerc",
+   "data": "000200000081d8bceb26fe07140c4a483027e2b98b9e2bcb82ee78a68b6cd8a7092500",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2dj5rUrMWrNJwhU56PF7bHcGPJdpVHsyrG8Sw6S7u7y4",
+   "data": "0cf40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2foKicJJvbaJQHAL7Djbb2G11QB43qMMZw5Jx4dQLA7N",
+   "data": "0b",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2gf76g6LhQjk3PpD3s8LdTBpmzfP2UL9pLJUuwmUx2Mu",
+   "data": "09",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2hfteNUxQrd9UCD4T2uici9TqTW5RKeyBPUEWh7PCUgE",
+   "data": "082a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 4
+  },
+  {
+   "fixture": "instr-2rQbzwxWMEEwB41Rz5WNNX968vwZ4nrS3LJnJqAyNvC6",
+   "data": "0200000000ca9a3b00000000",
+   "accounts": [
+    {
+     "index": 2,
+     "signer": true,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2rjmhuNU47xB6EijfieEaZhtk9ZufssyEgPVrqKZV3mS",
+   "data": "03f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-2ucdSS8yhkwMKCgbYDgZSpNUaTnCJqnNeNTsLPAkYWiT",
+   "data": "11",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 42949672960
+  },
+  {
+   "fixture": "instr-2wX6QWG8vXecmDACYicVT5rgiYt6tF32yu6thTeHCq3A",
+   "data": "0009000000056f0002172b8dff4f5a32740e271904d7e188fa8e6ced51ce1506139f00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-33vvDX5CiPHV2xSrczYqpJvdKNojGVzC5QhwcJuyX7K4",
+   "data": "09",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-39qxjNghJy8q4QmH4EYy3VEk55BobeNeQFYMQRZu7if4",
+   "data": "14020000003e36f0f9ee9e8294916245e1b94c9efc5e7648c71fb67dda1a37a636b600",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 4294967296
+  },
+  {
+   "fixture": "instr-3RyrUwvApsVCVsepZAN7YDmXGuNQ5oMqAa7bfVXoSwcH",
+   "data": "072a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 5
+  },
+  {
+   "fixture": "instr-3SZe1LCtNRQxZxwBeYRNX8X52dRivrUU42jWA1UCizy2",
+   "data": "0002000000385f8ce9b17884f508bd4ad3b1c325a7579cea7ad01bdcd16500b2d48301000000385f8ce9b17884f508bd4ad3b1c325a7579cea7ad01bdcd16500b2d483",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-3bXrhTeiybe6RB4sRiAAMS4efv5QXZgESM8Eeu5Ar7JW",
+   "data": "09",
+   "accounts": [
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-3dJoXCQgNrqazP7nNkpK7qUfGZWKwVdpSwoc8DhEdztf",
+   "data": "0ce80300000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-3kCCcCscykG1QUcdGgHWfgBEDf2dkJz4z4dL7ZAXzYPQ",
+   "data": "0603010000009b0005b341a30ed68729d2634f0dc1c0acf53856f31fbac4a8a9085c8c",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-3tgsH2DM1XBX9JGTKe36DzDhEHR9iTCWwQjTLJFyBbVV",
+   "data": "0d640000000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 3
+  },
+  {
+   "fixture": "instr-3xJPDhEqfvAh884b6HqCC8FLShDFkavhwSefDC7Vhh85",
+   "data": "18302e3230",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-3yQCgSSvHKNUqncNNuyJjCFbfCo4WZfKZYXQuMADXNnj",
+   "data": "00020000002ed83c04d2dce31f2be594bcef2d9e3a81a6cc7027c8bd02cf02b80b04010000002c0f050eba3aeb0d06d2f993848f474eb50f3106fd4675a1363a3b1db4",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-3yX8Mvx97mPRwZBY1uNzmdmwUfEudTyUpgLiv6hmVUDU",
+   "data": "070100000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 14
+  },
+  {
+   "fixture": "instr-429QTmDtGNJqQ6U1a53eeeiL8BkdCS152sAa5h98o1SY",
+   "data": "0002000000232bffd8b13a54bc09497c625cfa7784a42b5eb7a210683c4a8eecc87500",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-451PKRt3q6UZDbAvWn3oVBUKLz5xoXQHnfS8H4yTcvfe",
+   "data": "0cf40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 3,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-47FKWJpGKbtsnXMtmQqWnhXuztXLfxzi7f6EmdWmL6YN",
+   "data": "060101000000753196982ab0b14e50eebb18e12708e1ea779ea79f9c9364096ab45181",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 16
+  },
+  {
+   "fixture": "instr-4Eb71yoWwPZazBTUMgh8CJoj71HWCTmZ7vT7FV1ShQBF",
+   "data": "0ff40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4FMnn838NTWQ6D3faBKJZSVRH4zhoxSwdBvrdcXK2ndH",
+   "data": "120000000000000000000000000000000000000000000000000000000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4McWdph4hvHhPKXLHVkZBjBo4rTkfV9qo8zY8HdVBdbA",
+   "data": "0df40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4SJ4gXErnWHp6DbvsKdz48JUSoP1bXhdzD3nAAbeAkKN",
+   "data": "03f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4WYd5Mcu4i79mx91f2FFeD2256XAp96CMisKytrzRNZg",
+   "data": "04f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4X8LSneE6ry5k2EmqwBHiBkEP7yvaSuRQPuEVgrWeaDd",
+   "data": "00020000002a34d8fba29595346233a0c2e9556e6c77bd7728b1d5708081c3de919900",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4XfJ8YcbFLLgQhyEYdN4sy3WVCd1JPDW2NK7YQeq7JRJ",
+   "data": "0002000000600b71b663abbe6f284231a6dc4c1c97453ef6eadd4ed89c365a7ea08d00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4eRsA6hu9DehVBspoioT9kkg2WmJARy5UaqjXrZ3oppt",
+   "data": "07e803000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4jtT6jTKhkJC6QUfuPzTVtZo8ZhNjRThipF9RCEReNMa",
+   "data": "176e00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 2
+  },
+  {
+   "fixture": "instr-4pp5ddbkcWCo2KLnuggsesCFGNQtnEyGXQdDnBWMHREz",
+   "data": "0002000000336f2704b4066b170efc873fe0e5ba101cb4f8a0941682c37b8a8c3aa500",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4sMwWA23gQCSJ5mpuR7RrRVYYNbpqRuRGUM8gfDiKEV1",
+   "data": "0002000000695576fc40b49625a6bee95053f70212f5f420327d4cea9934d7378c8700",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-4yCQQGJ58NLPxWjMn5ydkhE14iJVP1c4LguygGJe4jwy",
+   "data": "182e3230",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-57by7Uk7XCQhskLi8eSKrY89Z2w9V4z2TsmeiKZ3ef9a",
+   "data": "0600010000007c9a596049911dbad45843eea913913e7adbcd82f99b27da19b0bcb9ef",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5E6kiBmEJ7PvXuBvLHsuC5jj1xY8AaqREzFRquSxvbKm",
+   "data": "0cf40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5F9oM9bqaPGrUbYghvQjsbHEbsXuBehjs6T9XRRNYCSB",
+   "data": "0a",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5KpfYgYmwP2fY9j95sH8SzJsVfpSg7jqEex2jb29pTNT",
+   "data": "060201000000581bc48ef449a4f6bd75efe65ee8af76b91392adfa2e656aa0e7ca324e",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5MAyU2eRmbge7XH7FPuGwGyw2qWDzn8KMmEf5YLVz9SL",
+   "data": "030100000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 4
+  },
+  {
+   "fixture": "instr-5Py9nUXGujKrgCGESByp4biaTqNL5yjTZYXvBHDmxWG9",
+   "data": "1834322e",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5RRhS6TdLwET9tYymZX3SzbjuLHVA4MgeSstsovp7cum",
+   "data": "076400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5afvGdixow5ihQ5hCdUyxFdyDV6YRRrRjj1SBKToXfpp",
+   "data": "0df40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5b3rYCvpnVKADuUHv6ibBdXhLESBtJM5F154tbqVnfF5",
+   "data": "0c01000000000000000a",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 18
+  },
+  {
+   "fixture": "instr-5p2gxQXxPjJnZRtd2iaw8jYYRfmDJvDQFqL99iADpz8H",
+   "data": "18302e32303030",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-5x8CdDA3mSALzvEGyDUcmzq4NBrZUof7eYhA9RQRv99D",
+   "data": "00020000000ea9d7503d16094b3609c00d0961882734a89813c9e66f9581b72cdf0200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-64356W77iTf5ouk3zZjffmDBtyaEiuXSs2TEuBntqMSJ",
+   "data": "18302e74",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 8589934592
+  },
+  {
+   "fixture": "instr-64rRUTLw7VPs3YcfMhEXo7A7ibZANZzxrf4vfrSwnoaL",
+   "data": "060001000000581bc48ef449a4f6bd75efe65ee8af76b91392adfa2e656aa0e7ca324e",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-65tVX2M88Ar7g6kMP6p7t8UbjH7diL6YLHnDxHhsriu3",
+   "data": "020b",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-6LjXz4J5yrRpWa24RjSui99dek1qDL1SGysKq5rS8Yt4",
+   "data": "000200000059e8ac4327afb04a7ec206da80d9aa59f454c8b8be66265652a81e41d000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-6Qj3HJdJigcxjjFWi2Fv2TLrPgQEyCkTTmfkArNN43zW",
+   "data": "0f150000000000000003",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 18
+  },
+  {
+   "fixture": "instr-6VGqe1jVDwRaCpEzp52MeavwvdAka3j3SmL4yqhtp1bb",
+   "data": "0002000000a00b1f66d912779bfa6b00629e0f1e72a389d53f855057e604c7aeefb200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-6WR4eGPDGE8vAe6KWeRE4woyw3oemJpx9VfhfmmCoeRq",
+   "data": "060000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-6qX2hCZpHNFJs3XuQj9Uh9FKeqHPktZ9mmm9gWocU18m",
+   "data": "045400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-6uNcZ8VktdiQgDcSmwMCQTjdPKCSxwGzdRY1VWeKBRAa",
+   "data": "0201",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-7PTiRUsDuari8gL5iGWjQ7bVNzo5AncUe4TKvoFchkCF",
+   "data": "120000003633bf9e27e05c0a1b3cb3ab592a89db17b804ff0473890091067b9f85",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-7guhAQ2TpgsES5DqBDZn9wGetp3zp4abq47EpC1s1WMK",
+   "data": "070080c6a47e8d0300",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-7iACKwQjeeJfsZ4DwCGUe5uXHinDttVtjGDEUxjZwUZc",
+   "data": "01",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-7kRKnUygEohj4hmfszBzP7x8L8F87yCtr2Ny6LYBbqjW",
+   "data": "086400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 17
+  },
+  {
+   "fixture": "instr-7mRsnLUx98tj7YXc6VSwqswZoAySpHY4PHmPrgs4tdTm",
+   "data": "03e803000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-7n19eSVLzupdoGRF2ajoepLRJ2zQ2pXLNcuiHERMD96Q",
+   "data": "00020000004b5a6baa34d8f2dd2cd180b60a8ad34d29a1997563d8e52eaed657959200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-7rS6a4XmMstGpFfQCZJaSQxzYPfZHYS2dvvKrFAvuXLT",
+   "data": "0002000000385f8ce9b17884f508bd4ad3b1c325a7579cea7ad01bdcd16500b2d48300",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 6
+  },
+  {
+   "fixture": "instr-7v489qxmntwx4ZkrenmcWXyNsjiE5TVvUb6rQFz6Mutb",
+   "data": "03e803000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-7xcZpgN7wQgvzAv58zemzWJhH6x48DvZcfYgdwP1u4ge",
+   "data": "12003390728d34116079bdc911bfff00dbd44d2ecdccf79ca6e10038e100000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8MhMHZbWWs6uAyGjauGxVAbdSRKFyNpG2ENE6K2bKXX8",
+   "data": "060301000000620403cc66854240b3e895536f73d91b74e28c1adcd540c89775a2a3cc",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8VG2Xo417j3ZtGzrwQYbKqqzSqspARZpBojGBomQ37pd",
+   "data": "03e903000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-8ZX1fCGtDLnYcCdAZTVyiYzd2kMVQ1HahJZkkDJ4TXK",
+   "data": "072a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8aNhqMvoj5mn1doZZGsJaLjbnPu8iSCnE1eDXdTbQC5u",
+   "data": "08f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8bnP7idbocwZDvYxbDwTrTEX5wRbT8hqRMht3Xy2NeW1",
+   "data": "16",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8dQB59WL6mE6y4fPYwBwsAJXyAkrvLQw4Zo2y6GHn3wQ",
+   "data": "0e2a0000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8dm1cDT635GifyGfeshUW1UuvMReoeN5tbjxJ2hBceaA",
+   "data": "00020000002d327ef3373d782f3f49aa0144523d26b0750450d7108fc6275446b39200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-8oXQoRDS5i84JJz9cqAe2KmEXsNdfGQDcsvhFr8qd4Gx",
+   "data": "0c01000000000000000a",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 18
+  },
+  {
+   "fixture": "instr-91faPhHWKc8Jnmcr9x9fqoAedKDGQBfkEUTR6AKWi2QP",
+   "data": "1830",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-96YJfP33hCJXhP5mBnME6uX5QDBA4tgHpbotTWMMBkZj",
+   "data": "0602010000007c9a596049911dbad45843eea913913e7adbcd82f99b27da19b0bcb9ef",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-98vDssYjacaiyLtUby8Yotvh5Wx4wjYche7ChbPmkAWW",
+   "data": "060200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 12
+  },
+  {
+   "fixture": "instr-9Bbt6h6UQrjRYYPmNnwe8vyo6hBYrsYaWD8wDANSAFmK",
+   "data": "06020100000074b935e913307f03c0fcb6e2656907830e888b5922ff26b170ed580a43",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 4
+  },
+  {
+   "fixture": "instr-9DVbGMZXSbzZkzkHWmjDBuikupxC9a7KTdLCwqtKMkVa",
+   "data": "000200000004245c80604e6b71818637a409e660630704568cb6de6d5ee2e00f326200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-9My4ee5RVsFZds9LWEbQmmCQhM2a5D9RK2nBtqMrrauC",
+   "data": "06020100000096c02444829047cb93921b2249dfb598c37b6b3e5beb502a0613211caf",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 17
+  },
+  {
+   "fixture": "instr-9NSEebYACnphDEqZnMfQxEspFqXTMpz5cr9HTmYYZ5Gc",
+   "data": "03f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-9PgY6SZdWFPrc8Pdc3Uy1cgz8BUuk7sP7rvhdPFfJmFK",
+   "data": "183432",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-9hJwSA75DpQZWSFhnHPEwPxjD9UpnF2hQwTyDeEsFWku",
+   "data": "03f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-9sALopXLDbx2JiCMKDfp7hLuckG6DHhoggZk1nxK8hkW",
+   "data": "0cf40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-9tiFaRvT1MgEFsU8tv8SPiZch5U4ucJk7HHLGXivLi7K",
+   "data": "00020000006f066fc38bc50cd5c061851d1570dc740932e236902c7d11029fa3e31900",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-9yKiot4cZDXsGF6h6vmYvv477pMPzUtKKU93ofs2bbPc",
+   "data": "060001000000753196982ab0b14e50eebb18e12708e1ea779ea79f9c9364096ab45181",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 5
+  },
+  {
+   "fixture": "instr-9zF9YbCXFCARPSae2Y3AgssdyUeBw1rCcvZ9gbpbwrZN",
+   "data": "0000000000ca9a3b00000000a50000000000000006ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9",
+   "accounts": [
+    {
+     "index": 2,
+     "signer": true,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-A142A3vMBiWin8hZtj6LcWDxoWV2FFcprSNNhnD63ATp",
+   "data": "0c010000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 3
+  },
+  {
+   "fixture": "instr-AKmaJ7rbuVucwzaYxCTbdmXfXWZ13zY2ejDfGhuGEaGi",
+   "data": "060201000000753196982ab0b14e50eebb18e12708e1ea779ea79f9c9364096ab45181",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-ALTU3eLCVz3LnLnQtzaioASGFMBEr1Bs4uH2K2XshGD4",
+   "data": "00020000001fc5ef2c46597402f4e3371bca0abd0f4008e0492d1cd6b0d086f0916200",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-AbeKKNsShAykuRgJ1cA6eazc3F1kGhJ59ToXWq5qiZkE",
+   "data": "0800e1f50500000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-AfWEM9NztBNP1Yd8mzvDKGHg9fj7oVBnEFVCWfEW8aS7",
+   "data": "033200000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-Ah14kNcMr11RoKBd3QnFwzHt3aBtGySMjLmb5QekN4X5",
+   "data": "080080c6a47e8d0300",
+   "accounts": [
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-AjYgKiDsbQZTsjuSCNTMXqKhtdmKFC65ehsD51SnoX8r",
+   "data": "060001000000753196982ab0b14e50eebb18e12708e1ea779ea79f9c9364096ab45181",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-AkAqVyvjXsMZwhtXX69EjTGJ9V2eDFwDe6gwewg2UJAa",
+   "data": "085400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-AsKCUCvZgxjYpEoXXZahBvELzwy8p2Uboaf7SVAuY8oJ",
+   "data": "0a",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-B2Kx3Pahr9gjZaVJCHeHZci1shXUMapCuaCZ1Z8DQg6o",
+   "data": "09",
+   "accounts": [
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 3,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-B7MPRXeHjmm6FNkqmYbTUEboSA3y8YRpAo25KtZJ9uKK",
+   "data": "0ff40100000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BA4PijRBWNDCk9jXQQr9ttJ49BxDaJBSNQhXueVvwCTy",
+   "data": "18312e3130",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BEKZFFRAQ9vEnETFaJvfvWSbYPVSbP7SaH5e6PdpMd3W",
+   "data": "060301000000753196982ab0b14e50eebb18e12708e1ea779ea79f9c9364096ab45181",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BHwG34y3trQC2x99ckj4DkrcRngKpjykKbd8Z2FdVH3s",
+   "data": "120000001566d1ea240feccbf08239742f46f4e10d1c785d8883345107f620060f",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BWcemG39MKiRrVYZp7kovQatqGoDiFNp1Vv3jw576qEc",
+   "data": "1301",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BXuY9bHpN8fL6ftW5GMKdq7MVpFZN1mofeF18ktwzVNN",
+   "data": "18302e3233",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-Bi2FZaYjF4AuRb5pPVcwWGmT147VJBSQVuS95zhqjES8",
+   "data": "0ce80300000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BkVHnnHs7YpcnjhePw3DtDVrGPSWpSGQyoAz8mdgRiyu",
+   "data": "081500000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BogmhncyEqXfnQ3fThZ7RiHys1WzfMtnsjyLubTtFQi",
+   "data": "080100000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 4
+  },
+  {
+   "fixture": "instr-BqMa28otpUAEAhoUz5W1ePZZpLGvewFhfQi1MqtLef3b",
+   "data": "0b",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 4
+  },
+  {
+   "fixture": "instr-BtU2G1gzkunPipxyT9mQvJWBA2B8wxEgPAdFyKQ5oeEt",
+   "data": "085500000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-BuBtArqFn1gPRCGfHMxB4k1v7cXSQYTYLuQCq3iA6MHN",
+   "data": "00020000001c5fce87c8af8b45d7c3f7ade49be2cfe640968a5342342f42469a11a300",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-BwYaxr8iWR2EKXfqxa2hJXBrQ9qPi4KqghHDHKAbvP6g",
+   "data": "15",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-Bz8k2rSD9XoZMgLbh3pvBvGo1GrBvEKfzaHnFhRWRgbc",
+   "data": "18312e31",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 2
+  },
+  {
+   "fixture": "instr-C3HjWofy6ygBQjAovP4hc37RJzg2eBA4Rxf4RHghZsci",
+   "data": "072a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-CFDCyTMGAmSrVVUzkbfdHeMG9N2wgvnUELd5XU5QntY6",
+   "data": "000200000007ea2fbd07ac6cf64f605c3e3780e4f7c0c605158f6527b0526f1653f600",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-CLzev2umDbgnehYu7KcqqKuTQakhg4hJrrSq1U43wQfq",
+   "data": "072a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-CRhZbBLdY7chQAkzjvUzLBZEvAw1Y6jA9uTE3MEgLk1e",
+   "data": "030080c6a47e8d0300",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-CWCXmUPe1gopEocGnqM3ymnFuvB7pXNv3LpaVrQfdPyJ",
+   "data": "000200000074b935e913307f03c0fcb6e2656907830e888b5922ff26b170ed580a430100000074b935e913307f03c0fcb6e2656907830e888b5922ff26b170ed580a43",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-CWUFj9RF5VBL37MS67TP2aN2FLYH49FEjLcyiGCiPY2R",
+   "data": "080000000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 30064771072
+  },
+  {
+   "fixture": "instr-CXPXLz64kz2e8esKD8ed4FDjNzme2zE7tvjwRQ2LANEL",
+   "data": "08f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-CZcnM4r67nFFued2n5KmujDQtL33goqMCPyPymcnaiyW",
+   "data": "0601010000007c9a596049911dbad45843eea913913e7adbcd82f99b27da19b0bcb9ef",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-CiezztAtxs8CgkibtSJzPmBMewKov54ZvnPhgbh9ntm2",
+   "data": "0ce90300000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-CkJFpa7C5mNAzy1Wkrsiai97Yf48Ns9reCCqkwndBiYJ",
+   "data": "03e803000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 3
+  },
+  {
+   "fixture": "instr-CmM8fRXYdtegGs8G5jhuJ7J31QusyhbXnpA4fUowc7eF",
+   "data": "046400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DGmSEpK2j82DTWzZH3VR5dSKCPTMfn3pSMH7L2wkweDD",
+   "data": "0c640000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DHFvnt2LSFu5vgd1Z1USL3WtXQomxUcxo52Qo3aBT8CS",
+   "data": "01",
+   "accounts": [
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 4,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DTzdffFk3kQB3gG8NjEMFPzmr862RNK4DSSi4y1Hat6s",
+   "data": "036500000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-DdRvpn7wsjtutT2uYM6rx53RVURrTuYQ6YJKq8znSyd6",
+   "data": "038403000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DfXDqbZYQgM9jthLuU5qMcLB75rzpXzJqGYDexSN1b93",
+   "data": "000200000074b935e913307f03c0fcb6e2656907830e888b5922ff26b170ed580a4300",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DidzkXxCxYRhW3mV3Mrmg6yn4TAUcy45KQd3cUu8EBQF",
+   "data": "0602010000006107c47c6bfdf529e6c5d89afe3ce3cd2f3995df8b22bba969b144093f",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DppXgekK4W9xG8mnX5zRAWJd2USioKLraqUNDDJTZqU7",
+   "data": "060100",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DuN5nXWB4qM7wz1ADHYgFbuSSuPFzyUizNAP4359yawt",
+   "data": "182e",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 8589934592
+  },
+  {
+   "fixture": "instr-DxnaCWdbnavPahNGyEpfh3Z5UKLCCotLokyY9eARqSVo",
+   "data": "00020000003633bf9e27e05c0a1b3cb3ab592a89db17b804ff0473890091067b9f8500",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-DzaUaH6w3tELX9i5Q2j2QszEuErvkMXy51zEdi7GuRFe",
+   "data": "171700000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-E4fYLp3fimKKnNrsW5CjNo5pVWf22DtwNvZ8DxVnwNbn",
+   "data": "030000000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 30064771072
+  },
+  {
+   "fixture": "instr-E987otR8iXbHwJHqczzz1Rr4ufDCoFreeBa8hpmug1zU",
+   "data": "00020000009292dd8f149873e6fc1f2337fbfcbe916d14148269ed8c25256a9d890800",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-EDWYrxVj4qvyb2PCEaF3i44Q8iXUbLwfQSpZVa5uBdND",
+   "data": "00020000003c349c055c618de1e42fd772cfe0e98e8e596cb514357572a77d34f45b00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-EX3DAHdjfVKcR5DmHr2ZJXawjiQkgcxU3EzGXdPSb9Dj",
+   "data": "0c010000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 3
+  },
+  {
+   "fixture": "instr-EYPwxsSMrBtZZ9Ntya4cmDYR4RBSBF21sZZpvsKm4LBg",
+   "data": "082a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-EZFsHHAzArVkg27G4LmK3C4tHqwYNfd71Xbee23NyKTZ",
+   "data": "05",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-FD9vTCkLFdDo7daeiwYFK9uUM6vLTkzFVtVm2jv1bP6h",
+   "data": "0c650000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-FSHcyaWhMcdXbg8Dazfy5Hi6gjRcij6jaZ9kQrh1B7a",
+   "data": "03e803000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-FW9ZxEzjtLvif5S9NCHQgx73kMqXTnM44rDdmy2vgj2D",
+   "data": "060201000000753196982ab0b14e50eebb18e12708e1ea779ea79f9c9364096ab45181",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-FjJqWTQnbkwc2nWwfp4yaYzhb8Lgzgt9veAUxHXqbYsr",
+   "data": "060001000000764cea612b382be94acf24694b1f225feccbec5761c67b521611716e0e",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 4
+  },
+  {
+   "fixture": "instr-FzaiRdnYAJom4m7gRy6Ytz4J5cE1X52oLb7fw9YuACzW",
+   "data": "04ffffffffffffffff",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-G19fDbn8GgKMs5YiqcoQ7Kdd8FZmzj1G75ZUuRy7EVjH",
+   "data": "0e2a0000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-G2RWkfv7dxDcGFLCJM2hgrdo54it9dAH7NXfqbNP8UKA",
+   "data": "060300",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GEJid1VRFGyxntMLuoNbeg46yA3eRZf5C7Th8ymnt9jt",
+   "data": "08f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GRVN487wi3ZcFv5eKQi4bY51mt8xXjKq6X85eVGbDc8g",
+   "data": "07ffffffffffffffff",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GSjZgtUSxGAiYUmGBdPjx42yKr1cP8w2DVEZJPH4sWjV",
+   "data": "00020000009440c1f29b038f9c561c97fdf36cb9040a40405e74eba81122c4478d9700",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GTgig4APtesFHDBpcssDhspJojpy17iNYTzMt3MAoFnr",
+   "data": "036500000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 1
+  },
+  {
+   "fixture": "instr-GXJMp7PWEGPapmEamboRHVF8RJ81b7L4UBq56JdtnbhG",
+   "data": "046400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 34359738368
+  },
+  {
+   "fixture": "instr-GZGCGL2vmFtYWCBHUUrfup9erBB1QGqBZXdLSY1DcAJc",
+   "data": "060201000000764cea612b382be94acf24694b1f225feccbec5761c67b521611716e0e",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GePcvVeXtjPZtKF9gXzJatZMRJ8XetymFduM5KMHsXRq",
+   "data": "170000000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GkWR1c9dqG9Av7po1QTX7gJgJy1uorbxiCaeh4bHynJA",
+   "data": "176810000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GmBe2z2NFerqbmxGgaYyskE3VjJ1QbnvL5928YgHdUBM",
+   "data": "032800000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GmJbWh2JjaHDv9Qb2CQDgUqmNqCjJukNqQ4vm1H78KUb",
+   "data": "04f401000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GrHp4krejdaDnPRi6ziN7SNkf77d1wduHPLS7eCbAvHX",
+   "data": "070000000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 30064771072
+  },
+  {
+   "fixture": "instr-GuAGDyTSyuKymyS9atE64PRhX8Yjji3L2vHpNpyYzqNY",
+   "data": "000200000051911a915cad7fbafd18703b9f68c55d990e5ee5819cad5781bf33198c00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GuHAjwDbacwm2JfvZnpDXWJ33Dg2uGArD515scqS7BLX",
+   "data": "00020000008815249b37ffd7892d959ab15b1360c19adc608c93f2258f03fd45c60d00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-Guh91KHxrBnbvEvCcS3z24BB3Y6ddaZtnnsFQCLihTz3",
+   "data": "000200000067c452ceca5aae292d137386e96e2762b31a86e1594bed8379f460ebdb00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-GxBec5tqxCZG841EGXjdKKinJJTtRJyCVmqdmoDrpDT",
+   "data": "032a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-H1ihxw3TkQtq7j5yuMRtTddVdzcKasWM6QiYpSUtq3P6",
+   "data": "0d640000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-H79LLnwDbHG9FtdGN9cvMsfYRU3U8VoVMijF5Bfqy6dx",
+   "data": "0603010000007c9a596049911dbad45843eea913913e7adbcd82f99b27da19b0bcb9ef",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-HMXYmSjzfdigus3cfcELcscV9am2onsXqQWw4hnnYJG5",
+   "data": "032a00000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    },
+    {
+     "index": 3,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-HZv9c9S2FZpB1iF5d8MmzTvX7Zd1upkeXP1Nmxm3kEGV",
+   "data": "18302e313131",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 8589934592
+  },
+  {
+   "fixture": "instr-HbVvGZ2NKYdDYhpVpxNMvi42iwhY3idfBDbKdVhjrmUv",
+   "data": "14020000001566d1ea240feccbf08239742f46f4e10d1c785d8883345107f620060f00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-Hkuxm8dLyvFQb71m1ukWux3yGkcoJvZ174jtaPDfUDoN",
+   "data": "000200000059e8ac4327afb04a7ec206da80d9aa59f454c8b8be66265652a81e41d00100000059e8ac4327afb04a7ec206da80d9aa59f454c8b8be66265652a81e41d0",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-HnecrQS2LSoiVqT9FwooV1nwNUthmEBLHb4eHDNJ9iJp",
+   "data": "00020000004acf0a6107a969ecdd1fd1c5c275cab320c08eab5ec1f188189f9f6b8d00",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-HnzBh6wZUopToEpAbgZHgejrZyjxbaff2u4nmZTNeznp",
+   "data": "100000003633bf9e27e05c0a1b3cb3ab592a89db17b804ff0473890091067b9f85",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    },
+    {
+     "index": 2,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-Hu5M3pdVB7aQAqEWYpaMTY2ZtCTNYiUvESsHTDPvJbgJ",
+   "data": "0e2a0000000000000003",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 18
+  },
+  {
+   "fixture": "instr-Hyt3HqkftzM7Eo8kzTxmDWZs19FzWb6pWEx8nfNS1jRp",
+   "data": "0f150000000000000002",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 2,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-b9vxTvvfGjrqi15XZd8d1G4RSrLt8kCTQV7J61prnBo",
+   "data": "00020000007d0cd90cd80b1832a5f711b9a68a6f82b16ce658c46fe65579ee7118bf010000007d0cd90cd80b1832a5f711b9a68a6f82b16ce658c46fe65579ee7118bf",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-kxySyoqyJhMKDutYPo6SXZtCXaU4Bydw1A3Z6ApAkmC",
+   "data": "0002000000420cead8ef3fa4ee502f1fc663c39ef90acf20ba3dd1f92ebb7ecdeaa800",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": false,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  },
+  {
+   "fixture": "instr-nitw1bEcj9GJVScZq9YQDhhQP5A1xUWtqMaLzRaG3Zj",
+   "data": "036400000000000000",
+   "accounts": [
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 0,
+     "signer": false,
+     "writable": true
+    },
+    {
+     "index": 1,
+     "signer": true,
+     "writable": false
+    }
+   ],
+   "spl_token_program_result": 0
+  }
+ ]
+}

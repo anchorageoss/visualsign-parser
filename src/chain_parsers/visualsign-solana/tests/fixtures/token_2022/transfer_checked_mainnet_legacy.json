@@ -1,0 +1,46 @@
+{
+  "description": "Token 2022 TransferChecked (mainnet, legacy transaction, all accounts static)",
+  "source": "https://solscan.io/tx/3eLcFpzF8s3R4KHo1SqPuHU8KKVsbNqDTY6AxdyE7h6GFDBWbYakWKLr585ZQJ3TK5NvNYbEqJ3AVWMn8penY5Ld",
+  "signature": "3eLcFpzF8s3R4KHo1SqPuHU8KKVsbNqDTY6AxdyE7h6GFDBWbYakWKLr585ZQJ3TK5NvNYbEqJ3AVWMn8penY5Ld",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "Fetched keylessly with getTransaction from api.mainnet-beta.solana.com (slot 461646916). Amount: 10.99816 (10998160 raw units, 6 decimals). full_transaction_base64 is the whole signed transaction as returned by the RPC.",
+  "instruction_index": 4,
+  "instruction_data": "hws1PnUKNaL2h",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "FWHRiaFfP4NWR8ui3cwHkVuBh2Kb6TmJhE2mbTWMPggH",
+      "signer": false,
+      "writable": true,
+      "description": "Source token account"
+    },
+    {
+      "pubkey": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+      "signer": false,
+      "writable": false,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "BzkjqUBaeJv3kYaztWpHc6gyRKJDT2pDog3rvpHGtRp2",
+      "signer": false,
+      "writable": true,
+      "description": "Destination token account"
+    },
+    {
+      "pubkey": "AnppRemLRErjaq6cMRhDLNPssZvzQzDdWhkPFdT4Z55e",
+      "signer": true,
+      "writable": true,
+      "description": "Authority (owner)"
+    }
+  ],
+  "expected_fields": {
+    "amount": "10.99816",
+    "raw_amount": "10998160",
+    "decimals": "6",
+    "source": "FWHRiaFfP4NWR8ui3cwHkVuBh2Kb6TmJhE2mbTWMPggH",
+    "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+    "destination": "BzkjqUBaeJv3kYaztWpHc6gyRKJDT2pDog3rvpHGtRp2",
+    "owner/delegate": "AnppRemLRErjaq6cMRhDLNPssZvzQzDdWhkPFdT4Z55e"
+  },
+  "full_transaction_base64": "AYQ7oSsvnyeYoxNBgSoY4cs2GD7K1ZvN5UoXthMpOM3jtkTprlmfiAP8G5lTQTNd6Pwc5EcwGyXfhj/7FZMfOAoBAAgLkXZi6IVlNp4pM9fxLPk2kFHt76ftH+scq9mJyywtpA2jYG5DKwCnDZqesc5RhjJGaa6UoN90sFkHBbZ5wyo9L9eECJYfzvWPxrE1t9Opahtkqs1avp/JutbYaoHfCvKyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAVKU1qZKSEGTSTocWDaOHx8NbXdvJK7geQfqEBBBUSNBqfVFxksXFEhjMlMPUrxf1ja7gibof1E49vZigAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/BeSSDtsiiqHt0cdgU+Vkfk5XIQKnOPZ9NW6fTpLinSejJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FnyJIwq97cuYA1CnPXh7CnP3H+VoIKuizXXWQlDZGMlFPhxOon3zftDSQSUDSVs3k/SNCiXgduzVjvGFX4gWOyNBQQABQKIhAIABAAJA2QAAAAAAAAABQEAJDM1ZDFjNmVhLTVjOTQtNGQyZi04ZTdiLTg3NmMyOWYzZGNjZQkHAAEKCAMHBgEBBwQCCAEACgyQ0acAAAAAAAY="
+}

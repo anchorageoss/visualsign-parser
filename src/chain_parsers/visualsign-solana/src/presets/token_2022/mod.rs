@@ -1006,6 +1006,7 @@ fn preview_field(
 mod tests {
     use super::*;
     use solana_pubkey::Pubkey;
+    mod adversarial_test;
     mod fixture_test;
 
     fn dummy_account_strings(n: usize) -> Vec<String> {
@@ -1102,19 +1103,32 @@ mod tests {
             spl_token_2022_interface::id().to_bytes(),
         )];
         keys.extend_from_slice(accounts);
+        let indices = (1..=accounts.len() as u8).collect();
+        visualize_indices(data, &keys, indices).unwrap()
+    }
+
+    /// Visualize `data` as one compiled instruction whose account indices are
+    /// `indices` into `keys` (the program id at index 0), and return
+    /// `(title, condensed, expanded)`, or the visualizer's error (for example
+    /// an index that doesn't resolve).
+    fn visualize_indices(
+        data: Vec<u8>,
+        keys: &[Pubkey],
+        indices: Vec<u8>,
+    ) -> Result<(String, Vec<String>, Vec<String>), VisualSignError> {
         let compiled = solana_message::compiled_instruction::CompiledInstruction {
             program_id_index: 0,
-            accounts: (1..=accounts.len() as u8).collect(),
+            accounts: indices,
             data,
         };
         let sender = solana_parser::solana::structs::SolanaAccount {
-            account_key: accounts[0].to_string(),
+            account_key: keys[0].to_string(),
             signer: false,
             writable: false,
         };
         let idl = crate::idl::IdlRegistry::new();
-        let context = VisualizerContext::new(&sender, &compiled, &keys, &idl, 0);
-        let field = Token2022Visualizer.visualize_tx_commands(&context).unwrap();
+        let context = VisualizerContext::new(&sender, &compiled, keys, &idl, 0);
+        let field = Token2022Visualizer.visualize_tx_commands(&context)?;
         let SignablePayloadField::PreviewLayout { preview_layout, .. } =
             field.signable_payload_field
         else {
@@ -1131,7 +1145,7 @@ mod tests {
         };
         let condensed = rows(&preview_layout.condensed.unwrap().fields);
         let expanded = rows(&preview_layout.expanded.unwrap().fields);
-        (preview_layout.title.unwrap().text, condensed, expanded)
+        Ok((preview_layout.title.unwrap().text, condensed, expanded))
     }
 
     fn keys(n: u8) -> Vec<Pubkey> {
