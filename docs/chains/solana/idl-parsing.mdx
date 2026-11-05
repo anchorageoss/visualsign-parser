@@ -93,7 +93,7 @@ use solana_parser::CustomIdlConfig;
 let config = CustomIdlConfig::from_json(idl_json_string, true);
 ```
 
-The `IdlRegistry` in `visualsign-solana` manages both built-in and custom IDLs, checking custom configs first and falling back to built-in `ProgramType` lookups.
+The `IdlRegistry` in `visualsign-solana` holds caller-supplied IDLs only for programs that are not trusted: a mapping for a native program, a program with a built-in IDL in `solana_parser`, or any program ID registered in-crate (by a preset, or by an IDL compiled in ahead of its preset) is dropped, and the bundled IDL is used instead. For every other program it checks custom configs first and falls back to built-in `ProgramType` lookups.
 
 ### Parsing an instruction
 

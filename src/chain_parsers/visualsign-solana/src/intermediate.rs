@@ -178,7 +178,8 @@ pub enum RegisteredSource {
     /// Matched `idl::builtin_programs`'s `NATIVE_PROGRAM_NAMES` list (native
     /// runtime / core SPL programs).
     Native,
-    /// Matched an in-crate preset visualizer's program ID
+    /// Matched an in-crate preset visualizer's program ID, or an IDL compiled in ahead
+    /// of its preset (see `idl::builtin_programs::preset_program_ids`)
     Preset,
     /// Matched a program known only via `solana_parser::ProgramType`
     ThirdParty,
@@ -2680,5 +2681,57 @@ mod tests {
             borsh::from_slice::<SolanaIntermediateOutput>(&bytes).expect("round trip"),
             output
         );
+    }
+
+    /// An IDL compiled in under `preset_idl_configs` decodes here and reports `Preset`,
+    /// with or without a preset visualizer for the program.
+    #[test]
+    fn compiled_in_idl_decodes_as_preset() {
+        let program_id = "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ";
+        let idl = crate::idl::builtin_programs::preset_idl_records()
+            .get(program_id)
+            .and_then(|record| record.custom_idl.as_ref())
+            .expect("Abra backed-token IDL is compiled in");
+        let mint = idl
+            .instructions
+            .iter()
+            .find(|instruction| instruction.name == "mint")
+            .expect("mint instruction");
+        let mut data = mint.discriminator.clone().expect("discriminator");
+        data.extend_from_slice(&25_000_000u64.to_le_bytes());
+        let user = solana_pubkey::Pubkey::new_unique();
+        let accounts = mint
+            .accounts
+            .iter()
+            .map(|account| {
+                if account.name == "user" {
+                    solana_instruction::AccountMeta::new(user, true)
+                } else {
+                    solana_instruction::AccountMeta::new(solana_pubkey::Pubkey::new_unique(), false)
+                }
+            })
+            .collect();
+        let instruction = solana_instruction::Instruction {
+            program_id: program_id.parse().expect("program id"),
+            accounts,
+            data,
+        };
+        let message = solana_message::Message::new(&[instruction], Some(&user));
+        let message_hex = hex::encode(bincode::serialize(&message).expect("serialize"));
+
+        let output =
+            extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new(), 5_105_000)
+                .expect("solana_parser accepts the message");
+        let instruction = &output.instructions[0];
+        assert_eq!(instruction.program_key, program_id);
+        assert_eq!(instruction.registered_source, RegisteredSource::Preset);
+        assert!(instruction.solana_json_parsed_data.is_none());
+        let parsed = instruction
+            .parsed_instruction_data
+            .as_ref()
+            .expect("decoded with the compiled-in IDL");
+        assert_eq!(parsed.instruction_name, "mint");
+        assert_eq!(parsed.program_call_args_json, r#"{"amount":25000000}"#);
+        assert_eq!(parsed.named_accounts.get("user"), Some(&user.to_string()));
     }
 }
