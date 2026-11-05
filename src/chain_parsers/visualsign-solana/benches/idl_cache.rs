@@ -18,11 +18,9 @@
 use base64::Engine;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde::Deserialize;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    message::Message,
-    pubkey::Pubkey,
-};
+use solana_instruction::{AccountMeta, Instruction};
+use solana_message::Message;
+use solana_pubkey::Pubkey;
 use std::{fs, hint::black_box, path::PathBuf, str::FromStr};
 use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
 use visualsign_solana::{SolanaTransactionWrapper, SolanaVisualSignConverter};
@@ -88,7 +86,7 @@ fn transaction_from_fixture(rel_path: &str) -> String {
         Some(&fee_payer),
     );
     let mut bytes = vec![0u8];
-    bytes.extend_from_slice(&message.serialize());
+    bytes.extend_from_slice(&bincode::serialize(&message).expect("message serializes"));
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
