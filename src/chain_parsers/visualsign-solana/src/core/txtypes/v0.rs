@@ -32,8 +32,10 @@ pub fn decode_v0_transfers(
     })?;
 
     // Override the stale Jupiter v6 IDL bundled in solana_parser with our locally
-    // refreshed copy so that newer instructions (e.g. route_v2) don't cause the
-    // whole-tx decode to bail with "no matching instruction discriminator".
+    // refreshed copy, so newer instructions (e.g. route_v2) decode by name. With
+    // the pinned solana-parser a missing discriminator is non-fatal (reported per
+    // instruction as `idl_parse_error`), so without the override those
+    // instructions would render undecoded rather than failing the whole decode.
     let mut custom_idls: BTreeMap<String, (String, bool)> = BTreeMap::new();
     custom_idls.insert(
         JUPITER_PROGRAM_ID.to_string(),
