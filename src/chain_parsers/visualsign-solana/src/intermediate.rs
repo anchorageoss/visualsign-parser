@@ -956,12 +956,18 @@ fn caller_idl_records(
 ///
 /// `solana_parser::parse_transaction_with_idl_records` takes the map by value,
 /// so the static path has to materialize one. It only ever looks a record up
-/// by an instruction's program id, and program ids are always static account
-/// keys, so when the message decodes only the records for its static keys are
-/// cloned. Cloning every cached record (each with its parsed `Idl` and IDL
-/// JSON) and dropping them again was most of the per-request cost of the
-/// intermediate output. If the message doesn't decode here, every record is
-/// passed, as before.
+/// by an instruction's program id, so when the message decodes only the
+/// records for the programs its instructions invoke are cloned. Cloning every
+/// cached record (each with its parsed `Idl` and IDL JSON) and dropping them
+/// again was most of the per-request cost of the intermediate output. If the
+/// message doesn't decode here, every record is passed, as before.
+///
+/// The filter is complete because a program id is always a static account key:
+/// Solana's v0 sanitize rejects a `program_id_index` loaded from a lookup table
+/// (`solana-message`, `VersionedMessage::sanitize`), and `solana_parser`
+/// re-checks the same bound before any IDL lookup. `versioned_message` does not
+/// call `sanitize`, so on this path it is `solana_parser`'s check that holds.
+/// `build_idl_record_map_*` tests pin both branches.
 ///
 /// Precedence matches [`lookup_idl_record`]: caller, then preset, then builtin.
 #[allow(clippy::disallowed_types)]
@@ -970,9 +976,11 @@ fn build_idl_record_map(
     message: Option<&VersionedMessage>,
 ) -> std::collections::HashMap<String, solana_parser::solana::structs::IdlRecord> {
     let wanted: Option<std::collections::BTreeSet<String>> = message.map(|message| {
+        let keys = message.static_account_keys();
         message
-            .static_account_keys()
+            .instructions()
             .iter()
+            .filter_map(|ix| keys.get(usize::from(ix.program_id_index)))
             .map(ToString::to_string)
             .collect()
     });
@@ -2699,5 +2707,103 @@ mod tests {
             borsh::from_slice::<SolanaIntermediateOutput>(&bytes).expect("round trip"),
             output
         );
+    }
+
+    /// The real Orca Whirlpool fixture, with Jupiter v6 (also a preset program)
+    /// added as a plain account that no instruction invokes.
+    fn orca_message_with_account_only_jupiter() -> (String, VersionedMessage) {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/orca_whirlpool/increase_liquidity_by_token_amounts_v2.json"
+        ))
+        .expect("fixture parses");
+        let pubkey = |s: &str| s.parse::<solana_pubkey::Pubkey>().expect("pubkey");
+        let mut accounts: Vec<solana_instruction::AccountMeta> = fixture["accounts"]
+            .as_array()
+            .expect("accounts")
+            .iter()
+            .map(|a| solana_instruction::AccountMeta {
+                pubkey: pubkey(a["pubkey"].as_str().expect("pubkey")),
+                is_signer: a["signer"].as_bool().expect("signer"),
+                is_writable: a["writable"].as_bool().expect("writable"),
+            })
+            .collect();
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
+            pubkey(JUPITER_V6),
+            false,
+        ));
+        let fee_payer = accounts
+            .iter()
+            .find(|a| a.is_signer)
+            .expect("fixture has a signer")
+            .pubkey;
+        let data = bs58::decode(fixture["instruction_data"].as_str().expect("data"))
+            .into_vec()
+            .expect("base58 instruction data");
+        let instruction = solana_instruction::Instruction::new_with_bytes(
+            pubkey(fixture["program_id"].as_str().expect("program id")),
+            &data,
+            accounts,
+        );
+        let message = solana_message::Message::new(&[instruction], Some(&fee_payer));
+        let hex = hex::encode(bincode::serialize(&message).expect("message serializes"));
+        let versioned = versioned_message(&hex, false).expect("message decodes");
+        (hex, versioned)
+    }
+
+    const ORCA_WHIRLPOOL: &str = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+    const JUPITER_V6: &str = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+
+    /// With a decodable message, only the invoked program's record is cloned: a
+    /// preset program that appears only as an account is left out, and the
+    /// invoked preset still decodes through the filtered map.
+    #[test]
+    fn build_idl_record_map_keeps_only_invoked_programs() {
+        let (hex, message) = orca_message_with_account_only_jupiter();
+        assert!(
+            message
+                .static_account_keys()
+                .iter()
+                .any(|k| k.to_string() == JUPITER_V6),
+            "Jupiter must be a static key for this test to mean anything"
+        );
+
+        let map = build_idl_record_map(&BTreeMap::new(), Some(&message));
+        let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec![ORCA_WHIRLPOOL]);
+
+        let metadata =
+            parse_solana_metadata(&hex, false, &IdlRegistry::new()).expect("orca fixture parses");
+        let orca = metadata
+            .instructions
+            .iter()
+            .find(|ix| ix.program_key == ORCA_WHIRLPOOL)
+            .expect("the orca instruction is decoded");
+        assert!(
+            orca.parsed_instruction.is_some(),
+            "the invoked preset must still resolve its IDL: {:?}",
+            orca.idl_parse_error
+        );
+    }
+
+    /// Without a decodable message there is nothing to filter on, so every
+    /// builtin, preset and caller record is passed, including a caller record
+    /// for a program no message mentions.
+    #[test]
+    fn build_idl_record_map_passes_everything_without_a_message() {
+        let caller_program = solana_pubkey::Pubkey::new_unique().to_string();
+        let caller = caller_records_for(
+            &caller_program,
+            r#"{"instructions":[{"name":"ping","discriminator":[9,9,9,9,9,9,9,9],"accounts":[],"args":[]}],"types":[]}"#,
+        );
+        assert!(caller.contains_key(&caller_program));
+
+        let map = build_idl_record_map(&caller, None);
+        let mut expected: std::collections::BTreeSet<&String> =
+            builtin_idl_records().keys().collect();
+        expected.extend(crate::idl::builtin_programs::preset_idl_records().keys());
+        expected.extend(caller.keys());
+        let got: std::collections::BTreeSet<&String> = map.keys().collect();
+        assert_eq!(got, expected);
+        assert!(map.contains_key(&caller_program));
     }
 }

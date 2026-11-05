@@ -356,6 +356,12 @@ const PRESET_IDL_JSONS: &[(&str, &str)] = &[
     ),
 ];
 
+/// The compiled-in preset IDL JSON: exactly the set [`preset_idl_records`]
+/// decodes, in table order.
+pub fn preset_idl_jsons() -> impl Iterator<Item = &'static str> {
+    PRESET_IDL_JSONS.iter().map(|(_, json)| *json)
+}
+
 /// The presets' `IdlRecord`s, parsed and serialized once per process.
 ///
 /// [`PRESET_IDL_JSONS`] holds raw JSON; turning it into records means a
