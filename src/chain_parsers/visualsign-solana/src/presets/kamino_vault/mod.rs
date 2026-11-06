@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::KaminoVaultConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -115,7 +113,7 @@ fn parse_kamino_vault_instruction(
     let idl = load_kamino_vault_idl()
         .ok_or_else(|| VisualSignError::DecodeError("failed to load Kamino Vault IDL".into()))?;
 
-    parse_instruction_with_idl(data, KAMINO_VAULT_PROGRAM_ID, idl)
+    crate::idl::compiled_in::parse_preset_instruction(data, KAMINO_VAULT_PROGRAM_ID, idl)
         .map_err(|e| VisualSignError::DecodeError(e.to_string()))
 }
 

@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::OnreAppConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -127,8 +125,8 @@ impl InstructionVisualizer for OnreAppVisualizer {
     }
 }
 
-fn get_onre_app_idl() -> Result<Idl, Box<dyn std::error::Error>> {
-    decode_idl_data(ONRE_APP_IDL_JSON)
+fn get_onre_app_idl() -> Result<&'static Idl, Box<dyn std::error::Error>> {
+    Ok(crate::idl::compiled_in::compiled_in_idl(ONRE_APP_IDL_JSON)?)
 }
 
 fn parse_onre_app_instruction(
@@ -140,7 +138,7 @@ fn parse_onre_app_instruction(
     }
 
     let idl = get_onre_app_idl()?;
-    let parsed = parse_instruction_with_idl(data, ONRE_APP_PROGRAM_ID, &idl)?;
+    let parsed = crate::idl::compiled_in::parse_preset_instruction(data, ONRE_APP_PROGRAM_ID, idl)?;
 
     let mut named_accounts: Vec<(String, String)> = Vec::new();
     if let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
