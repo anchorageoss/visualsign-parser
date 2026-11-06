@@ -1,0 +1,7 @@
+{
+  "program_id": "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+  "idl_sha256": "cb9a0a29040ec3853a5105c547ffc608bb0e3175d78dacf30d463aff939f9b9b",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:35Z",
+  "notes": "Origin not recorded; added in 09d64c38a534 (#240). Differs from the on-chain IDL read at slot 466271586 (instructions: committed 36, on chain 31 added: - removed: proposalCancelV2, transactionBufferClose, transactionBufferCreate, transactionBufferExtend, vaultTransactionCreateFromBuffer changed: multisigCreate)."
+}

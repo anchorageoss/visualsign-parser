@@ -1,0 +1,7 @@
+{
+  "program_id": "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
+  "idl_sha256": "79b423239fc268c03c60cd1d5e3fb50766b9d1f685744df3ca94d63b30519490",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:07:46Z",
+  "notes": "Origin not recorded; added in 3ec42f058d86 (#366). Differs from the on-chain IDL read at slot 466271357 (instructions: committed 249, on chain 241 added: - removed: adminWithdrawFromInsuranceFundVault, deleteOpenbookV2FulfillmentConfig, deleteSerumFulfillmentConfig, depositIntoIsolatedPerpPosition, placeScaleOrders, transferIsolatedPerpPositionDeposit, updatePerpMarketConfig, withdrawFromIsolatedPerpPosition changed: -)."
+}

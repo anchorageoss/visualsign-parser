@@ -1,0 +1,7 @@
+{
+  "program_id": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "idl_sha256": "1c3ff98db57692a1baecf5c3294dddbdca27fa9c69c4ca60e10003c43ce1202b",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:07:58Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271414 (instructions: committed 17, on chain 19 added: create_idempotent_associated_token_account, withdraw_token_account_excess_lamports removed: - changed: -)."
+}

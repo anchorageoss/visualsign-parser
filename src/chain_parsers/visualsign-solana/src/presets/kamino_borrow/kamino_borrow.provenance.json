@@ -1,0 +1,7 @@
+{
+  "program_id": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
+  "idl_sha256": "d5e0b1dc162d9097390a1a3ce433405bbf0dba4d6cd64ee13a94e20a7e0de58c",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:02Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271430 (instructions: committed 58, on chain 66 added: abortObligationOwnershipTransfer, acceptObligationOwnership, approveObligationOwnershipTransfer, calculateCtokenExchangeRate, fillBorrowOrderV2, initiateObligationOwnershipTransfer, setBorrowOrderV2, topupReserveRewards removed: - changed: cloneReserveConfig, idlMissingTypes, initFarmsForReserve, initGlobalConfig, initLendingMarket, initReserve, liquidateObligationAndRedeemReserveCollateral, liquidateObligationAndRedeemReserveCollateralV2, markObligationForDeleveraging, updateGlobalConfig, updateGlobalConfigAdmin, updateLendingMarket, updateLendingMarketOwner, updateReserveConfig, withdrawProtocolFee)."
+}

@@ -1,0 +1,7 @@
+{
+  "program_id": "MFv2hWf31Z9kbCa1snEPdcgp7X3GK4Y9EtyMkRxBUGA",
+  "idl_sha256": "744deb3f349fc6fc8a279e5e6b21799423fd9dd5cce54996e0a31b1268a66458",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:13Z",
+  "notes": "Origin not recorded; added in b5828854c3aa (#375). The program publishes no on-chain Anchor IDL to compare against."
+}

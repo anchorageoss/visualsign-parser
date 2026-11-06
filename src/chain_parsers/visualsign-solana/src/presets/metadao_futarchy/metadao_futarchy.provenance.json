@@ -1,0 +1,7 @@
+{
+  "program_id": "FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq",
+  "idl_sha256": "88fb264017bbd32d0a8e453e16aa46e524d8363995c409fa075fc9ca0a0f28ed",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:18Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271510 (instructions: committed 22, on chain 32 added: adminEnqueueMultisigProposalApproval, adminEnqueueMultisigProposalCancellation, adminUpdateProposalParams, executeMultisigProposalApproval, executeMultisigProposalCancellation, initializeBuybackTokenProposal, initializeHostileLiquidateProposal, initializeHostileTakeoverProposal, initializeLargeSpendProposal, initializeMintTokensProposal, initializeSpendingLimitChangeProposal, resizeProposal, setSpendingLimit, syncSpendingLimit removed: adminApproveMultisigProposal, executeSpendingLimitChange, finalizeOptimisticProposal, initiateVaultSpendOptimisticProposal changed: initializeProposal, resizeDao)."
+}
