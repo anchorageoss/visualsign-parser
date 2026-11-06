@@ -1,0 +1,36 @@
+---
+title: "RFCs"
+description: "Design proposals for VisualSign, numbered and grouped by chain."
+---
+
+RFCs propose changes to what VisualSign parses, verifies or shows, before the
+code lands. Each one is open for review on its pull request and tracked by the
+chain's support issue.
+
+## Numbering
+
+RFCs are numbered per chain as `VSP-<CHAIN>-<n>`:
+
+- `<CHAIN>` is the chain's ticker-style code: `BTC`, `ETH`, `SOL`, `NEAR`,
+  `SUI`, `TRX`, `ZEC`.
+- `<n>` counts up from 1 within that chain.
+- An RFC that spans chains uses `VSP-CORE-<n>`.
+- Numbers are never reused, including for withdrawn RFCs.
+
+Each RFC is a page at `docs/rfcs/<chain>/vsp-<chain>-<n>.mdx`, with its images
+and sample payloads in `docs/images/rfcs/vsp-<chain>-<n>/`. The RFC also gets a
+blog entry tagged with its chain and `RFC`.
+
+## By chain
+
+### Bitcoin
+
+| Number | Title | Status |
+|---|---|---|
+| [VSP-BTC-1](/rfcs/btc/vsp-btc-1) | Ownership metadata for Bitcoin-like chains | RFC |
+
+### Core
+
+| Number | Title | Status |
+|---|---|---|
+| [VSP-CORE-1](/rfcs/core/vsp-core-1) | Chain-scoped commands for parser_cli | RFC |
