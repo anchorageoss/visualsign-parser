@@ -5,7 +5,9 @@ name: "Solana: fetch on-chain IDL"
 # (workflow_dispatch) or from another workflow (workflow_call). With
 # `committed_idl`, the job summary lists the instructions added, removed or
 # changed relative to that file. The fetched IDL is uploaded as an artifact
-# named `idl-<program_id>`.
+# named `idl-<program_id>`, together with its provenance record
+# (`<program_id>.provenance.json`, which records the rpc slot and the slot the
+# program was last deployed at; both slots also land in the job summary).
 #
 # Locally: scripts/fetch-solana-idl.py <program_id> [--compare <committed.json>]
 
@@ -76,7 +78,9 @@ jobs:
           fi
           mkdir -p out
           set +e
-          python3 -I scripts/fetch-solana-idl.py "$PROGRAM_ID" --rpc "$RPC_URL" --out "out/$PROGRAM_ID.json" "${compare[@]}" 2> out/summary.txt
+          python3 -I scripts/fetch-solana-idl.py "$PROGRAM_ID" --rpc "$RPC_URL" \
+            --out "out/$PROGRAM_ID.json" --provenance "out/$PROGRAM_ID.provenance.json" \
+            "${compare[@]}" 2> out/summary.txt
           rc=$?
           set -e
           cat out/summary.txt
@@ -87,16 +91,29 @@ jobs:
             cat out/summary.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$rc" -eq 0 ]]; then
+            # rpc_slot / program_last_deployed_slot live in the provenance record
+            # the script wrote next to the IDL; surface them in the job summary.
+            rpc_slot=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["rpc_slot"])' "out/$PROGRAM_ID.provenance.json")
+            last_deployed=$(python3 -I -c 'import json,sys; v = json.load(open(sys.argv[1]))["program_last_deployed_slot"]; print("null" if v is None else v)' "out/$PROGRAM_ID.provenance.json")
+            {
+              echo
+              echo "rpc_slot: $rpc_slot"
+              echo "program_last_deployed_slot: $last_deployed"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           case $rc in
             0) echo "found=true" >> "$GITHUB_OUTPUT" ;;
             2) echo "found=false" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
-      - name: Upload the IDL
+      - name: Upload the IDL and its provenance record
         if: steps.fetch.outputs.found == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: idl-${{ inputs.program_id }}
-          path: out/${{ inputs.program_id }}.json
+          path: |
+            out/${{ inputs.program_id }}.json
+            out/${{ inputs.program_id }}.provenance.json
           if-no-files-found: error
           retention-days: 14

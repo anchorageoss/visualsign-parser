@@ -143,7 +143,7 @@ fn preset_idls_roundtrip() {
         // ships before the first preset IDL lands.
         return;
     }
-    for (name, idl_json) in visualsign_solana::PRESET_IDLS {
+    for (name, _idl_file, idl_json) in visualsign_solana::PRESET_IDLS {
         common::run_idl_roundtrip_inner(&format!("preset_{name}"), idl_json);
     }
 }

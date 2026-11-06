@@ -431,6 +431,79 @@ pub fn preset_idl_records()
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+
+    /// Program id each preset IDL JSON is registered under, keyed by the IDL
+    /// JSON itself. Sources: the `ENTRIES` list in `preset_idl_configs`, plus
+    /// presets that embed their IDL outside it (marginfi registers its IDL
+    /// in its own module).
+    fn idl_json_program_ids() -> BTreeMap<&'static str, &'static str> {
+        let mut by_json: BTreeMap<&'static str, &'static str> = preset_idl_configs()
+            .iter()
+            .filter_map(|(program_id, config)| {
+                let solana_parser::CustomIdl::Json(json) = &config.idl else {
+                    return None;
+                };
+                Some((json.as_str(), program_id.as_str()))
+            })
+            .collect();
+        by_json.insert(
+            include_str!("../presets/marginfi/marginfi.json"),
+            crate::presets::marginfi::MARGINFI_PROGRAM_ID,
+        );
+        by_json
+    }
+
+    /// String field of a provenance record, if present and a string.
+    fn record_str<'a>(record: &'a serde_json::Value, field: &str) -> Option<&'a str> {
+        record.get(field).and_then(serde_json::Value::as_str)
+    }
+
+    /// The exact command that regenerates `record`, per its `source`.
+    /// Embedded in assertion messages so a failure tells the developer what
+    /// to run, not just that something is stale.
+    fn provenance_regenerate_command(
+        record: &serde_json::Value,
+        program_id: &str,
+        idl_rel: &str,
+        record_rel: &str,
+    ) -> String {
+        let get = |field: &str| -> String {
+            match record_str(record, field) {
+                Some(value) => value.to_string(),
+                None => format!("<{field}>"),
+            }
+        };
+        match record_str(record, "source") {
+            Some("onchain") => format!(
+                "python3 -I scripts/fetch-solana-idl.py {program_id} --out {idl_rel} \
+                 --provenance {record_rel}"
+            ),
+            Some("repo") => format!(
+                "python3 -I scripts/fetch-solana-idl.py --record-repo {} \
+                 --commit {} --path {} --idl {idl_rel} --program-id {program_id}",
+                get("repo"),
+                get("commit"),
+                get("path")
+            ),
+            Some("issuer") => format!(
+                "python3 -I scripts/fetch-solana-idl.py --record-issuer {} \
+                 --notes {} --idl {idl_rel} --program-id {program_id}",
+                get("supplied_by"),
+                get("notes")
+            ),
+            Some("unknown") => format!(
+                "python3 -I scripts/fetch-solana-idl.py --record-unknown {} \
+                 --idl {idl_rel} --program-id {program_id}",
+                get("notes")
+            ),
+            _ => format!(
+                "python3 -I scripts/fetch-solana-idl.py --record-unknown \
+                 <why-the-origin-is-unknown> --idl {idl_rel} --program-id {program_id}"
+            ),
+        }
+    }
 
     #[test]
     fn system_program_is_trusted() {
@@ -545,5 +618,205 @@ mod tests {
         // with a rendered canonical label.
         assert!(!is_reserved_canonical_name("system program"));
         assert!(!is_reserved_canonical_name("System Program "));
+    }
+
+    #[test]
+    fn preset_idls_are_registered() {
+        let by_json = idl_json_program_ids();
+        assert!(
+            !crate::PRESET_IDLS.is_empty(),
+            "build.rs should discover the preset IDLs"
+        );
+        for (preset, _idl_file, idl_json) in crate::PRESET_IDLS {
+            assert!(
+                by_json.contains_key(idl_json),
+                "preset IDL src/presets/{preset}/... is embedded via PRESET_IDLS but \
+                 not registered under any program id; add it to ENTRIES in \
+                 preset_idl_configs, or register it in the preset module the way \
+                 marginfi does"
+            );
+        }
+    }
+
+    #[test]
+    fn preset_idl_provenance_records_match_the_idls() {
+        let by_json = idl_json_program_ids();
+
+        // (preset dir, IDL file name) -> embedded provenance record JSON.
+        let records: BTreeMap<(&str, &str), &str> = crate::PRESET_IDL_PROVENANCE
+            .iter()
+            .map(|(preset, idl_file, record)| ((*preset, *idl_file), *record))
+            .collect();
+
+        for (preset, idl_file, idl_json) in crate::PRESET_IDLS {
+            let idl_rel =
+                format!("src/chain_parsers/visualsign-solana/src/presets/{preset}/{idl_file}");
+            let record_rel = format!(
+                "src/chain_parsers/visualsign-solana/src/presets/{preset}/{}.provenance.json",
+                idl_file.strip_suffix(".json").unwrap_or(*idl_file)
+            );
+            let program_id = by_json.get(idl_json).copied().unwrap_or_else(|| {
+                panic!(
+                    "preset IDL {idl_rel} is not registered under any program id; \
+                     register it (ENTRIES in preset_idl_configs, or the preset module) \
+                     so its provenance record can name it"
+                )
+            });
+
+            let Some(record_json) = records.get(&(*preset, *idl_file)) else {
+                panic!(
+                    "missing provenance record {record_rel} for preset IDL {idl_rel}.\n\
+                     Create it with one of (see docs/chains/solana/idl-parsing.mdx):\n\
+                     - python3 -I scripts/fetch-solana-idl.py {program_id} --out {idl_rel} --provenance {record_rel}\n\
+                     - python3 -I scripts/fetch-solana-idl.py --record-repo <https-url> --commit <full-40-hex-sha> --path <idl-path> --idl {idl_rel} --program-id {program_id}\n\
+                     - python3 -I scripts/fetch-solana-idl.py --record-issuer '<who>' --notes '<context>' --idl {idl_rel} --program-id {program_id}\n\
+                     - python3 -I scripts/fetch-solana-idl.py --record-unknown '<why>' --idl {idl_rel} --program-id {program_id}"
+                );
+            };
+
+            let record: serde_json::Value = serde_json::from_str(record_json).unwrap_or_else(|e| {
+                panic!("provenance record {record_rel} is not valid JSON: {e}")
+            });
+
+            let source = record_str(&record, "source")
+                .unwrap_or_else(|| panic!("provenance record {record_rel} has no string 'source'"));
+            assert!(
+                matches!(source, "onchain" | "repo" | "issuer" | "unknown"),
+                "provenance record {record_rel} has unknown 'source' {source:?} \
+                 (expected onchain, repo, issuer or unknown)"
+            );
+
+            // Common fields.
+            assert_eq!(
+                record_str(&record, "program_id"),
+                Some(program_id),
+                "provenance record {record_rel} names the wrong program id. \
+                 Regenerate it with:\n  {}",
+                provenance_regenerate_command(&record, program_id, &idl_rel, &record_rel)
+            );
+            let recorded_at = record_str(&record, "recorded_at").unwrap_or_else(|| {
+                panic!("provenance record {record_rel} has no string 'recorded_at'")
+            });
+            assert!(
+                recorded_at.ends_with('Z') || recorded_at.ends_with("+00:00"),
+                "provenance record {record_rel} 'recorded_at' {recorded_at:?} must be \
+                 a UTC ISO-8601 timestamp"
+            );
+
+            // The hash ties the record to the exact IDL bytes: changing the
+            // IDL without re-recording fails here.
+            let digest = hex::encode(solana_sha256_hasher::hash(idl_json.as_bytes()).to_bytes());
+            assert_eq!(
+                record_str(&record, "idl_sha256"),
+                Some(digest.as_str()),
+                "the IDL and its provenance record disagree: {idl_rel} changed \
+                 without updating {record_rel}. Regenerate the record with:\n  {}",
+                provenance_regenerate_command(&record, program_id, &idl_rel, &record_rel)
+            );
+
+            // Per-source required fields.
+            match source {
+                "onchain" => {
+                    let idl_account = record_str(&record, "idl_account").unwrap_or_else(|| {
+                        panic!("'onchain' record {record_rel} has no string 'idl_account'")
+                    });
+                    assert!(
+                        !idl_account.is_empty(),
+                        "'onchain' record {record_rel} has an empty 'idl_account'"
+                    );
+                    let rpc_slot = record
+                        .get("rpc_slot")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or_else(|| {
+                            panic!("'onchain' record {record_rel} has no integer 'rpc_slot'")
+                        });
+                    assert!(
+                        rpc_slot > 0,
+                        "'onchain' record {record_rel} 'rpc_slot' {rpc_slot} must be the \
+                         slot of the getAccountInfo reply"
+                    );
+                    let last_deployed = record.get("program_last_deployed_slot");
+                    assert!(
+                        last_deployed.is_some_and(|v| v.is_null() || v.as_u64().is_some()),
+                        "'onchain' record {record_rel} 'program_last_deployed_slot' must \
+                         be an integer slot or null"
+                    );
+                    assert_eq!(
+                        record_str(&record, "tool"),
+                        Some("scripts/fetch-solana-idl.py"),
+                        "'onchain' record {record_rel} 'tool' must name the fetch script"
+                    );
+                }
+                "repo" => {
+                    let repo = record_str(&record, "repo").unwrap_or_else(|| {
+                        panic!("'repo' record {record_rel} has no string 'repo'")
+                    });
+                    assert!(
+                        repo.starts_with("https://"),
+                        "'repo' record {record_rel} 'repo' {repo:?} must be an https URL"
+                    );
+                    let commit = record_str(&record, "commit").unwrap_or_else(|| {
+                        panic!("'repo' record {record_rel} has no string 'commit'")
+                    });
+                    assert_eq!(
+                        commit.len(),
+                        40,
+                        "'repo' record {record_rel} 'commit' {commit:?} must be a full \
+                         40-character SHA"
+                    );
+                    assert!(
+                        commit
+                            .chars()
+                            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+                        "'repo' record {record_rel} 'commit' {commit:?} must be lowercase hex"
+                    );
+                    let path = record_str(&record, "path").unwrap_or_else(|| {
+                        panic!("'repo' record {record_rel} has no string 'path'")
+                    });
+                    assert!(
+                        !path.is_empty(),
+                        "'repo' record {record_rel} has an empty 'path'"
+                    );
+                }
+                "issuer" => {
+                    let supplied_by = record_str(&record, "supplied_by").unwrap_or_else(|| {
+                        panic!("'issuer' record {record_rel} has no string 'supplied_by'")
+                    });
+                    assert!(
+                        !supplied_by.is_empty(),
+                        "'issuer' record {record_rel} has an empty 'supplied_by'"
+                    );
+                    assert!(
+                        record_str(&record, "notes").is_some(),
+                        "'issuer' record {record_rel} has no string 'notes'"
+                    );
+                }
+                "unknown" => {
+                    let notes = record_str(&record, "notes").unwrap_or_else(|| {
+                        panic!("'unknown' record {record_rel} has no string 'notes'")
+                    });
+                    assert!(
+                        !notes.is_empty(),
+                        "'unknown' record {record_rel} must say in 'notes' why the \
+                         origin can't be established"
+                    );
+                }
+                _ => unreachable!("'source' checked against the known list above"),
+            }
+        }
+
+        // No orphans: every embedded record must describe a known preset IDL,
+        // so a renamed or deleted IDL can't leave a stale record behind.
+        let idl_keys: BTreeSet<(&str, &str)> = crate::PRESET_IDLS
+            .iter()
+            .map(|(preset, idl_file, _)| (*preset, *idl_file))
+            .collect();
+        for (preset, idl_file, _) in crate::PRESET_IDL_PROVENANCE {
+            assert!(
+                idl_keys.contains(&(*preset, *idl_file)),
+                "provenance record for src/presets/{preset}/{idl_file} describes no \
+                 known preset IDL; remove the record or fix its name"
+            );
+        }
     }
 }

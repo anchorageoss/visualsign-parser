@@ -35,6 +35,7 @@ What you get:
 - Each on-chain account paired with its IDL-declared name
 - Each instruction argument shown as a `text` field with the raw decoded value
 - Auto-registered in `available_visualizers()` and `PRESET_IDLS` by `build.rs` reflection — no edits to `presets/mod.rs` or any test file
+- A provenance record (`<idl>.provenance.json`) next to the IDL, saying where the IDL came from — written by the fetch script or one of its `--record-*` modes; the `builtin_programs.rs` provenance test refuses an IDL without a matching record
 - Crash-safety auto-covered by `tests/fuzz_idl_parsing.rs` (proptest, generative), `fuzz/fuzz_targets/` (cargo-fuzz, generative), and `tests/surfpool_fuzz.rs::preset_idls_roundtrip` (reflective, runs on every `cargo test`)
 
 What it deliberately does **not** produce:
@@ -132,7 +133,7 @@ python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} --out /tmp/{PROGRAM_ID}.json
 # refreshing an existing preset: summarize what changed against the committed IDL
 python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} --compare src/chain_parsers/visualsign-solana/src/presets/<preset>/<idl>.json > /dev/null
 ```
-Exit code 2 means the program publishes no on-chain IDL; fall back to Option C. The same fetch runs in CI as the "Solana: fetch on-chain IDL" workflow (`.github/workflows/solana-idl-fetch.yml`, manual dispatch or `workflow_call`), which uploads the IDL as an artifact.
+Exit code 2 means the program publishes no on-chain IDL; fall back to Option C. The same fetch runs in CI as the "Solana: fetch on-chain IDL" workflow (`.github/workflows/solana-idl-fetch.yml`, manual dispatch or `workflow_call`), which uploads the IDL and its provenance record as an artifact.
 
 ### Option A: Local Anchor CLI
 ```bash
@@ -152,6 +153,39 @@ If both fail, ask the user for the IDL (file path, URL, or pasted JSON).
 Save to: `{OUTPUT_DIR}src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json`
 
 The IDL **must** have an `instructions` array. Stop and report if missing.
+
+## Step A2: Record where the IDL came from
+
+Every preset IDL needs a provenance record next to it: `{snake_name}.provenance.json`.
+A Rust test (`preset_idl_provenance_records_match_the_idls` in
+`src/idl/builtin_programs.rs`) refuses an IDL whose record is missing or hashes
+different bytes, so this step is mandatory, not optional. Write the record with
+one of the four modes of `scripts/fetch-solana-idl.py` (see
+`docs/chains/solana/idl-parsing.mdx` for the schema):
+
+```bash
+# the IDL came from the on-chain fetch above
+python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} \
+  --out src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json \
+  --provenance src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.provenance.json
+
+# the IDL came from a public repo at a known commit (no network)
+python3 -I scripts/fetch-solana-idl.py --record-repo <https-url> --commit <full-40-hex-sha> \
+  --path <idl-path-in-that-repo> \
+  --idl src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json --program-id {PROGRAM_ID}
+
+# the IDL was supplied out of band by a named party (no network)
+python3 -I scripts/fetch-solana-idl.py --record-issuer '<who supplied it>' --notes '<context>' \
+  --idl src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json --program-id {PROGRAM_ID}
+
+# the origin can't be established (no network); keeps the gap visible
+python3 -I scripts/fetch-solana-idl.py --record-unknown '<why not>' \
+  --idl src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json --program-id {PROGRAM_ID}
+```
+
+The record modes hash the existing IDL file and never modify it. The on-chain
+mode rewrites the IDL together with its record, which is also how you refresh
+a preset whose IDL changed on chain.
 
 ## Step B: Scaffold config.rs
 
@@ -297,11 +331,14 @@ preset's own test module.
 No manual registration needed. `build.rs` auto-discovers `{PascalName}Visualizer`
 from any directory under `src/presets/` — do not edit `presets/mod.rs`, it is
 generated. Because Step A saved an IDL JSON at `{snake_name}/{snake_name}.json`,
-`build.rs` also adds an entry to `pub const PRESET_IDLS: &[(&str, &str)]`, which
+`build.rs` also adds an entry to `pub const PRESET_IDLS: &[(&str, &str, &str)]`
+(preset dir, IDL file name, IDL JSON), which
 `tests/surfpool_fuzz.rs::preset_idls_roundtrip` iterates automatically on every
 `cargo test` (decode IDL → build synthetic tx from the first
-instruction's discriminator → convert → assert non-empty payload). No test-file
-edit needed for either mechanism.
+instruction's discriminator → convert → assert non-empty payload). The Step A2
+provenance record is picked up the same way (`PRESET_IDL_PROVENANCE`) and
+checked by the `builtin_programs.rs` provenance test. No test-file
+edit needed for any of these mechanisms.
 
 This only covers crash-safety, not semantic correctness — the auto-roundtrip
 asserts the converter doesn't crash, not that the displayed fields read
