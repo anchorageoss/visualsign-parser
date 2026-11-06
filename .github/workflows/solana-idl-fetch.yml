@@ -9,7 +9,9 @@ name: "Solana: fetch on-chain IDL"
 # (`<program_id>.provenance.json`, which records the rpc slot and the slot the
 # program was last deployed at; both slots also land in the job summary).
 #
-# Locally: scripts/fetch-solana-idl.py <program_id> [--compare <committed.json>]
+# Locally (from the repo root): cargo run --manifest-path src/Cargo.toml
+# --locked --release -q -p solana-idl-fetch -- <program_id> [--compare
+# <committed.json>]
 
 on:
   workflow_dispatch:
@@ -52,16 +54,38 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    # Needs to build the tool (release profile, cached) before the 5-minute
+    # fetch itself; the fetch is what the timeout guards.
+    timeout-minutes: 15
     outputs:
       found: ${{ steps.fetch.outputs.found }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          components: clippy, rustfmt
+          cache: false
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/registry/git/db/
+            src/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Fetch the IDL
         id: fetch
         env:
+          # Invoked from the repo root via --manifest-path, so pin the
+          # target dir to the one the cache step above caches.
+          CARGO_TARGET_DIR: src/target
           PROGRAM_ID: ${{ inputs.program_id }}
           COMMITTED_IDL: ${{ inputs.committed_idl }}
           RPC_URL: ${{ inputs.rpc_url }}
@@ -78,7 +102,7 @@ jobs:
           fi
           mkdir -p out
           set +e
-          python3 -I scripts/fetch-solana-idl.py "$PROGRAM_ID" --rpc "$RPC_URL" \
+          cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- "$PROGRAM_ID" --rpc "$RPC_URL" \
             --out "out/$PROGRAM_ID.json" --provenance "out/$PROGRAM_ID.provenance.json" \
             "${compare[@]}" 2> out/summary.txt
           rc=$?
@@ -93,9 +117,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$rc" -eq 0 ]]; then
             # rpc_slot / program_last_deployed_slot live in the provenance record
-            # the script wrote next to the IDL; surface them in the job summary.
-            rpc_slot=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["rpc_slot"])' "out/$PROGRAM_ID.provenance.json")
-            last_deployed=$(python3 -I -c 'import json,sys; v = json.load(open(sys.argv[1]))["program_last_deployed_slot"]; print("null" if v is None else v)' "out/$PROGRAM_ID.provenance.json")
+            # the tool wrote next to the IDL; surface them in the job summary.
+            rpc_slot=$(jq -r '.rpc_slot' "out/$PROGRAM_ID.provenance.json")
+            last_deployed=$(jq -r 'if .program_last_deployed_slot == null then "null" else tostring end' "out/$PROGRAM_ID.provenance.json")
             {
               echo
               echo "rpc_slot: $rpc_slot"

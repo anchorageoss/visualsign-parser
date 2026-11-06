@@ -118,26 +118,27 @@ bytes), `source`, `recorded_at` (UTC ISO-8601). Then, per `source`:
 `unknown` is for presets whose origin can't be established any more: the record
 keeps that gap visible instead of hiding it.
 
-Create records with [`scripts/fetch-solana-idl.py`](https://github.com/anchorageoss/visualsign-parser/tree/main/scripts/fetch-solana-idl.py)
-(stdlib only, run with `python3 -I` from the repo root):
+Create records with the `solana-idl-fetch` workspace tool
+([`src/tools/solana-idl-fetch`](https://github.com/anchorageoss/visualsign-parser/tree/main/src/tools/solana-idl-fetch);
+run from the repo root, paths repo-root relative):
 
 ```bash
 # on-chain: fetches the IDL and writes the record for the exact bytes written
-python3 -I scripts/fetch-solana-idl.py <program_id> \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- <program_id> \
   --out src/chain_parsers/visualsign-solana/src/presets/<dir>/<file>.json \
   --provenance src/chain_parsers/visualsign-solana/src/presets/<dir>/<file>.provenance.json
 
 # copied from a public repository at a known commit (no network)
-python3 -I scripts/fetch-solana-idl.py --record-repo <https-url> --commit <full-40-hex-sha> \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-repo <https-url> --commit <full-40-hex-sha> \
   --path <idl-path-in-that-repo> \
   --idl src/chain_parsers/visualsign-solana/src/presets/<dir>/<file>.json --program-id <program_id>
 
 # supplied out of band by a named party (no network)
-python3 -I scripts/fetch-solana-idl.py --record-issuer '<who supplied it>' --notes '<context>' \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-issuer '<who supplied it>' --notes '<context>' \
   --idl src/chain_parsers/visualsign-solana/src/presets/<dir>/<file>.json --program-id <program_id>
 
 # origin can't be established (no network)
-python3 -I scripts/fetch-solana-idl.py --record-unknown '<why not>' \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-unknown '<why not>' \
   --idl src/chain_parsers/visualsign-solana/src/presets/<dir>/<file>.json --program-id <program_id>
 ```
 

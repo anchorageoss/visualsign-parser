@@ -127,11 +127,11 @@ You are scaffolding a Solana program visualizer preset from an Anchor IDL.
 
 ## Step A: Fetch the IDL
 
-### Preferred: the repo script (no Anchor CLI needed)
+### Preferred: the repo tool (no Anchor CLI needed)
 ```bash
-python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} --out /tmp/{PROGRAM_ID}.json
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- {PROGRAM_ID} --out /tmp/{PROGRAM_ID}.json
 # refreshing an existing preset: summarize what changed against the committed IDL
-python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} --compare src/chain_parsers/visualsign-solana/src/presets/<preset>/<idl>.json > /dev/null
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- {PROGRAM_ID} --compare src/chain_parsers/visualsign-solana/src/presets/<preset>/<idl>.json > /dev/null
 ```
 Exit code 2 means the program publishes no on-chain IDL; fall back to Option C. The same fetch runs in CI as the "Solana: fetch on-chain IDL" workflow (`.github/workflows/solana-idl-fetch.yml`, manual dispatch or `workflow_call`), which uploads the IDL and its provenance record as an artifact.
 
@@ -160,26 +160,26 @@ Every preset IDL needs a provenance record next to it: `{snake_name}.provenance.
 A Rust test (`preset_idl_provenance_records_match_the_idls` in
 `src/idl/builtin_programs.rs`) refuses an IDL whose record is missing or hashes
 different bytes, so this step is mandatory, not optional. Write the record with
-one of the four modes of `scripts/fetch-solana-idl.py` (see
+one of the four modes of the `solana-idl-fetch` workspace tool (see
 `docs/chains/solana/idl-parsing.mdx` for the schema):
 
 ```bash
 # the IDL came from the on-chain fetch above
-python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- {PROGRAM_ID} \
   --out src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json \
   --provenance src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.provenance.json
 
 # the IDL came from a public repo at a known commit (no network)
-python3 -I scripts/fetch-solana-idl.py --record-repo <https-url> --commit <full-40-hex-sha> \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-repo <https-url> --commit <full-40-hex-sha> \
   --path <idl-path-in-that-repo> \
   --idl src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json --program-id {PROGRAM_ID}
 
 # the IDL was supplied out of band by a named party (no network)
-python3 -I scripts/fetch-solana-idl.py --record-issuer '<who supplied it>' --notes '<context>' \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-issuer '<who supplied it>' --notes '<context>' \
   --idl src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json --program-id {PROGRAM_ID}
 
 # the origin can't be established (no network); keeps the gap visible
-python3 -I scripts/fetch-solana-idl.py --record-unknown '<why not>' \
+cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-unknown '<why not>' \
   --idl src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json --program-id {PROGRAM_ID}
 ```
 

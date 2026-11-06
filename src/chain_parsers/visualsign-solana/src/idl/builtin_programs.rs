@@ -462,7 +462,8 @@ mod tests {
 
     /// The exact command that regenerates `record`, per its `source`.
     /// Embedded in assertion messages so a failure tells the developer what
-    /// to run, not just that something is stale.
+    /// to run, not just that something is stale. Paths are repo-root
+    /// relative, so the commands work pasted from the repo root.
     fn provenance_regenerate_command(
         record: &serde_json::Value,
         program_id: &str,
@@ -477,29 +478,29 @@ mod tests {
         };
         match record_str(record, "source") {
             Some("onchain") => format!(
-                "python3 -I scripts/fetch-solana-idl.py {program_id} --out {idl_rel} \
-                 --provenance {record_rel}"
+                "cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- {program_id} \
+                 --out {idl_rel} --provenance {record_rel}"
             ),
             Some("repo") => format!(
-                "python3 -I scripts/fetch-solana-idl.py --record-repo {} \
+                "cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-repo {} \
                  --commit {} --path {} --idl {idl_rel} --program-id {program_id}",
                 get("repo"),
                 get("commit"),
                 get("path")
             ),
             Some("issuer") => format!(
-                "python3 -I scripts/fetch-solana-idl.py --record-issuer {} \
+                "cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-issuer {} \
                  --notes {} --idl {idl_rel} --program-id {program_id}",
                 get("supplied_by"),
                 get("notes")
             ),
             Some("unknown") => format!(
-                "python3 -I scripts/fetch-solana-idl.py --record-unknown {} \
+                "cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-unknown {} \
                  --idl {idl_rel} --program-id {program_id}",
                 get("notes")
             ),
             _ => format!(
-                "python3 -I scripts/fetch-solana-idl.py --record-unknown \
+                "cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-unknown \
                  <why-the-origin-is-unknown> --idl {idl_rel} --program-id {program_id}"
             ),
         }
@@ -667,10 +668,10 @@ mod tests {
                 panic!(
                     "missing provenance record {record_rel} for preset IDL {idl_rel}.\n\
                      Create it with one of (see docs/chains/solana/idl-parsing.mdx):\n\
-                     - python3 -I scripts/fetch-solana-idl.py {program_id} --out {idl_rel} --provenance {record_rel}\n\
-                     - python3 -I scripts/fetch-solana-idl.py --record-repo <https-url> --commit <full-40-hex-sha> --path <idl-path> --idl {idl_rel} --program-id {program_id}\n\
-                     - python3 -I scripts/fetch-solana-idl.py --record-issuer '<who>' --notes '<context>' --idl {idl_rel} --program-id {program_id}\n\
-                     - python3 -I scripts/fetch-solana-idl.py --record-unknown '<why>' --idl {idl_rel} --program-id {program_id}"
+                     - cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- {program_id} --out {idl_rel} --provenance {record_rel}\n\
+                     - cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-repo <https-url> --commit <full-40-hex-sha> --path <idl-path> --idl {idl_rel} --program-id {program_id}\n\
+                     - cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-issuer '<who>' --notes '<context>' --idl {idl_rel} --program-id {program_id}\n\
+                     - cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- --record-unknown '<why>' --idl {idl_rel} --program-id {program_id}"
                 );
             };
 
@@ -744,7 +745,7 @@ mod tests {
                     assert_eq!(
                         record_str(&record, "tool"),
                         Some("scripts/fetch-solana-idl.py"),
-                        "'onchain' record {record_rel} 'tool' must name the fetch script"
+                        "'onchain' record {record_rel} 'tool' must name the fetch tool the committed records were written with"
                     );
                 }
                 "repo" => {
