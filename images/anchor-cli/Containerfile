@@ -1,4 +1,7 @@
-FROM rust:1.88-slim-bookworm AS build
+# Builds the third-party Anchor CLI (v0.31.1), not this repo's crates, so it is not
+# tied to src/rust-toolchain.toml. Bump the Rust image together with the Anchor tag,
+# rebuild, and re-resolve both digests locally.
+FROM rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -12,7 +15,7 @@ ENV PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
 # Install Anchor CLI
 RUN cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/*
