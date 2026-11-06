@@ -1,0 +1,4 @@
+enum Chain {
+  CHAIN_UNSPECIFIED = 0;
+  CHAIN_GOOD = 1;
+}

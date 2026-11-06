@@ -1,0 +1,9 @@
+[package]
+name = "visualsign-good"
+version = "0.0.0"
+
+[features]
+default = ["cli-plugin"]
+
+[lints]
+workspace = true
