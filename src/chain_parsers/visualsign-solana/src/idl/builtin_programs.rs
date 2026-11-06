@@ -350,6 +350,10 @@ fn preset_idl_configs()
                 include_str!("../presets/neutral_trade/neutral_trade.json"),
             ),
             (
+                "proVF4pMXVaYqmy4NjniPh4pqKNfMmsihgd4wdkCX3u",
+                include_str!("../presets/okx_router/okx_router.json"),
+            ),
+            (
                 "onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe",
                 include_str!("../presets/onre_app/onre_app.json"),
             ),
@@ -545,5 +549,16 @@ mod tests {
         // with a rendered canonical label.
         assert!(!is_reserved_canonical_name("system program"));
         assert!(!is_reserved_canonical_name("System Program "));
+    }
+
+    #[test]
+    fn okx_router_preset_idl_is_registered() {
+        // Registration alone is not enough: a preset IDL that fails to parse
+        // is dropped from the records without an error, so assert that it
+        // made it through to the decoded records the intermediate path uses.
+        let record = preset_idl_records()
+            .get("proVF4pMXVaYqmy4NjniPh4pqKNfMmsihgd4wdkCX3u")
+            .expect("okx_router preset IDL must be registered and parse");
+        assert!(record.custom_idl.is_some());
     }
 }
