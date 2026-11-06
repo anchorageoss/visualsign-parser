@@ -126,7 +126,7 @@ fn parse_marinade_finance_instruction(
 fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
-    instruction_accounts: &[solana_sdk::instruction::AccountMeta],
+    instruction_accounts: &[solana_instruction::AccountMeta],
 ) -> BTreeMap<String, String> {
     let mut named = BTreeMap::new();
 

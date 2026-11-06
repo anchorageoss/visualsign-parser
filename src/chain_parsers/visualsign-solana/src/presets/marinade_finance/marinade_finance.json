@@ -166,6 +166,24 @@
             "type": {
               "defined": "Fee"
             }
+          },
+          {
+            "name": "delinquentUpgrader",
+            "type": {
+              "defined": "DelinquentUpgraderState"
+            }
+          },
+          {
+            "name": "depositSolFee",
+            "type": {
+              "defined": "FeeCents"
+            }
+          },
+          {
+            "name": "depositStakeAccountFee",
+            "type": {
+              "defined": "FeeCents"
+            }
           }
         ],
         "kind": "struct"
@@ -606,6 +624,36 @@
       "code": 6086,
       "msg": "Capacity of the list must be not less than it's current size",
       "name": "ShrinkingListWithDeletingContents"
+    },
+    {
+      "code": 6087,
+      "msg": "Upgrading invariant violation",
+      "name": "UpgradingInvariantViolation"
+    },
+    {
+      "code": 6088,
+      "msg": "Delinquent upgrader is not done",
+      "name": "DelinquentUpgraderIsNotDone"
+    },
+    {
+      "code": 6089,
+      "msg": "Canonical stake account for this validator already exists",
+      "name": "CanonicalStakeAccountAlreadyCreated"
+    },
+    {
+      "code": 6090,
+      "msg": "Invalid canonical stake account address",
+      "name": "InvalidCanonicalStakeAccountAddress"
+    },
+    {
+      "code": 6091,
+      "msg": "Deposit stake account fee is too high",
+      "name": "DepositStakeAccountFeeIsTooHigh"
+    },
+    {
+      "code": 6092,
+      "msg": "Deposit SOL fee is too high",
+      "name": "DepositSolFeeIsTooHigh"
     }
   ],
   "events": [
@@ -813,6 +861,24 @@
           "type": {
             "option": {
               "defined": "FeeValueChange"
+            }
+          }
+        },
+        {
+          "index": false,
+          "name": "depositSolFeeChange",
+          "type": {
+            "option": {
+              "defined": "FeeCentsValueChange"
+            }
+          }
+        },
+        {
+          "index": false,
+          "name": "depositStakeAccountFeeChange",
+          "type": {
+            "option": {
+              "defined": "FeeCentsValueChange"
             }
           }
         }
@@ -1094,6 +1160,66 @@
         }
       ],
       "name": "MergeStakesEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "state",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "epoch",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "canonicalStakeAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "sourceStakeIndex",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "sourceStakeAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "lastUpdateSourceStakeDelegation",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "validatorIndex",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "validatorVote",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "validatorActiveBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "totalActiveBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "operationalSolBalance",
+          "type": "u64"
+        }
+      ],
+      "name": "CreateCanonicalStakeEvent"
     },
     {
       "fields": [
@@ -1891,6 +2017,11 @@
           "index": false,
           "name": "msolSupply",
           "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "solFees",
+          "type": "u64"
         }
       ],
       "name": "DepositStakeAccountEvent"
@@ -1960,6 +2091,11 @@
         {
           "index": false,
           "name": "msolSupply",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "solFees",
           "type": "u64"
         }
       ],
@@ -2935,14 +3071,14 @@
               "isMut": false,
               "isSigner": false,
               "name": "tokenProgram"
+            },
+            {
+              "isMut": true,
+              "isSigner": false,
+              "name": "validatorList"
             }
           ],
           "name": "common"
-        },
-        {
-          "isMut": true,
-          "isSigner": false,
-          "name": "validatorList"
         }
       ],
       "args": [
@@ -3020,6 +3156,11 @@
               "isMut": false,
               "isSigner": false,
               "name": "tokenProgram"
+            },
+            {
+              "isMut": true,
+              "isSigner": false,
+              "name": "validatorList"
             }
           ],
           "name": "common"
@@ -3038,6 +3179,10 @@
       "args": [
         {
           "name": "stakeIndex",
+          "type": "u32"
+        },
+        {
+          "name": "validatorIndex",
           "type": "u32"
         }
       ],
@@ -3356,17 +3501,22 @@
         {
           "isMut": true,
           "isSigner": false,
-          "name": "validatorList"
-        },
-        {
-          "isMut": true,
-          "isSigner": false,
           "name": "stakeList"
         },
         {
           "isMut": true,
           "isSigner": false,
-          "name": "stakeAccount"
+          "name": "validatorList"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "canonicalStake"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "sourceStake"
         },
         {
           "isMut": false,
@@ -3376,27 +3526,12 @@
         {
           "isMut": false,
           "isSigner": false,
-          "name": "reservePda"
+          "name": "stakeWithdrawAuthority"
         },
         {
           "isMut": true,
-          "isSigner": true,
-          "name": "splitStakeAccount"
-        },
-        {
-          "isMut": true,
-          "isSigner": true,
-          "name": "splitStakeRentPayer"
-        },
-        {
-          "isMut": false,
           "isSigner": false,
-          "name": "destValidatorAccount"
-        },
-        {
-          "isMut": true,
-          "isSigner": true,
-          "name": "redelegateStakeAccount"
+          "name": "operationalSolAccount"
         },
         {
           "isMut": false,
@@ -3411,34 +3546,25 @@
         {
           "isMut": false,
           "isSigner": false,
-          "name": "stakeConfig"
+          "name": "stakeProgram"
         },
         {
           "isMut": false,
           "isSigner": false,
           "name": "systemProgram"
-        },
-        {
-          "isMut": false,
-          "isSigner": false,
-          "name": "stakeProgram"
         }
       ],
       "args": [
         {
-          "name": "stakeIndex",
+          "name": "sourceStakeIndex",
           "type": "u32"
         },
         {
-          "name": "sourceValidatorIndex",
-          "type": "u32"
-        },
-        {
-          "name": "destValidatorIndex",
+          "name": "validatorIndex",
           "type": "u32"
         }
       ],
-      "name": "redelegate"
+      "name": "createCanonicalStake"
     },
     {
       "accounts": [
@@ -3646,6 +3772,27 @@
         }
       ],
       "name": "reallocStakeList"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "state"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "validatorList"
+        }
+      ],
+      "args": [
+        {
+          "name": "maxValidators",
+          "type": "u32"
+        }
+      ],
+      "name": "finalizeDelinquentUpgrade"
     }
   ],
   "name": "marinade_finance",
@@ -3923,6 +4070,22 @@
                 "defined": "Fee"
               }
             }
+          },
+          {
+            "name": "depositSolFee",
+            "type": {
+              "option": {
+                "defined": "FeeCents"
+              }
+            }
+          },
+          {
+            "name": "depositStakeAccountFee",
+            "type": {
+              "option": {
+                "defined": "FeeCents"
+              }
+            }
           }
         ],
         "kind": "struct"
@@ -4154,7 +4317,13 @@
           },
           {
             "name": "isEmergencyUnstaking",
-            "type": "u8"
+            "type": "bool"
+          },
+          {
+            "name": "lastUpdateStatus",
+            "type": {
+              "defined": "StakeStatus"
+            }
           }
         ],
         "kind": "struct"
@@ -4250,6 +4419,10 @@
           {
             "name": "duplicationFlagBumpSeed",
             "type": "u8"
+          },
+          {
+            "name": "delinquentUpgraderActiveBalance",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -4296,6 +4469,64 @@
           }
         ],
         "kind": "struct"
+      }
+    },
+    {
+      "name": "DelinquentUpgraderState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "fields": [
+              {
+                "name": "visited_count",
+                "type": "u32"
+              },
+              {
+                "name": "total_active_balance",
+                "type": "u64"
+              },
+              {
+                "name": "total_delinquent_balance",
+                "type": "u64"
+              }
+            ],
+            "name": "IteratingStakes"
+          },
+          {
+            "fields": [
+              {
+                "name": "visited_count",
+                "type": "u32"
+              },
+              {
+                "name": "delinquent_balance_left",
+                "type": "u64"
+              }
+            ],
+            "name": "IteratingValidators"
+          },
+          {
+            "name": "Done"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakeStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Unknown"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Deactivating"
+          }
+        ]
       }
     }
   ],
