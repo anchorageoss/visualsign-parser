@@ -1,9 +1,12 @@
 //! SPL Memo preset implementation for Solana.
 //!
-//! The Memo program (`MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`) is a
-//! native, non-Anchor program: its instruction data carries no 8-byte
-//! discriminator and no borsh-encoded arguments. The entire data buffer *is*
-//! the memo, which the program requires to be valid UTF-8. This visualizer
+//! The Memo programs (v2 `MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr` and the
+//! still-live v1 `Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo`) are native,
+//! non-Anchor programs: their instruction data carries no 8-byte discriminator
+//! and no borsh-encoded arguments. The entire data buffer *is* the memo. The
+//! memo is chosen by whoever built the transaction, so it is shown escaped
+//! (`escape_display_bytes`), never raw: a newline or bidi control could
+//! otherwise forge extra rows in the approval display. This visualizer
 //! therefore decodes the data directly as text rather than going through the
 //! IDL/discriminator path used by Anchor-program presets (e.g. dflow_aggregator).
 //! It mirrors the native-program pattern of `compute_budget` and
@@ -14,7 +17,9 @@ mod config;
 use crate::core::{
     InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
+use crate::idl::builtin_programs::canonical_name;
 use config::MemoConfig;
+use visualsign::encodings::escape_display_bytes;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -23,10 +28,13 @@ use visualsign::{
 };
 
 pub(crate) const MEMO_PROGRAM_ID: &str = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+pub(crate) const MEMO_V1_PROGRAM_ID: &str = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo";
 
-/// Canonical display name for the program, matching
-/// `idl::builtin_programs::canonical_name`.
-const PROGRAM_DISPLAY_NAME: &str = "Memo Program";
+/// Display name for a memo program, from `idl::builtin_programs::canonical_name`
+/// so it cannot drift from the canonical table.
+fn program_display_name(program_id: &str) -> &'static str {
+    canonical_name(program_id).unwrap_or("Memo Program")
+}
 
 static MEMO_CONFIG: MemoConfig = MemoConfig;
 
@@ -53,17 +61,22 @@ impl InstructionVisualizer for MemoVisualizer {
     }
 }
 
-/// Render the raw instruction data as the memo's text.
+/// Render the memo bytes for display, escaped.
 ///
-/// The SPL Memo program requires the memo to be valid UTF-8, so the common
-/// case is a clean decode. Empty data and non-UTF-8 data fall back to an ASCII
-/// placeholder; the raw bytes stay available in the "Raw Data" field either
-/// way.
+/// Every byte that isn't printable ASCII (newlines, control and bidi
+/// characters, non-ASCII UTF-8, invalid UTF-8) is percent-encoded, so the
+/// text can't add rows to the display, always passes the payload charset
+/// check, and distinct signed bytes always render differently.
+/// `unescape_display_bytes` recovers the exact bytes.
 fn memo_display_text(data: &[u8]) -> String {
-    match std::str::from_utf8(data) {
-        Ok("") => "(empty memo)".to_string(),
-        Ok(text) => text.to_string(),
-        Err(_) => "(non-UTF-8 data; see Raw Data)".to_string(),
+    escape_display_bytes(data)
+}
+
+/// The memo's length, shown next to it so an empty memo is unambiguous.
+fn memo_length_text(data: &[u8]) -> String {
+    match data.len() {
+        1 => "1 byte".to_string(),
+        n => format!("{n} bytes"),
     }
 }
 
@@ -76,12 +89,14 @@ fn render_memo(
     instruction_index: usize,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let memo_text = memo_display_text(data);
+    let length_text = memo_length_text(data);
     let hex_fallback = hex::encode(data);
 
     let condensed = SignablePayloadFieldListLayout {
         fields: vec![
-            create_text_field("Program", PROGRAM_DISPLAY_NAME)?,
+            create_text_field("Program", program_display_name(program_id))?,
             create_text_field("Memo", &memo_text)?,
+            create_text_field("Memo Length", &length_text)?,
         ],
     };
 
@@ -89,6 +104,7 @@ fn render_memo(
         fields: vec![
             create_text_field("Program ID", program_id)?,
             create_text_field("Memo", &memo_text)?,
+            create_text_field("Memo Length", &length_text)?,
             create_raw_data_field(data, Some(hex_fallback.clone()))?,
         ],
     };
@@ -121,6 +137,7 @@ fn render_memo(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use visualsign::encodings::unescape_display_bytes;
 
     /// (label, value) pairs extracted from a list of text fields.
     type LabeledFields = Vec<(String, String)>;
@@ -167,26 +184,68 @@ mod tests {
     }
 
     #[test]
-    fn test_memo_display_text_preserves_unicode() {
-        // The Memo program accepts any valid UTF-8; non-ASCII content must pass
-        // through unchanged rather than being mangled or rejected. Built from
-        // escapes to keep this source file ASCII-only.
+    fn test_memo_display_text_escapes_unicode_reversibly() {
+        // Non-ASCII UTF-8 is percent-encoded, not passed through: the payload
+        // charset check rejects raw non-ASCII, which would fail the whole
+        // transaction. Built from escapes to keep this source file ASCII-only.
         let memo = "caf\u{e9} \u{1f600} \u{65e5}\u{672c}\u{8a9e}";
-        assert_eq!(memo_display_text(memo.as_bytes()), memo);
+        let shown = memo_display_text(memo.as_bytes());
+        assert!(shown.is_ascii());
+        assert_eq!(unescape_display_bytes(&shown).unwrap(), memo.as_bytes());
     }
 
     #[test]
-    fn test_memo_display_text_empty() {
-        assert_eq!(memo_display_text(b""), "(empty memo)");
+    fn test_memo_display_text_cannot_forge_rows() {
+        let memo = b"Payment received\nAmount: 1000000 USDC\r\t";
+        let shown = memo_display_text(memo);
+        assert!(!shown.contains('\n') && !shown.contains('\r') && !shown.contains('\t'));
+        assert!(shown.contains("%0A"));
+        assert_eq!(unescape_display_bytes(&shown).unwrap(), memo);
     }
 
     #[test]
-    fn test_memo_display_text_invalid_utf8() {
-        // 0xFF is never a valid UTF-8 byte.
-        assert_eq!(
-            memo_display_text(&[0xff, 0xfe, 0xfd]),
-            "(non-UTF-8 data; see Raw Data)"
-        );
+    fn test_memo_display_text_escapes_bidi_controls() {
+        // U+202E RIGHT-TO-LEFT OVERRIDE can visually reorder an address.
+        let memo = "pay \u{202e}0001 USDC";
+        let shown = memo_display_text(memo.as_bytes());
+        assert!(!shown.contains('\u{202e}'));
+        assert_eq!(unescape_display_bytes(&shown).unwrap(), memo.as_bytes());
+    }
+
+    #[test]
+    fn test_memo_display_text_invalid_utf8_is_escaped_not_replaced() {
+        // 0xFF is never a valid UTF-8 byte; each byte stays distinguishable.
+        let shown = memo_display_text(&[0xff, 0xfe, 0xfd]);
+        assert_eq!(shown, "%FF%FE%FD");
+        assert_ne!(shown, memo_display_text(&[0xff, 0xfe, 0xfc]));
+    }
+
+    #[test]
+    fn test_memo_length_disambiguates_empty_memo() {
+        assert_eq!(memo_length_text(b""), "0 bytes");
+        assert_eq!(memo_length_text(b"x"), "1 byte");
+        // A memo whose text looks like a placeholder still differs by length.
+        assert_ne!(memo_length_text(b""), memo_length_text(b"(empty)"));
+    }
+
+    #[test]
+    fn test_rendered_memo_passes_payload_charset_check() {
+        for data in [
+            &b""[..],
+            b"plain",
+            b"line1\nline2",
+            "caf\u{e9}".as_bytes(),
+            &[0xff, 0x00, 0x7f],
+        ] {
+            let field = render_memo(MEMO_PROGRAM_ID, data, 0).unwrap();
+            let (_title, condensed, expanded) = preview_parts(&field);
+            for (label, value) in condensed.iter().chain(expanded.iter()) {
+                assert!(
+                    value.chars().all(|c| c == ' ' || c.is_ascii_graphic()),
+                    "{label} = {value:?} for {data:?} contains a restricted character"
+                );
+            }
+        }
     }
 
     #[test]
@@ -200,6 +259,7 @@ mod tests {
             vec![
                 ("Program".to_string(), "Memo Program".to_string()),
                 ("Memo".to_string(), "hello world".to_string()),
+                ("Memo Length".to_string(), "11 bytes".to_string()),
             ]
         );
         assert_eq!(
@@ -207,6 +267,7 @@ mod tests {
             vec![
                 ("Program ID".to_string(), MEMO_PROGRAM_ID.to_string()),
                 ("Memo".to_string(), "hello world".to_string()),
+                ("Memo Length".to_string(), "11 bytes".to_string()),
                 ("Raw Data".to_string(), hex::encode(b"hello world")),
             ]
         );
@@ -232,8 +293,8 @@ mod tests {
         assert!(
             expanded
                 .iter()
-                .any(|(l, v)| l == "Memo" && v == "(non-UTF-8 data; see Raw Data)"),
-            "expanded view should show the non-UTF-8 placeholder for the Memo field"
+                .any(|(l, v)| l == "Memo" && v == "%FF%00%10"),
+            "expanded view should show the escaped bytes for the Memo field"
         );
         assert!(
             expanded
@@ -247,7 +308,18 @@ mod tests {
     fn test_memo_config_handles_program_id() {
         let config = MemoConfig::new();
         assert!(config.can_handle(MEMO_PROGRAM_ID));
+        assert!(config.can_handle(MEMO_V1_PROGRAM_ID));
         assert!(!config.can_handle("11111111111111111111111111111111"));
+    }
+
+    #[test]
+    fn test_memo_v1_renders_with_its_canonical_name() {
+        let field = render_memo(MEMO_V1_PROGRAM_ID, b"hi", 0).unwrap();
+        let (_title, condensed, _expanded) = preview_parts(&field);
+        assert_eq!(
+            condensed[0],
+            ("Program".to_string(), "Memo Program v1".to_string())
+        );
     }
 
     #[test]
