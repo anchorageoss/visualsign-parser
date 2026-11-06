@@ -134,9 +134,12 @@ anchor idl fetch {PROGRAM_ID} --provider.cluster mainnet
 ### Option B: Docker container
 ```bash
 docker images -q anchor-cli | grep -q . || \
-  docker build -t anchor-cli -f images/anchor-cli/Containerfile .
+  docker build -t anchor-cli -f images/anchor-cli/Containerfile images/anchor-cli
 docker run --rm anchor-cli idl fetch {PROGRAM_ID} --provider.cluster mainnet
 ```
+
+The image ships the pinned Anchor release binary (see `.github/anchor.env`);
+no source build and no Solana CLI are involved.
 
 ### Option C: User-provided
 If both fail, ask the user for the IDL (file path, URL, or pasted JSON).
