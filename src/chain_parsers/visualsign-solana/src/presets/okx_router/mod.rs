@@ -46,9 +46,9 @@ impl InstructionVisualizer for OkxRouterVisualizer {
         let parsed = parse_instruction_with_idl(data, OKX_ROUTER_PROGRAM_ID, &idl)
             .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
 
-        let named_accounts = build_named_accounts(&idl, data, &view.accounts);
+        let accounts = build_named_accounts(&idl, data, &view.accounts);
 
-        build_visualization(context, &view, data, &parsed, &named_accounts)
+        build_visualization(context, &view, data, &parsed, &accounts)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -65,28 +65,50 @@ fn load_idl() -> Result<Idl, VisualSignError> {
         .map_err(|e| VisualSignError::DecodeError(format!("Failed to decode bundled IDL: {e}")))
 }
 
-fn build_named_accounts(
-    idl: &Idl,
-    instruction_data: &[u8],
-    accounts: &[String],
-) -> BTreeMap<String, String> {
-    let mut named = BTreeMap::new();
-    if instruction_data.len() < 8 {
-        return named;
-    }
+/// The instruction's accounts, named from the IDL by position.
+///
+/// Anchor reads accounts by position too: an omitted optional account is
+/// passed as the program's own ID, so naming by position shows exactly what
+/// the program will use. Such placeholders are labelled "Not provided" next
+/// to the address. Accounts past the IDL's list (the pools and vaults a route
+/// passes through) are kept, in order, as remaining accounts, so no signed
+/// account is left out of the display.
+struct InstructionAccounts {
+    named: BTreeMap<String, String>,
+    remaining: Vec<String>,
+}
+
+fn build_named_accounts(idl: &Idl, instruction_data: &[u8], accounts: &[String]) -> InstructionAccounts {
+    let mut result = InstructionAccounts {
+        named: BTreeMap::new(),
+        remaining: Vec::new(),
+    };
+    let Some(discriminator) = instruction_data.get(..8) else {
+        result.remaining = accounts.to_vec();
+        return result;
+    };
     let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
         inst.discriminator
             .as_ref()
-            .is_some_and(|disc| &instruction_data[0..8] == disc.as_slice())
+            .is_some_and(|disc| discriminator == disc.as_slice())
     }) else {
-        return named;
+        result.remaining = accounts.to_vec();
+        return result;
     };
     for (index, account) in accounts.iter().enumerate() {
-        if let Some(idl_account) = idl_instruction.accounts.get(index) {
-            named.insert(idl_account.name.clone(), account.clone());
+        match idl_instruction.accounts.get(index) {
+            Some(idl_account) => {
+                let shown = if idl_account.is_optional && account == OKX_ROUTER_PROGRAM_ID {
+                    format!("Not provided ({account})")
+                } else {
+                    account.clone()
+                };
+                result.named.insert(idl_account.name.clone(), shown);
+            }
+            None => result.remaining.push(account.clone()),
         }
     }
-    named
+    result
 }
 
 fn format_arg_value(value: &serde_json::Value) -> String {
@@ -102,7 +124,7 @@ fn build_visualization(
     view: &InstructionView,
     data: &[u8],
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &BTreeMap<String, String>,
+    accounts: &InstructionAccounts,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let program_id = view.program_id.clone();
     let title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
@@ -116,12 +138,14 @@ fn build_visualization(
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];
 
-    let mut account_keys: Vec<&String> = named_accounts.keys().collect();
-    account_keys.sort();
-    for key in account_keys {
-        if let Some(addr) = named_accounts.get(key) {
-            expanded_fields.push(create_text_field(key, addr)?);
-        }
+    for (name, address) in &accounts.named {
+        expanded_fields.push(create_text_field(name, address)?);
+    }
+    for (index, address) in accounts.remaining.iter().enumerate() {
+        expanded_fields.push(create_text_field(
+            &format!("Remaining Account {}", index + 1),
+            address,
+        )?);
     }
 
     for (key, value) in &parsed.program_call_args {
@@ -167,6 +191,78 @@ fn build_visualization(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_parser::solana::structs::IdlInstruction;
+
+    /// `swap_tob_v3` names 14 accounts; slots 5-11 are optional.
+    fn swap_tob_v3(idl: &Idl) -> (Vec<u8>, &IdlInstruction) {
+        let instruction = idl
+            .instructions
+            .iter()
+            .find(|inst| inst.name == "swap_tob_v3")
+            .expect("swap_tob_v3 is in the IDL");
+        let mut data = instruction.discriminator.clone().expect("discriminator");
+        data.extend_from_slice(&[0u8; 4]);
+        (data, instruction)
+    }
+
+    fn keys(n: usize) -> Vec<String> {
+        (0..n).map(|_| solana_pubkey::Pubkey::new_unique().to_string()).collect()
+    }
+
+    #[test]
+    fn test_accounts_past_the_idl_list_are_kept_in_order() {
+        let idl = load_idl().expect("IDL must load");
+        let (data, instruction) = swap_tob_v3(&idl);
+        let declared = instruction.accounts.len();
+        let accounts = keys(declared + 3);
+
+        let result = build_named_accounts(&idl, &data, &accounts);
+
+        assert_eq!(result.named.len(), declared);
+        assert_eq!(result.remaining, accounts[declared..].to_vec());
+    }
+
+    #[test]
+    fn test_unused_optional_account_reads_not_provided() {
+        let idl = load_idl().expect("IDL must load");
+        let (data, instruction) = swap_tob_v3(&idl);
+        let optional_index = instruction
+            .accounts
+            .iter()
+            .position(|account| account.is_optional)
+            .expect("swap_tob_v3 has optional accounts");
+        let required_index = instruction
+            .accounts
+            .iter()
+            .position(|account| !account.is_optional)
+            .expect("swap_tob_v3 has required accounts");
+        let mut accounts = keys(instruction.accounts.len());
+        accounts[optional_index] = OKX_ROUTER_PROGRAM_ID.to_string();
+        // The program ID in a required slot is just an address, not a placeholder.
+        accounts[required_index] = OKX_ROUTER_PROGRAM_ID.to_string();
+
+        let result = build_named_accounts(&idl, &data, &accounts);
+
+        assert_eq!(
+            result.named[&instruction.accounts[optional_index].name],
+            format!("Not provided ({OKX_ROUTER_PROGRAM_ID})")
+        );
+        assert_eq!(
+            result.named[&instruction.accounts[required_index].name],
+            OKX_ROUTER_PROGRAM_ID
+        );
+    }
+
+    #[test]
+    fn test_unknown_or_short_data_keeps_every_account() {
+        let idl = load_idl().expect("IDL must load");
+        let accounts = keys(4);
+        for data in [&[0xFFu8; 12][..], &[1, 2, 3][..]] {
+            let result = build_named_accounts(&idl, data, &accounts);
+            assert!(result.named.is_empty());
+            assert_eq!(result.remaining, accounts);
+        }
+    }
 
     #[test]
     fn test_okx_router_idl_loads() {
