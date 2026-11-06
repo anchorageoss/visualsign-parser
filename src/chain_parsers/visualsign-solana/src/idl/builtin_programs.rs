@@ -287,14 +287,13 @@ fn preset_idl_configs()
         OnceLock::new();
     PRESET_IDL_CONFIGS.get_or_init(|| {
         const ENTRIES: &[(&str, &str)] = &[
-            // Abra: compiled in ahead of its preset; see `preset_program_ids`.
             (
                 "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
-                include_str!("abra/abrafi_backed_token.json"),
+                include_str!("../presets/abra/abrafi_backed_token.json"),
             ),
             (
                 "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
-                include_str!("abra/abrafi_staking_liquid.json"),
+                include_str!("../presets/abra/abrafi_staking_liquid.json"),
             ),
             (
                 "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
@@ -339,6 +338,10 @@ fn preset_idl_configs()
             (
                 "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
                 include_str!("../presets/kamino_vault/kamino_vault.json"),
+            ),
+            (
+                "MFv2hWf31Z9kbCa1snEPdcgp7X3GK4Y9EtyMkRxBUGA",
+                include_str!("../presets/marginfi/marginfi.json"),
             ),
             (
                 "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
@@ -538,6 +541,30 @@ mod tests {
         // every base58 string.
         assert!(!preset_ids.is_empty());
         assert!(!preset_ids.contains("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"));
+    }
+
+    /// Every IDL file under `presets/` must have an `ENTRIES` line, or the intermediate output
+    /// decodes nothing for that program while `registered_source` still says `Preset`.
+    #[test]
+    fn preset_idls_are_registered() {
+        let registered: Vec<&str> = preset_idl_configs()
+            .values()
+            .filter_map(|config| match &config.idl {
+                solana_parser::CustomIdl::Json(json) => Some(json.as_str()),
+                solana_parser::CustomIdl::Parsed(_) => None,
+            })
+            .collect();
+        for (name, json) in crate::PRESET_IDLS {
+            assert!(
+                registered.contains(json),
+                "preset {name} has an IDL file with no ENTRIES line"
+            );
+        }
+        assert_eq!(
+            registered.len(),
+            crate::PRESET_IDLS.len(),
+            "an ENTRIES line has no IDL file under presets/"
+        );
     }
 
     #[test]

@@ -1,0 +1,108 @@
+{
+  "description": "Abra unmint claim burning 24999.999999 USDaf for USDC (mainnet)",
+  "source": "https://solscan.io/tx/5Bou9PD9dYDm9GEm3QtHJbdb7jA71AgwPCXBtZAhH7RkjGQaxpDEs2GtLX6YqRQ8HSV4DD7nRGPfpYRYAXgCDho8",
+  "signature": "5Bou9PD9dYDm9GEm3QtHJbdb7jA71AgwPCXBtZAhH7RkjGQaxpDEs2GtLX6YqRQ8HSV4DD7nRGPfpYRYAXgCDho8",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "3 instructions: [0-1] ComputeBudget, [2] Abra claim_unmint. Testing instruction [2].",
+  "instruction_index": 2,
+  "instruction_data": "FLPEfGMQA9NaTCRwUWtkkF",
+  "program_id": "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+  "accounts": [
+    {
+      "pubkey": "9eUcxpxHn7ZpcEKw5eGofPNZiSVSCESjWcmwJCjFgETE",
+      "signer": false,
+      "writable": true,
+      "description": "state"
+    },
+    {
+      "pubkey": "BN31wAJLcp22gpBUMESbTTSZ4hzMvdKWR9sx37TjEMPV",
+      "signer": true,
+      "writable": true,
+      "description": "user"
+    },
+    {
+      "pubkey": "CqoegkgnoMiLehYVpTZXf6HvjVeB2GQRZ1Eh3wq4bQS7",
+      "signer": false,
+      "writable": false,
+      "description": "vault_authority"
+    },
+    {
+      "pubkey": "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+      "signer": false,
+      "writable": true,
+      "description": "abrafi_backed_token_mint"
+    },
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": true,
+      "description": "claim_token_mint"
+    },
+    {
+      "pubkey": "DVLZSjHy87VkXQboQusJJBuHEYbtufxNi42qKU4S3oSM",
+      "signer": false,
+      "writable": false,
+      "description": "user_abrafi_backed_token_account"
+    },
+    {
+      "pubkey": "C9MPUHh4KdzirmLcwZSL63WNNmMsBd7gz2gnenVHuacR",
+      "signer": false,
+      "writable": true,
+      "description": "user_claim_token_account"
+    },
+    {
+      "pubkey": "C2JgWMy5gW3qAKMkAqepYcXLC8KsoLN93GSF95TEfuw1",
+      "signer": false,
+      "writable": true,
+      "description": "escrow_token_account"
+    },
+    {
+      "pubkey": "Fyvh6Mb9XdVMkhUdLQRWiQDTdWSWM3K4k4YrKisYm3iX",
+      "signer": false,
+      "writable": true,
+      "description": "vault_token_account"
+    },
+    {
+      "pubkey": "2PqDbiEEGW98KwwdJbpmdsavp5mKLhmzSYwKXszZ81Ac",
+      "signer": false,
+      "writable": true,
+      "description": "user_unmint_details"
+    },
+    {
+      "pubkey": "BqZabRBS2k5U4jL4sHLSdsDvzSsM8NNoH7nzzBXkkrXV",
+      "signer": false,
+      "writable": false,
+      "description": "mint_whitelist"
+    },
+    {
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "signer": false,
+      "writable": false,
+      "description": "associated_token_program"
+    },
+    {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "writable": false,
+      "description": "token_program"
+    },
+    {
+      "pubkey": "11111111111111111111111111111111",
+      "signer": false,
+      "writable": false,
+      "description": "system_program"
+    }
+  ],
+  "expected_title": "Collect USDC from Abra",
+  "expected_fields": {
+    "instruction": "claim_unmint",
+    "discriminator": "7414c6a75faea1f7",
+    "action": "Collect",
+    "amount": "24999.999999",
+    "claim_amount": "24999999999",
+    "recipient": "C9MPUHh4KdzirmLcwZSL63WNNmMsBd7gz2gnenVHuacR",
+    "paid_from": "Fyvh6Mb9XdVMkhUdLQRWiQDTdWSWM3K4k4YrKisYm3iX",
+    "burned_from": "C2JgWMy5gW3qAKMkAqepYcXLC8KsoLN93GSF95TEfuw1",
+    "raw_data": "7414c6a75faea1f7ffb91dd205000000"
+  }
+}

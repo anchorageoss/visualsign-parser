@@ -5,6 +5,12 @@ description: "New Solana preset coverage, IDL handling changes, and Solana-speci
 
 <Icon icon="rss" /> [Subscribe](/changelog/solana/rss.xml) · Filter by tag — `Wallet API`, `Contributors`, `Security`, `Architecture`.
 
+<Update label="2026-11-05 — Abra preset and shared receipt-token rendering" tags={["Wallet API", "Contributors"]}>
+  The Abra programs now get per-operation views: `mint`, `request_unmint`, `claim_unmint`, and `cancel_unmint` on the backed-token program, and `stake`, `request_unstake`, and `claim_unstake` on the liquid-staking program. Each operation gets a title, a typed amount, and a row that checks the destination is the signer's own token account or, for a request, the escrow of the signer's own request account. No received amount is estimated: it depends on the exchange rate at execution. The other instructions keep the generic IDL view.
+
+  The Jupiter Lend Earn preset and the Abra preset now share one renderer, `core::receipt_token`, for programs where the signer supplies an asset, receives a receipt token, and later redeems it. A new preset of this shape declares its program ID, IDL, account names, and one entry per instruction; decoding, amount formatting, recipient checks, both layouts, and the transaction summary are shared. Jupiter Lend Earn output is unchanged.
+</Update>
+
 <Update label="2026-11-05 — Abra IDLs" tags={["Wallet API", "Contributors"]}>
   The IDLs of the two Abra programs on Solana are now compiled in: the backed-token program `H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ` (USDC mints USDaf) and the liquid-staking program `9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC` (USDaf stakes into sUSDaf). The intermediate output decodes every instruction of both programs with `registered_source = Preset`; the human-readable view still shows them as an unknown program until their preset lands.
 

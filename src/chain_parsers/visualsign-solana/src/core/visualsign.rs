@@ -1358,7 +1358,7 @@ mod tests {
     use crate::intermediate::{
         RegisteredSource, SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput,
     };
-    use crate::test_utils::payload_from_b64;
+    use crate::test_utils::{legacy_transaction_b64, payload_from_b64, v0_transaction_b64};
     use crate::utils::create_transaction_with_empty_signatures;
     use base64::Engine;
     use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -3795,28 +3795,6 @@ mod tests {
             .expect("a cap equal to the bound passes");
     }
 
-    fn legacy_b64(instructions: &[Instruction], payer: &Pubkey) -> String {
-        let tx = SolanaTransaction::new_unsigned(Message::new(instructions, Some(payer)));
-        base64::engine::general_purpose::STANDARD
-            .encode(bincode::serialize(&tx).expect("serialize"))
-    }
-
-    fn v0_b64(instructions: &[Instruction], payer: &Pubkey) -> String {
-        let message = solana_message::v0::Message::try_compile(
-            payer,
-            instructions,
-            &[],
-            solana_hash::Hash::default(),
-        )
-        .expect("compile");
-        let tx = VersionedTransaction {
-            signatures: vec![solana_signature::Signature::default()],
-            message: VersionedMessage::V0(message),
-        };
-        base64::engine::general_purpose::STANDARD
-            .encode(bincode::serialize(&tx).expect("serialize"))
-    }
-
     /// A unit price cut short: the runtime rejects it and the parser cannot read it, so the
     /// fee is unknown and every cap is refused in every build.
     fn truncated_unit_price() -> Instruction {
@@ -3840,7 +3818,7 @@ mod tests {
     #[test]
     fn trailing_bytes_in_a_compute_budget_request_are_charged() {
         let payer = Pubkey::new_unique();
-        let wrapper = SolanaTransactionWrapper::from_string(&legacy_b64(
+        let wrapper = SolanaTransactionWrapper::from_string(&legacy_transaction_b64(
             &[unit_price_with_trailing_byte()],
             &payer,
         ))
@@ -3868,8 +3846,9 @@ mod tests {
             accounts: vec![],
             data: vec![2, 0, 0, 0],
         };
-        let wrapper = SolanaTransactionWrapper::from_string(&legacy_b64(&[verify_two], &payer))
-            .expect("parses");
+        let wrapper =
+            SolanaTransactionWrapper::from_string(&legacy_transaction_b64(&[verify_two], &payer))
+                .expect("parses");
         // One transaction signature plus two verified ones: 15_000 lamports.
         assert!(matches!(
             to_payload(wrapper.clone(), options_with_max_fee(Some(14_999))),
@@ -3885,8 +3864,8 @@ mod tests {
     fn truncated_compute_budget_refuses_every_cap() {
         let payer = Pubkey::new_unique();
         for encoded in [
-            legacy_b64(&[truncated_unit_price()], &payer),
-            v0_b64(&[truncated_unit_price()], &payer),
+            legacy_transaction_b64(&[truncated_unit_price()], &payer),
+            v0_transaction_b64(&[truncated_unit_price()], &payer, &[]),
         ] {
             let wrapper = SolanaTransactionWrapper::from_string(&encoded).expect("parses");
             for options in [
@@ -3910,7 +3889,10 @@ mod tests {
             ComputeBudgetInstruction::set_compute_unit_price(1),
             ComputeBudgetInstruction::set_compute_unit_price(2),
         ];
-        for encoded in [legacy_b64(&twice, &payer), v0_b64(&twice, &payer)] {
+        for encoded in [
+            legacy_transaction_b64(&twice, &payer),
+            v0_transaction_b64(&twice, &payer, &[]),
+        ] {
             let wrapper = SolanaTransactionWrapper::from_string(&encoded).expect("parses");
             for options in [
                 options_with_max_fee(None),
@@ -3939,7 +3921,8 @@ mod tests {
             garbage,
         ];
         let wrapper =
-            SolanaTransactionWrapper::from_string(&v0_b64(&instructions, &payer)).expect("parses");
+            SolanaTransactionWrapper::from_string(&v0_transaction_b64(&instructions, &payer, &[]))
+                .expect("parses");
         let payload = to_payload(wrapper.clone(), options_with_max_fee(None)).expect("renders");
         assert_eq!(payload.fields[1].label(), "Max Fee (default)");
         assert_eq!(payload.fields[1].fallback_text(), "0.1 SOL");
@@ -3962,8 +3945,9 @@ mod tests {
             ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             ComputeBudgetInstruction::set_compute_unit_price(100_000_000),
         ];
-        let wrapper = SolanaTransactionWrapper::from_string(&legacy_b64(&instructions, &payer))
-            .expect("parses");
+        let wrapper =
+            SolanaTransactionWrapper::from_string(&legacy_transaction_b64(&instructions, &payer))
+                .expect("parses");
         let Err(VisualSignError::ValidationError(message)) =
             to_payload(wrapper.clone(), options_with_max_fee(None))
         else {
