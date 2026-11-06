@@ -1,0 +1,8 @@
+name = "vsp-x402-poc"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+PRICE_ATOMIC = "1000"
+# PAY_TO is the receiving address; pass it at deploy time:
+#   npx wrangler deploy --var PAY_TO:0x...
