@@ -126,6 +126,14 @@ You are scaffolding a Solana program visualizer preset from an Anchor IDL.
 
 ## Step A: Fetch the IDL
 
+### Preferred: the repo script (no Anchor CLI needed)
+```bash
+python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} --out /tmp/{PROGRAM_ID}.json
+# refreshing an existing preset: summarize what changed against the committed IDL
+python3 -I scripts/fetch-solana-idl.py {PROGRAM_ID} --compare src/chain_parsers/visualsign-solana/src/presets/<preset>/<idl>.json > /dev/null
+```
+Exit code 2 means the program publishes no on-chain IDL; fall back to Option C. The same fetch runs in CI as the "Solana: fetch on-chain IDL" workflow (`.github/workflows/solana-idl-fetch.yml`, manual dispatch or `workflow_call`), which uploads the IDL as an artifact.
+
 ### Option A: Local Anchor CLI
 ```bash
 anchor idl fetch {PROGRAM_ID} --provider.cluster mainnet
