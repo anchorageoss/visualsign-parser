@@ -17,6 +17,10 @@ pub mod utils;
 pub use core::*;
 pub use utils::*;
 
+/// The committed preset IDLs and where they live, for tools that keep them
+/// in sync with chain (the nightly workflow's `solana-idl-sync` tool).
+pub use idl::builtin_programs::{PresetIdlSource, preset_idl_sources};
+
 // Auto-discovered preset IDLs. See `build.rs::collect_preset_idls`.
 include!(concat!(env!("OUT_DIR"), "/preset_idls.rs"));
 
