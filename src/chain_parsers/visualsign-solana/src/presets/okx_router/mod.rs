@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::OkxRouterConfig;
 use solana_parser::{
@@ -32,23 +33,22 @@ impl InstructionVisualizer for OkxRouterVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let view = InstructionView::from_context(context);
+        let data = context.data();
 
-        if instruction.data.len() < 8 {
+        if data.len() < 8 {
             return Err(VisualSignError::DecodeError(
                 "Instruction data too short for Anchor discriminator".to_string(),
             ));
         }
 
         let idl = load_idl()?;
-        let parsed = parse_instruction_with_idl(&instruction.data, OKX_ROUTER_PROGRAM_ID, &idl)
+        let parsed = parse_instruction_with_idl(data, OKX_ROUTER_PROGRAM_ID, &idl)
             .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
 
-        let named_accounts = build_named_accounts(&idl, &instruction.data, &instruction.accounts);
+        let named_accounts = build_named_accounts(&idl, data, &view.accounts);
 
-        build_visualization(context, instruction, &parsed, &named_accounts)
+        build_visualization(context, &view, data, &parsed, &named_accounts)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -68,7 +68,7 @@ fn load_idl() -> Result<Idl, VisualSignError> {
 fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[String],
 ) -> BTreeMap<String, String> {
     let mut named = BTreeMap::new();
     if instruction_data.len() < 8 {
@@ -81,9 +81,9 @@ fn build_named_accounts(
     }) else {
         return named;
     };
-    for (index, account_meta) in accounts.iter().enumerate() {
+    for (index, account) in accounts.iter().enumerate() {
         if let Some(idl_account) = idl_instruction.accounts.get(index) {
-            named.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+            named.insert(idl_account.name.clone(), account.clone());
         }
     }
     named
@@ -99,11 +99,12 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 
 fn build_visualization(
     context: &VisualizerContext,
-    instruction: &solana_sdk::instruction::Instruction,
+    view: &InstructionView,
+    data: &[u8],
     parsed: &SolanaParsedInstructionData,
     named_accounts: &BTreeMap<String, String>,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id = instruction.program_id.to_string();
+    let program_id = view.program_id.clone();
     let title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
 
     let condensed_fields = vec![create_text_field("Instruction", &parsed.instruction_name)?];
@@ -127,10 +128,7 @@ fn build_visualization(
         expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
-    expanded_fields.push(create_raw_data_field(
-        &instruction.data,
-        Some(hex::encode(&instruction.data)),
-    )?);
+    expanded_fields.push(create_raw_data_field(data, Some(hex::encode(data)))?);
 
     let condensed = SignablePayloadFieldListLayout {
         fields: condensed_fields,
@@ -150,10 +148,7 @@ fn build_visualization(
         expanded: Some(expanded),
     };
 
-    let fallback_text = format!(
-        "Program ID: {program_id}\nData: {}",
-        hex::encode(&instruction.data)
-    );
+    let fallback_text = format!("Program ID: {program_id}\nData: {}", hex::encode(data));
 
     Ok(AnnotatedPayloadField {
         static_annotation: None,
