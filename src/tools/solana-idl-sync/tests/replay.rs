@@ -69,17 +69,26 @@ impl ReplayRpc for MockRpc {
 /// fails with a fixed error.
 struct FakeRunner {
     payload: Option<String>,
+    error: String,
 }
 
 impl FakeRunner {
     fn ok(payload: String) -> Self {
         FakeRunner {
             payload: Some(payload),
+            error: String::new(),
         }
     }
 
     fn failing() -> Self {
-        FakeRunner { payload: None }
+        FakeRunner::failing_with("unsupported transaction layout")
+    }
+
+    fn failing_with(message: &str) -> Self {
+        FakeRunner {
+            payload: None,
+            error: message.to_string(),
+        }
     }
 }
 
@@ -87,6 +96,39 @@ impl ParserRunner for FakeRunner {
     fn decode(&self, _tx_base64: &str) -> Result<String, String> {
         match &self.payload {
             Some(payload) => Ok(payload.clone()),
+            None => Err(self.error.clone()),
+        }
+    }
+}
+
+/// A fake parser build scripted per wire transaction: each base64 tx maps
+/// to its decode result, anything else fails.
+struct ScriptedRunner {
+    results: BTreeMap<String, Result<String, String>>,
+}
+
+impl ScriptedRunner {
+    fn new() -> Self {
+        ScriptedRunner {
+            results: BTreeMap::new(),
+        }
+    }
+
+    fn ok(&mut self, tx_base64: &str, payload: String) {
+        self.results.insert(tx_base64.to_string(), Ok(payload));
+    }
+
+    fn fail(&mut self, tx_base64: &str, error: &str) {
+        self.results
+            .insert(tx_base64.to_string(), Err(error.to_string()));
+    }
+}
+
+impl ParserRunner for ScriptedRunner {
+    fn decode(&self, tx_base64: &str) -> Result<String, String> {
+        match self.results.get(tx_base64) {
+            Some(Ok(payload)) => Ok(payload.clone()),
+            Some(Err(err)) => Err(err.clone()),
             None => Err("unsupported transaction layout".to_string()),
         }
     }
@@ -146,10 +188,10 @@ fn payload(title: &str, rows: &[(&str, &str)]) -> String {
     ]))
 }
 
-fn run(
+fn run<P: ParserRunner>(
     rpc: &MockRpc,
-    before: &FakeRunner,
-    after: &FakeRunner,
+    before: &P,
+    after: &P,
     limit: usize,
 ) -> (String, ReplayCounts) {
     replay::replay_section(rpc, PROGRAM_ID, before, after, limit).unwrap()
@@ -167,6 +209,158 @@ fn one_tx(version: &str) -> MockRpc {
         "QUJDRA==",
     );
     rpc
+}
+
+// parser_cli's three version 1 (SIMD-0385) rejection messages: over the
+// legacy/v0 packet limit, truncated inside a packet, and the message
+// format from visualsign-solana.
+const V1_ERROR_TEXTS: [&str; 3] = [
+    "parser_cli exited with exit status: 1: Error: Failed to parse transaction: Unsupported \
+     transaction version: Solana transaction format v1 (SIMD-0385) is not supported \
+     (leading byte 0x81 matches the v1 version marker; 1773 bytes is over the \
+     1232-byte legacy/v0 packet limit)",
+    "parser_cli exited with exit status: 1: Error: Failed to parse transaction: Unsupported \
+     transaction version: Solana transaction format v1 (SIMD-0385) is not supported \
+     (leading byte 0x81 matches the v1 version marker; decode error: io error: \
+     unexpected end of file)",
+    "Error: Failed to parse transaction: Solana message format v1 (SIMD-0385) is not \
+     supported",
+];
+
+#[test]
+fn tx_version_renders_legacy_zero_one_and_unknown() {
+    use solana_idl_sync::replay::tx_version;
+    // getTransaction (maxSupportedTransactionVersion 1) reports the
+    // version as the JSON string "legacy" or the JSON number 0 or 1,
+    // absent on very old transactions.
+    assert_eq!(tx_version(Some(&Json::str("legacy"))), "legacy");
+    assert_eq!(tx_version(Some(&Json::Int(0))), "0");
+    assert_eq!(tx_version(Some(&Json::Int(1))), "1");
+    assert_eq!(tx_version(None), "unknown");
+    // Unexpected shapes never fall back to "legacy": that hid version 1
+    // transactions (and their SIMD-0385 failures, issue #662) as ordinary
+    // parse errors.
+    assert_eq!(tx_version(Some(&Json::Int(2))), "unknown");
+    assert_eq!(tx_version(Some(&Json::str("bogus"))), "unknown");
+    assert_eq!(tx_version(Some(&Json::Null)), "unknown");
+}
+
+#[test]
+fn simd_0385_error_texts_are_v1_failures_not_parse_errors() {
+    for error in V1_ERROR_TEXTS {
+        // The RPC reports the transaction as "legacy" (exactly what the
+        // real replay saw before the version-parsing fix): the error text
+        // alone must classify it as a v1 (SIMD-0385) failure.
+        let rpc = one_tx("legacy");
+        let before = FakeRunner::failing_with(error);
+        let after = FakeRunner::failing_with(error);
+        let (section, counts) = run(&rpc, &before, &after, 5);
+
+        assert_eq!(counts.v1_failures, 1, "for error: {error}");
+        assert_eq!(counts.errors, 0, "for error: {error}");
+        assert!(
+            section.contains("v1 (SIMD-0385) parse failure"),
+            "for error: {error}"
+        );
+        assert!(section.contains("issue #662"), "for error: {error}");
+        // Not reported as an ordinary parse error, and the summary line
+        // carries the v1 count instead of a parse-error count.
+        assert!(
+            !section.contains("parse error (before and after)"),
+            "for error: {error}"
+        );
+        assert!(
+            section.contains(
+                "1 replayed, 0 unchanged, 0 changed, 0 parse errors, \
+                 1 v1 (SIMD-0385) parse failures (issue #662)."
+            ),
+            "for error: {error}"
+        );
+    }
+}
+
+#[test]
+fn the_summary_line_of_a_mixed_run_is_pinned() {
+    let mut rpc = MockRpc::new();
+    let mut before = ScriptedRunner::new();
+    let mut after = ScriptedRunner::new();
+    // unchanged: both sides render the same view.
+    rpc.put_signature(
+        "Same11111111111111111111111111111111111111111111111111111",
+        false,
+    );
+    rpc.put_transaction(
+        "Same11111111111111111111111111111111111111111111111111111",
+        "v0",
+        "dHgtc2FtZQ==",
+    );
+    let view = payload("Jupiter Swap", &[("Instruction", "Swap 1.5 USDC")]);
+    before.ok("dHgtc2FtZQ==", view.clone());
+    after.ok("dHgtc2FtZQ==", view);
+    // changed: the views differ.
+    rpc.put_signature(
+        "Diff11111111111111111111111111111111111111111111111111111",
+        false,
+    );
+    rpc.put_transaction(
+        "Diff11111111111111111111111111111111111111111111111111111",
+        "v0",
+        "dHgtZGlmZg==",
+    );
+    before.ok(
+        "dHgtZGlmZg==",
+        payload("Jupiter Swap", &[("Instruction", "old")]),
+    );
+    after.ok(
+        "dHgtZGlmZg==",
+        payload("Jupiter Swap v2", &[("Instruction", "new")]),
+    );
+    // v1 (SIMD-0385) failure: both sides reject with a v1 error, and the
+    // RPC (still) reports the version as "legacy".
+    rpc.put_signature(
+        "Vone11111111111111111111111111111111111111111111111111111",
+        false,
+    );
+    rpc.put_transaction(
+        "Vone11111111111111111111111111111111111111111111111111111",
+        "legacy",
+        "dHgtdjE=",
+    );
+    before.fail("dHgtdjE=", V1_ERROR_TEXTS[0]);
+    after.fail("dHgtdjE=", V1_ERROR_TEXTS[0]);
+    // ordinary parse error: both sides fail without naming SIMD-0385.
+    rpc.put_signature(
+        "Boom11111111111111111111111111111111111111111111111111111",
+        false,
+    );
+    rpc.put_transaction(
+        "Boom11111111111111111111111111111111111111111111111111111",
+        "v0",
+        "dHgtYm9vbQ==",
+    );
+    before.fail("dHgtYm9vbQ==", "unsupported transaction layout");
+    after.fail("dHgtYm9vbQ==", "unsupported transaction layout");
+
+    let (section, counts) = run(&rpc, &before, &after, 4);
+
+    assert_eq!(
+        counts,
+        ReplayCounts {
+            replayed: 4,
+            unchanged: 1,
+            changed: 1,
+            errors: 1,
+            v1_failures: 1,
+        }
+    );
+    assert_eq!(
+        section.lines().next(),
+        Some(
+            "Replay of up to 4 recent successful mainnet transactions of \
+             `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`: 4 replayed, 1 unchanged, \
+             1 changed, 1 parse errors, 1 v1 (SIMD-0385) parse failures (issue #662)."
+        )
+    );
 }
 
 #[test]

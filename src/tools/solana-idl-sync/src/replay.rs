@@ -178,11 +178,7 @@ impl ReplayRpc for HttpRpc {
         if result.is_null() {
             return Ok(None);
         }
-        let version = result
-            .get("version")
-            .and_then(Json::as_str)
-            .unwrap_or("legacy")
-            .to_string();
+        let version = tx_version(result.get("version"));
         let tx_base64 = result
             .get("transaction")
             .and_then(|tx| tx.at(0))
@@ -195,6 +191,32 @@ impl ReplayRpc for HttpRpc {
             .to_string();
         Ok(Some(TxReply { version, tx_base64 }))
     }
+}
+
+/// Render getTransaction's `version` the way replay reports it.
+/// maxSupportedTransactionVersion 1 makes the RPC report it either as
+/// the JSON string `"legacy"` or as the JSON number `0` or `1` (absent
+/// on very old transactions): `legacy`, `0`, `1` respectively, anything
+/// absent or unexpected `unknown`. Numbers must never default to
+/// `legacy` -- a version 1 transaction reported as `legacy` would hide
+/// SIMD-0385 failures (issue #662) as ordinary parse errors.
+pub fn tx_version(version: Option<&Json>) -> String {
+    match version {
+        Some(Json::Str(text)) if text == "legacy" => "legacy".to_string(),
+        Some(Json::Int(0)) => "0".to_string(),
+        Some(Json::Int(1)) => "1".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+/// A parse failure on both sides is a version 1 (SIMD-0385) failure
+/// (issue #662) when the RPC reports the transaction as version 1, or
+/// when either parser build's error names SIMD-0385 -- parser_cli's v1
+/// rejections all do, whatever shape they surface in (transaction
+/// format v1, message format v1, over the packet limit, truncated in a
+/// packet).
+fn is_v1_failure(version: &str, before_err: &str, after_err: &str) -> bool {
+    version == "1" || before_err.contains("SIMD-0385") || after_err.contains("SIMD-0385")
 }
 
 /// One parser_cli build, behind a trait so tests need no binary.
@@ -317,7 +339,7 @@ pub fn replay_section(
                 }
             }
             (Side::Error(before_err), Side::Error(after_err)) => {
-                if tx.version == "1" {
+                if is_v1_failure(&tx.version, before_err, after_err) {
                     // Version 1 (SIMD-0385) transactions fail on both
                     // sides today: the parser does not support them yet
                     // (issue #662). Report and count them as such rather
