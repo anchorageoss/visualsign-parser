@@ -1696,6 +1696,48 @@ async fn deployment_created_at_map(auth: &Auth, app_id: &str) -> Result<HashMap<
     Ok(map)
 }
 
+/// The image URL `app_id`'s live deployment was created from: the
+/// `Targeted Deployment:` in `tvc app status`, matched to the completed
+/// `create_tvc_deployment` activity whose result names it. `Ok(None)` when the
+/// app has no live deployment or no activity for it is found. Used by the
+/// wallet-integration gate to find the version currently serving.
+pub fn live_image_url(sh: &Shell, org: Option<&str>, app_id: &str) -> Result<Option<String>> {
+    ensure_status_will_use_same_org(org)?;
+    let status_out = cmd!(sh, "tvc app status --app-id {app_id}")
+        .read()
+        .context("tvc app status")?;
+    let Some(live) = parse_deployments(&status_out)
+        .into_iter()
+        .find(|d| d.is_live)
+    else {
+        return Ok(None);
+    };
+    block_on(async {
+        let auth = resolve_auth(org)?;
+        let activities = fetch_activities(
+            &auth,
+            vec![ActivityStatus::Completed],
+            vec![ActivityType::CreateTvcDeployment],
+            None,
+        )
+        .await?;
+        Ok(activities.iter().find_map(|a| {
+            let created = match a.result.as_ref().and_then(|r| r.inner.as_ref()) {
+                Some(result::Inner::CreateTvcDeploymentResult(res)) => &res.deployment_id,
+                _ => return None,
+            };
+            match a.intent.as_ref().and_then(|i| i.inner.as_ref()) {
+                Some(intent::Inner::CreateTvcDeploymentIntent(i))
+                    if i.app_id == app_id && *created == live.id =>
+                {
+                    Some(i.pivot_container_image_url.clone())
+                }
+                _ => None,
+            }
+        }))
+    })?
+}
+
 /// Submit a single `DeleteTvcDeploymentIntent`, reporting the activity id (or the
 /// approve command when consensus is needed) exactly like the invite/policy
 /// flows. Turnkey deletion carries no manifest, so this goes SDK-direct.

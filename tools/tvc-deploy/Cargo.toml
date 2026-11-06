@@ -23,6 +23,8 @@ toml = "0.8"
 tokio = { version = "1", features = ["rt", "macros"] }
 turnkey_api_key_stamper = "0.10"
 turnkey_client = "0.10"
+# Shared with the PR check: PR-body section parsing and the exact-set ack.
+wallet-integration = { path = "../wallet-integration" }
 xshell = "0.2.7"
 
 [dev-dependencies]

@@ -1,0 +1,20 @@
+[package]
+name = "wallet-integration"
+version = "0.1.0"
+edition = "2021"
+description = "Detects wallet-integration-breaking changes; PR check + tvc-deploy gate helpers"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "wallet-integration"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4", features = ["derive"] }
+
+# Own workspace root, like tools/tvc-deploy: independent of the parser
+# workspace under ../../src, so the PR check builds in seconds.
+[workspace]

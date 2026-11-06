@@ -1,0 +1,228 @@
+diff --git a/docs/parser-cli.mdx b/docs/parser-cli.mdx
+index 847a50b5..4e9d8d57 100644
+--- a/docs/parser-cli.mdx
++++ b/docs/parser-cli.mdx
+@@ -36,0 +37 @@ parser_cli decode --chain <chain> -t <transaction_hex> --output <format>
++| `--max-fee-lamports` | Maximum total fee allowed for a Solana transaction, in lamports; defaults to 0.1 SOL. Rendered as the "Max Fee" row, or "Max Fee (default)" when omitted; the decode fails when the transaction commits to more |
+diff --git a/proto/parser/parser.proto b/proto/parser/parser.proto
+index 1da473f0..f5b67900 100644
+--- a/proto/parser/parser.proto
++++ b/proto/parser/parser.proto
+@@ -171,0 +172,8 @@ message SolanaMetadata {
++  // Maximum total fee (base plus priority) the caller allows for this transaction, in
++  // lamports. Absent, the parser's default cap (0.1 SOL) applies. The cap in force is
++  // rendered as the top-level "Max Fee" row ("Max Fee (default)" for the default) and carried
++  // in `intermediate_output`; the parser rejects the request when the fee the transaction
++  // commits to exceeds it. A consumer that rewrites the compute budget instructions after
++  // parsing (re-pricing at sign time) changes the fee this cap bounds, so it must re-check the
++  // final fee against this value itself.
++  optional uint64 max_fee_lamports = 6;
+diff --git a/src/chain_parsers/visualsign-solana/src/core/mod.rs b/src/chain_parsers/visualsign-solana/src/core/mod.rs
+index c23d2966..d847b231 100644
+--- a/src/chain_parsers/visualsign-solana/src/core/mod.rs
++++ b/src/chain_parsers/visualsign-solana/src/core/mod.rs
+@@ -5 +4,0 @@ use ::visualsign::errors::VisualSignError;
+-use solana_compute_budget_interface::ComputeBudgetInstruction;
+@@ -21,0 +21,4 @@ pub use instructions::*;
++#[cfg(test)]
++pub(crate) use priority_fee::BASE_FEE_LAMPORTS_PER_SIGNATURE;
++pub use priority_fee::DEFAULT_MAX_FEE_LAMPORTS;
++pub(crate) use priority_fee::decode_compute_budget_request;
+@@ -354,5 +356,0 @@ pub trait InstructionVisualizer {
+-    /// The compute-budget request, if any; the summary gate hoists the resulting priority fee.
+-    fn compute_budget(&self, _context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
+-        None
+-    }
+-
+@@ -380,2 +377,0 @@ pub struct VisualizeResult {
+-    /// The handling visualizer's [`InstructionVisualizer::compute_budget`].
+-    pub compute_budget: Option<ComputeBudgetInstruction>,
+@@ -401 +396,0 @@ pub fn visualize_with_any(
+-                    compute_budget: v.compute_budget(context),
+diff --git a/src/chain_parsers/visualsign-solana/src/intermediate.rs b/src/chain_parsers/visualsign-solana/src/intermediate.rs
+index 002c1fd5..f14cca65 100644
+--- a/src/chain_parsers/visualsign-solana/src/intermediate.rs
++++ b/src/chain_parsers/visualsign-solana/src/intermediate.rs
+@@ -10 +10 @@
+-//! Consumers (e.g. the Anchorage HSM) mirror these types and decode the bytes;
++//! Downstream consumers mirror these types and decode the bytes;
+@@ -15,0 +16,2 @@
++//! - `native_instruction_decoder` is added: the native decoding this build has.
++//! - `max_fee_lamports` is added: the fee cap the payload renders as "Max Fee".
+@@ -71 +73,22 @@ const UNSUPPORTED_NATIVE_PROGRAM: &str = "program has no native decoder";
+-pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 4;
++pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 5;
++
++/// Native decoding available in this build. This is independent of whether
++/// any particular instruction is valid or supported by the decoder.
++///
++/// Schema v5 adds this tag immediately after the version. Mirrored consumers
++/// must read it before decoding the account keys and instruction collections.
++#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
++#[borsh(use_discriminant = true)]
++pub enum SolanaNativeInstructionDecoder {
++    /// `json-parsed` is disabled; only Compute Budget uses a local decoder.
++    ComputeBudgetOnly = 0,
++    /// Solana's `jsonParsed` decoder and the local Compute Budget decoder.
++    JsonParsed = 1,
++}
++
++const NATIVE_INSTRUCTION_DECODER: SolanaNativeInstructionDecoder = if cfg!(feature = "json-parsed")
++{
++    SolanaNativeInstructionDecoder::JsonParsed
++} else {
++    SolanaNativeInstructionDecoder::ComputeBudgetOnly
++};
+@@ -74 +97 @@ pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 4;
+-/// minus `signatures`.
++/// minus `signatures`, plus `native_instruction_decoder` and `max_fee_lamports`.
+@@ -79,0 +103,3 @@ pub struct SolanaIntermediateOutput {
++    /// Build capability: distinguishes an unavailable `jsonParsed` decoder
++    /// from rejection of malformed instructions in `solana_json_parse_error`.
++    pub native_instruction_decoder: SolanaNativeInstructionDecoder,
+@@ -92,0 +119,3 @@ pub struct SolanaIntermediateOutput {
++    /// The fee cap the payload renders as "Max Fee": the caller's, or the parser default.
++    /// The parser has already checked that the fee the transaction commits to is within it.
++    pub max_fee_lamports: u64,
+@@ -116,0 +146,2 @@ pub enum SolanaSimulationError {
++    /// The parser was built without the `simulation` feature.
++    SimulationUnsupported = 7,
+@@ -705,0 +737,16 @@ pub(crate) fn parse_and_decode_simulated_instructions(
++/// Without the `simulation` feature a supplied simulation cannot be read.
++#[cfg(not(feature = "simulation"))]
++pub(crate) fn parse_and_decode_simulated_instructions(
++    _raw_json: &[u8],
++    _idl_registry: &IdlRegistry,
++) -> (
++    Vec<SolanaSimulatedInstruction>,
++    Option<SolanaSimulationError>,
++) {
++    tracing::warn!("simulated_transaction_result supplied but the `simulation` feature is off");
++    (
++        Vec::new(),
++        Some(SolanaSimulationError::SimulationUnsupported),
++    )
++}
++
+@@ -1176,0 +1224 @@ fn build_intermediate_output(
++    max_fee_lamports: u64,
+@@ -1182,0 +1231 @@ fn build_intermediate_output(
++        native_instruction_decoder: NATIVE_INSTRUCTION_DECODER,
+@@ -1209,0 +1259 @@ fn build_intermediate_output(
++        max_fee_lamports,
+@@ -1239,0 +1290 @@ pub(crate) fn extract_solana_intermediate_output(
++    max_fee_lamports: u64,
+@@ -1274,0 +1326 @@ pub(crate) fn extract_solana_intermediate_output(
++        max_fee_lamports,
+@@ -1467,0 +1520 @@ mod tests {
++            (SolanaSimulationError::SimulationUnsupported, 7),
+@@ -1470,0 +1524 @@ mod tests {
++                native_instruction_decoder: NATIVE_INSTRUCTION_DECODER,
+@@ -1479,0 +1534 @@ mod tests {
++                max_fee_lamports: 5_105_000,
+@@ -1485,3 +1540,4 @@ mod tests {
+-            // Trailing `01 <tag>`: Some, then the variant. No payload.
+-            assert_eq!(bytes[bytes.len() - 2], 1);
+-            assert_eq!(bytes[bytes.len() - 1], tag, "{error:?} tag");
++            // `01 <tag>` ahead of the trailing cap: Some, then the variant. No payload.
++            let cap_at = bytes.len() - 8;
++            assert_eq!(bytes[cap_at - 2], 1);
++            assert_eq!(bytes[cap_at - 1], tag, "{error:?} tag");
+@@ -2257,2 +2313,3 @@ mod tests {
+-        let output = extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new())
+-            .expect("solana_parser accepts the message");
++        let output =
++            extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new(), 5_105_000)
++                .expect("solana_parser accepts the message");
+@@ -2306,2 +2363,3 @@ mod tests {
+-        let output = extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new())
+-            .expect("solana_parser accepts the message");
++        let output =
++            extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new(), 5_105_000)
++                .expect("solana_parser accepts the message");
+@@ -2523,0 +2582 @@ mod tests {
++            native_instruction_decoder: NATIVE_INSTRUCTION_DECODER,
+@@ -2532,0 +2592 @@ mod tests {
++            max_fee_lamports: 5_105_000,
+@@ -2552 +2612 @@ mod tests {
+-        let io = build_intermediate_output(&metadata, None, &BTreeMap::new());
++        let io = build_intermediate_output(&metadata, None, &BTreeMap::new(), 5_105_000);
+@@ -2557,0 +2618 @@ mod tests {
++        assert_eq!(io.max_fee_lamports, 5_105_000);
+@@ -2561,0 +2623,4 @@ mod tests {
++        // The version leads and the cap trails, so a decoder gates on the first field and
++        // reads the last one after every field it already knew.
++        assert_eq!(bytes[..2], SOLANA_INTERMEDIATE_SCHEMA_VERSION.to_le_bytes());
++        assert_eq!(bytes[bytes.len() - 8..], 5_105_000u64.to_le_bytes());
+@@ -2565,0 +2631,33 @@ mod tests {
++
++    #[test]
++    fn intermediate_wire_identifies_native_decoder_capability() {
++        let metadata = SolanaMetadata {
++            signatures: vec![],
++            account_keys: vec![],
++            program_keys: vec![],
++            instructions: vec![],
++            transfers: vec![],
++            spl_transfers: vec![],
++            recent_blockhash: String::new(),
++            address_table_lookups: vec![],
++        };
++        let output = build_intermediate_output(&metadata, None, &BTreeMap::new(), 5_105_000);
++        let bytes = borsh::to_vec(&output).expect("serializes intermediate output");
++        // Consumers read the version, then the capability tag, then the v4 body; the fee cap
++        // trails the body.
++        assert_eq!(&bytes[..2], &[5, 0]);
++        #[cfg(feature = "json-parsed")]
++        assert_eq!(bytes[2], 1, "jsonParsed decoder is available");
++        #[cfg(not(feature = "json-parsed"))]
++        assert_eq!(bytes[2], 0, "only Compute Budget decoding is available");
++        assert_eq!(
++            &bytes[3..7],
++            &[0, 0, 0, 0],
++            "the body opens with account_keys' length"
++        );
++        assert_eq!(bytes[bytes.len() - 8..], 5_105_000u64.to_le_bytes());
++        assert_eq!(
++            borsh::from_slice::<SolanaIntermediateOutput>(&bytes).expect("round trip"),
++            output
++        );
++    }
+diff --git a/src/generated/src/generated/descriptor.bin b/src/generated/src/generated/descriptor.bin
+index 20d7637b..a3ba8c9e 100644
+Binary files a/src/generated/src/generated/descriptor.bin and b/src/generated/src/generated/descriptor.bin differ
+diff --git a/src/generated/src/generated/parser.rs b/src/generated/src/generated/parser.rs
+index 6cfe5328..030fe25e 100644
+--- a/src/generated/src/generated/parser.rs
++++ b/src/generated/src/generated/parser.rs
+@@ -279,0 +280,13 @@ pub struct SolanaMetadata {
++    /// Maximum total fee (base plus priority) the caller allows for this transaction, in
++    /// lamports. Absent, the parser's default cap (0.1 SOL) applies. The cap in force is
++    /// rendered as the top-level "Max Fee" row ("Max Fee (default)" for the default) and carried
++    /// in `intermediate_output`; the parser rejects the request when the fee the transaction
++    /// commits to exceeds it. A consumer that rewrites the compute budget instructions after
++    /// parsing (re-pricing at sign time) changes the fee this cap bounds, so it must re-check the
++    /// final fee against this value itself.
++    #[prost(uint64, optional, tag = "6")]
++    #[cfg_attr(
++        feature = "serde_derive",
++        serde(with = "crate::u64_or_string_serde", default)
++    )]
++    pub max_fee_lamports: ::core::option::Option<u64>,
+diff --git a/src/parser/cli/tests/fixtures/solana-text.display.expected b/src/parser/cli/tests/fixtures/solana-text.display.expected
+index 571707dd..1d50763d 100644
+--- a/src/parser/cli/tests/fixtures/solana-text.display.expected
++++ b/src/parser/cli/tests/fixtures/solana-text.display.expected
+@@ -11,0 +12,12 @@ SignablePayload {
++        AmountV2 {
++            common: SignablePayloadFieldCommon {
++                fallback_text: "0.1 SOL",
++                label: "Max Fee (default)",
++            },
++            amount_v2: SignablePayloadFieldAmountV2 {
++                amount: "0.1",
++                abbreviation: Some(
++                    "SOL",
++                ),
++            },
++        },

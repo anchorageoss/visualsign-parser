@@ -1,0 +1,75 @@
+name: Wallet integration
+
+# Fails a PR that changes the wallet integration surface (proto, ChainMetadata,
+# intermediate-output types or schema versions, digest code, golden bytes; the
+# rule list is tools/wallet-integration/src/rules.rs) unless it is labeled
+# `breaking-wallet-integration`, and fails a labeled PR whose description lacks
+# a valid `## Wallet integration` section (format: CONTRIBUTING.md).
+# `tvc-deploy deploy` later reads that label and section to gate deploys.
+#
+# Plain `pull_request` with a read-only token: the job only diffs and reads the
+# description. It never changes labels; a failing check is the signal.
+
+on:
+  pull_request:
+    # edited: the description changed; (un)labeled: the label changed.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions: {}
+
+concurrency:
+  group: wallet-integration-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Wallet integration check
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          # Full history so the base..head merge base is available.
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        with:
+          # A few small crates; a cache would cost more than the build.
+          cache: false
+
+      - name: Test detector
+        run: cargo test --locked --manifest-path tools/wallet-integration/Cargo.toml
+
+      # Build the detector from the base branch when it has one, so a PR can't
+      # pass its own check by editing the rules. A PR that changes the rules is
+      # checked by the old ones; the new ones apply once it merges.
+      - name: Build detector
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "$BASE_SHA:tools/wallet-integration/Cargo.toml" 2>/dev/null; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+            tool_dir="$RUNNER_TEMP/base/tools/wallet-integration"
+          else
+            tool_dir="tools/wallet-integration"
+          fi
+          cargo build --locked --release --manifest-path "$tool_dir/Cargo.toml"
+          echo "WALLET_INTEGRATION_BIN=$tool_dir/target/release/wallet-integration" >> "$GITHUB_ENV"
+
+      - name: Check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'breaking-wallet-integration') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+          "$WALLET_INTEGRATION_BIN" check-pr \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --labeled "$LABELED" \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --github

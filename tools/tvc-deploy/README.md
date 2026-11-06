@@ -247,6 +247,50 @@ Resolve the existing activity (approve or reject it) and re-run, or pass
 `--force` to submit anyway. The check uses the active org by default; pass
 `--org <alias>` on `deploy` if the deployment's org differs from it.
 
+### Wallet-integration gate
+
+Some PRs break wallet integrators: intermediate-output decoders, clients that
+recompute `metadata_digest`, anything built on `parser.proto`. Those PRs carry
+the `breaking-wallet-integration` label and a `## Wallet integration` section
+naming who must upgrade (see CONTRIBUTING.md). `deploy` refuses to ship them
+until the operator confirms those integrators have upgraded:
+
+1. It works out the range: from the live deployment's image tag (`tvc app
+   status`, then the `create_tvc_deployment` activity that made it) to
+   `--image-url`'s tag. Release tags (`v0.1076.0`) and commit-sha tags both
+   work. If the live version can't be read, pass `--since <tag or commit>`. If
+   the image tag is a moving one (`latest`, `pr-N`), pass `--target-ref`.
+2. It lists the merged `breaking-wallet-integration` PRs in that range through
+   the GitHub API (`gh api`, authenticated only by `GH_TOKEN`; locally run
+   `export GH_TOKEN=$(gh auth token)`), and prints each with its declared
+   requirements.
+3. It refuses unless `--ack-breaking-wallet-integration` lists exactly those PR
+   numbers. A missing or extra number is an error. Run once without the flag to
+   see the list:
+
+   ```
+   wallet-integration gate: checking anchorageoss/visualsign-parser PRs in v0.1058.0..v0.1076.0
+     #625 feat(solana): apply a default max fee and carry the cap in the intermediate output (...)
+     requires: Anchorage HSM Solana intermediate reader >= schema v5 reader
+     requires: visualsign-turnkeyclient >= first release with anchorageoss/visualsign-turnkeyclient#47
+     deploy-order: both readers ship first; deploy the parser only after they are live
+   error: this deploy ships `breaking-wallet-integration` PRs; confirm every integrator above has upgraded, then re-run with --ack-breaking-wallet-integration 625
+   ```
+
+   With nothing in range the flag can be omitted (or given as `none`).
+
+The outcome (`operator acknowledged #625`) is printed before the deployment is
+created and again at the end of the log, and added to the GitHub job summary.
+In CI, pass the list as the `ack_breaking_wallet_integration` workflow_dispatch
+input (and `since` if needed).
+
+The gate fails closed: if the range or the PR list can't be resolved (no
+`GH_TOKEN`, GitHub down), the deploy stops. `--dangerous-skip-wallet-gate
+<REASON>` deploys anyway. It prints a banner with the reason and what the gate
+would have said, and records `SKIPPED (<reason>)` in the output. The
+`tvc-deploy-test` label path uses it, since the dev TEST app has no
+integrators; for real apps, use the ack instead.
+
 ### Verifying the digest on its own
 
 `deploy` runs the digest gate itself, so a normal deploy needs nothing extra.

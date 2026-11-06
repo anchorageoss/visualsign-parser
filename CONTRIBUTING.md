@@ -14,6 +14,37 @@ For complete contribution guidelines, including PR workflow, code standards, and
 
 Reach out through the [issue tracker](https://github.com/anchorageoss/visualsign-parser/issues).
 
+## Changes that break wallet integration
+
+Label a PR `breaking-wallet-integration` when integrators must upgrade before it
+can deploy: it changes `proto/` (`parser.proto`, the `ChainMetadata` messages),
+a chain's `*_INTERMEDIATE_SCHEMA_VERSION` or intermediate-output types, the bytes
+hashed into `metadata_digest` or the signed payload, or a golden fixture that
+pins those bytes. The "Wallet integration" check
+(`tools/wallet-integration/src/rules.rs`) fails a PR that makes such a change
+without the label. Use the label too for breaks the rules can't see. Name
+golden-byte constants `*_GOLDEN` so the check sees changes to them.
+
+A labeled PR needs this section in its description. The check parses it, and
+`tvc-deploy deploy` prints it to the operator, who must acknowledge the PR by
+number before it deploys:
+
+```markdown
+## Wallet integration
+
+- requires: <integrator> >= <minimum version>
+- deploy-order: <who ships first, and when the parser may deploy>
+```
+
+Add one `requires` line per integrator, plus at least one `deploy-order` line.
+Other prose in the section is fine. Lines inside HTML comments and code blocks
+are ignored, and `<placeholders>` are rejected. Run the check locally with:
+
+```bash
+cargo run --manifest-path tools/wallet-integration/Cargo.toml -- \
+  check-pr --base origin/main --head HEAD --labeled true --body-file body.md
+```
+
 ## Agent setup (Claude Code & pi)
 
 Shared agent configuration lives in tracked files and applies to both Claude Code and pi:
