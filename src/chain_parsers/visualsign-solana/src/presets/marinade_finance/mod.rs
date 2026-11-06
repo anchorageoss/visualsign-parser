@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::MarinadeFinanceConfig;
 use solana_parser::{
@@ -32,21 +33,21 @@ impl InstructionVisualizer for MarinadeFinanceVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id_str = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        // InstructionView, not resolve_accounts()?: an account from an address
+        // lookup table shows as an unresolved(N) placeholder instead of failing
+        // the whole transaction.
+        let view = InstructionView::from_context(context);
+        let program_id_str = view.program_id.clone();
         let data = context.data();
 
         let parsed_result = parse_marinade_finance_instruction(data);
 
         let (condensed_fields, expanded_fields, title_text) = match &parsed_result {
             Ok(parsed) => {
-                let named_accounts = match load_marinade_finance_idl() {
-                    Some(idl) => build_named_accounts(idl, data, &accounts),
-                    None => BTreeMap::new(),
-                };
+                let accounts = build_named_accounts(&parsed.instruction_name, &view.accounts);
                 (
                     build_condensed_fields(&parsed.instruction_name)?,
-                    build_parsed_fields(&program_id_str, parsed, &named_accounts, data)?,
+                    build_parsed_fields(&program_id_str, parsed, &accounts, data)?,
                     format!(
                         "{MARINADE_FINANCE_DISPLAY_NAME}: {}",
                         parsed.instruction_name
@@ -122,37 +123,87 @@ fn parse_marinade_finance_instruction(
         .map_err(|e| VisualSignError::DecodeError(e.to_string()))
 }
 
-/// Build a map of IDL account name to pubkey by zipping instruction accounts with IDL accounts.
-fn build_named_accounts(
-    idl: &Idl,
-    instruction_data: &[u8],
-    instruction_accounts: &[solana_instruction::AccountMeta],
-) -> BTreeMap<String, String> {
-    let mut named = BTreeMap::new();
+/// Each instruction's account names in the order the program reads them.
+///
+/// Marinade's IDL is in the legacy Anchor format, where an account can be a
+/// group of accounts (`updateActive`'s `common`, `initialize`'s `liqPool`).
+/// The decoded IDL keeps a group as a single entry, so zipping it with the
+/// instruction's accounts would shift every later name by the group's size.
+/// Flatten groups from the raw JSON instead, naming members `group.member`.
+fn flattened_account_names() -> &'static BTreeMap<String, Vec<String>> {
+    static NAMES: std::sync::OnceLock<BTreeMap<String, Vec<String>>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        fn flatten(prefix: &str, accounts: &[serde_json::Value], out: &mut Vec<String>) {
+            for account in accounts {
+                let Some(name) = account.get("name").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let full = if prefix.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{prefix}.{name}")
+                };
+                match account.get("accounts").and_then(serde_json::Value::as_array) {
+                    Some(members) => flatten(&full, members, out),
+                    None => out.push(full),
+                }
+            }
+        }
+        let mut names = BTreeMap::new();
+        let Ok(idl) = serde_json::from_str::<serde_json::Value>(MARINADE_FINANCE_IDL_JSON) else {
+            return names;
+        };
+        for instruction in idl
+            .get("instructions")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (Some(name), Some(accounts)) = (
+                instruction.get("name").and_then(serde_json::Value::as_str),
+                instruction.get("accounts").and_then(serde_json::Value::as_array),
+            ) else {
+                continue;
+            };
+            let mut flat = Vec::new();
+            flatten("", accounts, &mut flat);
+            names.insert(name.to_string(), flat);
+        }
+        names
+    })
+}
 
-    let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
-        inst.discriminator
-            .as_ref()
-            .map(|d| instruction_data.len() >= 8 && &instruction_data[0..8] == d.as_slice())
-            .unwrap_or(false)
-    }) else {
-        return named;
+/// The instruction's accounts, named by position, plus any past the IDL's list.
+struct InstructionAccounts {
+    named: BTreeMap<String, String>,
+    remaining: Vec<String>,
+}
+
+fn build_named_accounts(instruction_name: &str, accounts: &[String]) -> InstructionAccounts {
+    let names = flattened_account_names()
+        .get(instruction_name)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut result = InstructionAccounts {
+        named: BTreeMap::new(),
+        remaining: Vec::new(),
     };
-
-    for (idx, account_meta) in instruction_accounts.iter().enumerate() {
-        if let Some(idl_account) = idl_instruction.accounts.get(idx) {
-            named.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+    for (index, account) in accounts.iter().enumerate() {
+        match names.get(index) {
+            Some(name) => {
+                result.named.insert(name.clone(), account.clone());
+            }
+            None => result.remaining.push(account.clone()),
         }
     }
-
-    named
+    result
 }
 
 /// Build the expanded fields shown when the IDL parsed successfully.
 fn build_parsed_fields(
     program_id: &str,
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &BTreeMap<String, String>,
+    accounts: &InstructionAccounts,
     data: &[u8],
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let mut fields = vec![
@@ -161,10 +212,14 @@ fn build_parsed_fields(
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];
 
-    let mut account_entries: Vec<(&String, &String)> = named_accounts.iter().collect();
-    account_entries.sort_by(|a, b| a.0.cmp(b.0));
-    for (name, address) in account_entries {
+    for (name, address) in &accounts.named {
         fields.push(create_text_field(name, address)?);
+    }
+    for (index, address) in accounts.remaining.iter().enumerate() {
+        fields.push(create_text_field(
+            &format!("Remaining Account {}", index + 1),
+            address,
+        )?);
     }
 
     let mut arg_entries: Vec<(&String, &serde_json::Value)> =
@@ -229,6 +284,48 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    fn keys(n: usize) -> Vec<String> {
+        (0..n).map(|index| format!("Account{index:02}")).collect()
+    }
+
+    #[test]
+    fn test_update_deactivated_names_follow_flattened_groups() {
+        // `common` is a group of 13 accounts; the decoded IDL would treat it as
+        // one, which labelled common's second member "operationalSolAccount".
+        let names = &flattened_account_names()["updateDeactivated"];
+        assert_eq!(names.len(), 15);
+        assert_eq!(names[0], "common.state");
+        assert_eq!(names[13], "operationalSolAccount");
+        assert_eq!(names[14], "systemProgram");
+
+        let accounts = keys(15);
+        let result = build_named_accounts("updateDeactivated", &accounts);
+        assert_eq!(result.named["common.state"], "Account00");
+        assert_eq!(result.named["operationalSolAccount"], "Account13");
+        assert_eq!(result.named["systemProgram"], "Account14");
+        assert!(result.remaining.is_empty());
+    }
+
+    #[test]
+    fn test_every_instruction_has_flattened_names() {
+        let idl = load_marinade_finance_idl().expect("IDL");
+        for instruction in &idl.instructions {
+            let names = flattened_account_names()
+                .get(&instruction.name)
+                .unwrap_or_else(|| panic!("no names for {}", instruction.name));
+            assert!(names.len() >= instruction.accounts.len());
+        }
+    }
+
+    #[test]
+    fn test_accounts_past_the_idl_list_are_kept_in_order() {
+        let declared = flattened_account_names()["deposit"].len();
+        let accounts = keys(declared + 2);
+        let result = build_named_accounts("deposit", &accounts);
+        assert_eq!(result.named.len(), declared);
+        assert_eq!(result.remaining, accounts[declared..].to_vec());
+    }
 
     #[test]
     fn test_marinade_finance_idl_loads() {
