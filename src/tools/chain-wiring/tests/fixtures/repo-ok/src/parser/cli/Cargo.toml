@@ -1,0 +1,6 @@
+[package]
+name = "parser_cli"
+version = "0.0.0"
+
+[features]
+good = ["dep:visualsign-good"]

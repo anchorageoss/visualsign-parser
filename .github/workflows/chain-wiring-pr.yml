@@ -1,0 +1,112 @@
+name: Chain wiring (PR)
+
+# Validates chain support per pull request with `chain-wiring pr-check`: every
+# touch point of each chain the PR affects is wired (or a known gap on the
+# base), known-gaps.toml only shrinks, a new chain's PR body states its
+# policies and links its tracking issue, and a C-free claim holds. The job
+# summary is the main output; a sticky comment repeats it on same-repo PRs.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+    paths:
+      - 'src/chain_parsers/**'
+      - 'src/parser/**'
+      - 'src/tools/chain-wiring/**'
+      - 'src/Makefile'
+      - 'src/Cargo.toml'
+      - 'proto/**'
+      - 'images/**'
+      - '.oss-scanner/**'
+      - 'docs/chains/**'
+      - '.github/labeler.yml'
+      - '.github/CODEOWNERS'
+
+permissions: {}
+
+concurrency:
+  group: chain-wiring-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check chain wiring
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      summary: ${{ steps.run.outputs.summary }}
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        with:
+          cache: false
+      - name: Build chain-wiring
+        working-directory: src
+        run: cargo build --locked -q -p chain-wiring
+      - name: pr-check
+        id: run
+        env:
+          # Read-only: lists open PRs and reads their proto for the slot check.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The checkout is the PR merged into its base; its first parent is the base.
+          set +e
+          src/target/debug/chain-wiring pr-check --base "$(git rev-parse HEAD^1)" \
+            --event "$GITHUB_EVENT_PATH" > summary.md
+          status=$?
+          set -e
+          delim="EOF_$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+          {
+            echo "status=$status"
+            echo "summary<<$delim"
+            cat summary.md
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+      - name: Fail on wiring problems
+        if: steps.run.outputs.status != '0'
+        run: |
+          echo "chain-wiring pr-check failed; see the job summary"
+          exit 1
+
+  comment:
+    name: Sticky PR comment
+    needs: check
+    # The GITHUB_TOKEN is read-only on fork PRs, so they get the job summary only.
+    # This job never checks out or runs PR code; it posts check's output as text.
+    if: >-
+      always() &&
+      needs.check.outputs.summary != '' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Create or update the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BODY: ${{ needs.check.outputs.summary }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BODY" > body.md
+          id="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- chain-wiring:pr -->"))) | .id' \
+            | head -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@body.md > /dev/null
+            echo "updated comment $id"
+          elif grep -q '^Chains this PR affects: none' body.md && grep -q '^\*\*Passed\.\*\*' body.md; then
+            echo "no chain affected and nothing failed; no comment"
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@body.md > /dev/null
+            echo "created comment"
+          fi

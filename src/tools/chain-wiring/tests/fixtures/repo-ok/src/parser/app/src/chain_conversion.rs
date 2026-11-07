@@ -1,0 +1,1 @@
+        ProtoChain::Good => RegistryChain::Good,

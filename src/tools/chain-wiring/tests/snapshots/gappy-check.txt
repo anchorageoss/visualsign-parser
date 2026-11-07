@@ -1,0 +1,45 @@
+Wiring for chain 'gappy' (variant Gappy, proto CHAIN_GAPPY)
+Crate
+  OK       src/chain_parsers/visualsign-gappy exists
+  OK       crate default = ["cli-plugin"]
+  OK       crate [lints] workspace = true
+  OK       workspace member
+Proto and core enum
+  OK       proto CHAIN_GAPPY slot
+  OK       generated code regenerated
+  OK       registry Chain::Gappy
+  OK       registry FromStr "gappy"
+  OK       chain_conversion proto->registry
+parser_app / http-server
+  OK       parser_app feature
+  OK       parser_app registers converter
+  MISSING  parser_app registry test (src/parser/app/src/registry.rs)
+  OK       http-server feature
+Default set: parser_app default == http-server default == every CHAIN_FEATURES
+  INFO     gappy is DEFAULT-ON in parser_app (state this in the PR)
+  OK       http-server default matches parser_app default
+  OK       images/parser_app/Containerfile CHAIN_FEATURES matches parser_app default
+  OK       images/parser_http_server/Containerfile CHAIN_FEATURES matches parser_app default
+  MISSING  .oss-scanner/Dockerfile CHAIN_FEATURES differs from parser_app default [gappy ] vs [ ]
+parser_cli
+  OK       parser_cli feature
+  OK       parser_cli main.rs plugin
+  OK       cli-core chains.rs mapping
+  OK       Makefile PARSER_CLI_CHAINS
+  OK       cli_test.rs feature list
+  OK       cli_test.rs disabled prefix
+  MISSING  parser_cli fixture (src/parser/cli/tests/fixtures/gappy-*.input)
+Repo metadata and docs
+  OK       labeler chain:gappy
+  OK       CODEOWNERS entry
+  MISSING  docs/chains/gappy.mdx (docs/chains/gappy.mdx)
+  OK       docs.json nav
+  OK       chain-modules.mdx
+  OK       introduction.mdx
+  OK       parser-cli.mdx --chain list
+  OK       README chain list
+  MISSING  changelog entry (docs/changelog/_drafts/<date>-gappy-*.md)
+  OK       CLAUDE.md crate list
+  INFO     no APPLE_NO_C_CRATES in src/Makefile yet; check C deps by hand (see SKILL.md)
+
+29/34 touch points present, 5 missing
