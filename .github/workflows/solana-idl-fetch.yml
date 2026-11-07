@@ -1,0 +1,143 @@
+name: "Solana: fetch on-chain IDL"
+
+# Fetches the Anchor IDL a Solana program publishes on chain, so a preset's IDL
+# can be refreshed without installing the Anchor CLI. Run it by hand
+# (workflow_dispatch) or from another workflow (workflow_call). With
+# `committed_idl`, the job summary lists the instructions added, removed or
+# changed relative to that file. The fetched IDL is uploaded as an artifact
+# named `idl-<program_id>`, together with its provenance record
+# (`<program_id>.provenance.json`, which records the rpc slot and the slot the
+# program was last deployed at; both slots also land in the job summary).
+#
+# Locally (from the repo root): cargo run --manifest-path src/Cargo.toml
+# --locked --release -q -p solana-idl-fetch -- <program_id> [--compare
+# <committed.json>]
+
+on:
+  workflow_dispatch:
+    inputs:
+      program_id:
+        description: Solana program id (base58)
+        required: true
+        type: string
+      committed_idl:
+        description: Optional committed IDL to compare against, e.g. src/chain_parsers/visualsign-solana/src/presets/jupiter_swap/jupiter_agg_v6.json
+        required: false
+        type: string
+        default: ""
+      rpc_url:
+        description: JSON-RPC endpoint
+        required: false
+        type: string
+        default: https://api.mainnet-beta.solana.com
+  workflow_call:
+    inputs:
+      program_id:
+        required: true
+        type: string
+      committed_idl:
+        required: false
+        type: string
+        default: ""
+      rpc_url:
+        required: false
+        type: string
+        default: https://api.mainnet-beta.solana.com
+    outputs:
+      found:
+        description: "'true' if the program publishes an on-chain IDL"
+        value: ${{ jobs.fetch.outputs.found }}
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-26.04
+    # Needs to build the tool (release profile, cached) before the 5-minute
+    # fetch itself; the fetch is what the timeout guards.
+    timeout-minutes: 15
+    outputs:
+      found: ${{ steps.fetch.outputs.found }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          components: clippy, rustfmt
+          cache: false
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/registry/git/db/
+            src/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Fetch the IDL
+        id: fetch
+        env:
+          # Invoked from the repo root via --manifest-path, so pin the
+          # target dir to the one the cache step above caches.
+          CARGO_TARGET_DIR: src/target
+          PROGRAM_ID: ${{ inputs.program_id }}
+          COMMITTED_IDL: ${{ inputs.committed_idl }}
+          RPC_URL: ${{ inputs.rpc_url }}
+        run: |
+          set -euo pipefail
+          [[ "$PROGRAM_ID" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || { echo "::error::program_id is not base58"; exit 1; }
+          [[ "$RPC_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$ ]] || { echo "::error::rpc_url must be a plain https URL"; exit 1; }
+          compare=()
+          if [[ -n "$COMMITTED_IDL" ]]; then
+            [[ "$COMMITTED_IDL" =~ ^src/chain_parsers/visualsign-solana/src/presets/[a-z0-9_]+/[A-Za-z0-9_.-]+\.json$ ]] \
+              || { echo "::error::committed_idl must be a preset IDL under src/chain_parsers/visualsign-solana/src/presets/"; exit 1; }
+            [[ -f "$COMMITTED_IDL" ]] || { echo "::error::$COMMITTED_IDL not found"; exit 1; }
+            compare=(--compare "$COMMITTED_IDL")
+          fi
+          mkdir -p out
+          set +e
+          cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fetch -- "$PROGRAM_ID" --rpc "$RPC_URL" \
+            --out "out/$PROGRAM_ID.json" --provenance "out/$PROGRAM_ID.provenance.json" \
+            "${compare[@]}" 2> out/summary.txt
+          rc=$?
+          set -e
+          cat out/summary.txt
+          {
+            echo "### On-chain IDL for \`$PROGRAM_ID\`"
+            echo
+            echo '```'
+            cat out/summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$rc" -eq 0 ]]; then
+            # rpc_slot / program_last_deployed_slot live in the provenance record
+            # the tool wrote next to the IDL; surface them in the job summary.
+            rpc_slot=$(jq -r '.rpc_slot' "out/$PROGRAM_ID.provenance.json")
+            last_deployed=$(jq -r 'if .program_last_deployed_slot == null then "null" else tostring end' "out/$PROGRAM_ID.provenance.json")
+            {
+              echo
+              echo "rpc_slot: $rpc_slot"
+              echo "program_last_deployed_slot: $last_deployed"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          case $rc in
+            0) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+            2) echo "found=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
+      - name: Upload the IDL and its provenance record
+        if: steps.fetch.outputs.found == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: idl-${{ inputs.program_id }}
+          path: |
+            out/${{ inputs.program_id }}.json
+            out/${{ inputs.program_id }}.provenance.json
+          if-no-files-found: error
+          retention-days: 14

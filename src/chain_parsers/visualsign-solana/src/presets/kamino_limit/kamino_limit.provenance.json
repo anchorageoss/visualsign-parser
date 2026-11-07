@@ -1,0 +1,11 @@
+{
+  "program_id": "LiMoM9rMhrdYrfzUCxQppvxCSG1FcrUK9G8uLq4A1GF",
+  "idl_sha256": "d57e19f41273f621b2033d4db2214190ffddc4fed9bfb2b6912aba473646ed94",
+  "source": "onchain",
+  "recorded_at": "2026-11-06T22:08:06Z",
+  "idl_account": "CEKPqaWFh121hEPxCd6vyuZRe2n3tsgQZZczuX8vmbnu",
+  "rpc_slot": 466271459,
+  "program_last_deployed_slot": 446205635,
+  "tool": "scripts/fetch-solana-idl.py",
+  "notes": "Same JSON as the on-chain IDL at rpc_slot; the committed file only differs in formatting, and idl_sha256 is over the committed bytes."
+}

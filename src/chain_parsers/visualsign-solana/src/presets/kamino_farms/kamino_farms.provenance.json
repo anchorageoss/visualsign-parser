@@ -1,0 +1,7 @@
+{
+  "program_id": "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
+  "idl_sha256": "ecd2f5ea557fcf01f236e3cb4cc33aecabaee5362e00205f1e92de7460497b88",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:04Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271444 (instructions: committed 26, on chain 27 added: closeEmptyUserState removed: - changed: rewardUserOnce)."
+}

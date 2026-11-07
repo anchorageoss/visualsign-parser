@@ -20,6 +20,9 @@ pub use utils::*;
 // Auto-discovered preset IDLs. See `build.rs::collect_preset_idls`.
 include!(concat!(env!("OUT_DIR"), "/preset_idls.rs"));
 
+// Provenance records next to those IDLs. See `build.rs::collect_preset_idl_provenance`.
+include!(concat!(env!("OUT_DIR"), "/preset_idl_provenance.rs"));
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
