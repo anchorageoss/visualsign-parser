@@ -187,6 +187,26 @@ The record modes hash the existing IDL file and never modify it. The on-chain
 mode rewrites the IDL together with its record, which is also how you refresh
 a preset whose IDL changed on chain.
 
+## After bootstrap: the nightly sync keeps it fresh
+
+Once a preset is registered (in the `ENTRIES` list of `preset_idl_configs`, or
+in the preset module the way marginfi does), the nightly
+`solana-idl-nightly` workflow takes over refreshing it from chain:
+
+- it re-fetches every preset's on-chain IDL (via the reusable fetch workflow),
+- for each program whose IDL changed (compared as parsed JSON), it replays
+  recent successful mainnet transactions through `parser_cli` built before and
+  after the IDL update (Helius RPC), and
+- it opens/updates one bot PR (`bot/solana-idl-sync`) with the IDLs, their new
+  provenance records, and a before/after report per changed program.
+
+The driving tool is the `solana-idl-sync` workspace crate; the preset matrix it
+walks comes from `visualsign_solana::preset_idl_sources()` (tested to cover
+every preset IDL file exactly once), so a preset added by this skill joins the
+sync automatically. Nothing in the skill needs to opt in; just make sure the
+registration and provenance record above are in place, or the sync will fail
+its own provenance checks.
+
 ## Step B: Scaffold config.rs
 
 ```rust

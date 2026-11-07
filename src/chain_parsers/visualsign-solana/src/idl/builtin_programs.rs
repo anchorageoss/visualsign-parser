@@ -378,6 +378,77 @@ fn preset_idl_configs()
     })
 }
 
+/// One committed preset IDL: the program it is registered under and the
+/// file it lives in.
+///
+/// [`preset_idl_sources`] produces these; they are the public, tested answer
+/// to "which programs do the presets decode, and where are their IDLs?",
+/// used by the nightly sync workflow to decide what to re-fetch and where a
+/// refreshed IDL has to land.
+#[derive(Clone, Debug)]
+pub struct PresetIdlSource {
+    /// Base58 program id the IDL is registered under.
+    pub program_id: String,
+    /// Preset directory under `src/presets/`, e.g. `jupiter_swap`.
+    pub preset_dir: &'static str,
+    /// IDL file name inside the preset directory, e.g. `jupiter_agg_v6.json`.
+    pub idl_file: &'static str,
+    /// The IDL JSON, exactly the committed file's bytes.
+    pub idl_json: &'static str,
+}
+
+impl PresetIdlSource {
+    /// Path of the committed IDL relative to the repository root.
+    pub fn idl_path(&self) -> String {
+        format!(
+            "src/chain_parsers/visualsign-solana/src/presets/{}/{}",
+            self.preset_dir, self.idl_file
+        )
+    }
+}
+
+/// The committed preset IDLs, one entry per program id, sorted by program id.
+///
+/// Joins the program-id registrations (the `ENTRIES` list in
+/// `preset_idl_configs`, plus marginfi, which registers its IDL in its own
+/// preset module) to the `PRESET_IDLS` file list `build.rs` reflects out of
+/// `src/presets/`, so every JSON file under a preset directory is paired
+/// with its program id and its on-disk location.
+pub fn preset_idl_sources() -> Vec<PresetIdlSource> {
+    // JSON -> program id, the same join the provenance test uses. A JSON
+    // registered under two ids would collapse here; the coverage test
+    // below refuses that by checking every PRESET_IDLS entry is covered.
+    let mut by_json: std::collections::BTreeMap<&str, String> = preset_idl_configs()
+        .iter()
+        .filter_map(|(program_id, config)| {
+            let solana_parser::CustomIdl::Json(json) = &config.idl else {
+                return None;
+            };
+            Some((json.as_str(), program_id.clone()))
+        })
+        .collect();
+    by_json.insert(
+        include_str!("../presets/marginfi/marginfi.json"),
+        crate::presets::marginfi::MARGINFI_PROGRAM_ID.to_string(),
+    );
+    let mut sources: Vec<PresetIdlSource> = crate::PRESET_IDLS
+        .iter()
+        .filter_map(|(preset_dir, idl_file, idl_json)| {
+            // `remove`: an entry picked up twice (or left over because a
+            // PRESET_IDLS json matched nothing) is caught by the coverage
+            // test, which requires an exact one-to-one pairing.
+            by_json.remove(idl_json).map(|program_id| PresetIdlSource {
+                program_id,
+                preset_dir,
+                idl_file,
+                idl_json,
+            })
+        })
+        .collect();
+    sources.sort_by(|a, b| a.program_id.cmp(&b.program_id));
+    sources
+}
+
 /// The presets' `IdlRecord`s, parsed and serialized once per process.
 ///
 /// [`preset_idl_configs`] holds raw JSON; turning it into records means a
@@ -619,6 +690,65 @@ mod tests {
         // with a rendered canonical label.
         assert!(!is_reserved_canonical_name("system program"));
         assert!(!is_reserved_canonical_name("System Program "));
+    }
+
+    #[test]
+    fn preset_idl_sources_cover_every_preset_idl_exactly_once() {
+        let sources = preset_idl_sources();
+        assert!(
+            !sources.is_empty(),
+            "build.rs should discover the preset IDLs"
+        );
+
+        // Every PRESET_IDLS file is covered, exactly once, and nothing else.
+        let mut expected: Vec<(&str, &str)> = crate::PRESET_IDLS
+            .iter()
+            .map(|(preset, idl_file, _)| (*preset, *idl_file))
+            .collect();
+        let mut covered: Vec<(&str, &str)> = sources
+            .iter()
+            .map(|source| (source.preset_dir, source.idl_file))
+            .collect();
+        expected.sort();
+        covered.sort();
+        assert_eq!(covered, expected);
+
+        // Sorted by program id, and each program id names exactly one IDL.
+        let ids: Vec<&str> = sources
+            .iter()
+            .map(|source| source.program_id.as_str())
+            .collect();
+        let mut sorted_ids = ids.clone();
+        sorted_ids.sort();
+        assert_eq!(
+            ids, sorted_ids,
+            "preset_idl_sources must be sorted by program id"
+        );
+        let mut unique_ids = sorted_ids.clone();
+        unique_ids.dedup();
+        assert_eq!(
+            sorted_ids.len(),
+            unique_ids.len(),
+            "program ids must be unique"
+        );
+
+        // Each entry points at the JSON file it was joined by, and its path
+        // is where the file actually lives in the repo.
+        for source in &sources {
+            let idl_rel = source.idl_path();
+            // idl_path is repo-root relative; CARGO_MANIFEST_DIR is the
+            // crate root, which is three levels down.
+            let crate_rel = idl_rel
+                .strip_prefix("src/chain_parsers/visualsign-solana/")
+                .unwrap_or(&idl_rel);
+            let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            let committed = std::fs::read_to_string(manifest_dir.join(crate_rel))
+                .unwrap_or_else(|e| panic!("failed to read {idl_rel}: {e}"));
+            assert_eq!(
+                committed, source.idl_json,
+                "{idl_rel} and its source disagree"
+            );
+        }
     }
 
     #[test]
