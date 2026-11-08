@@ -290,14 +290,6 @@ fn preset_idl_configs()
             // Abra: compiled in ahead of its preset; see `preset_program_ids`.
             (
                 "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
-                include_str!("abra/abrafi_backed_token.json"),
-            ),
-            (
-                "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
-                include_str!("abra/abrafi_staking_liquid.json"),
-            ),
-            (
-                "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
                 include_str!("../presets/abra/abrafi_backed_token.json"),
             ),
             (
