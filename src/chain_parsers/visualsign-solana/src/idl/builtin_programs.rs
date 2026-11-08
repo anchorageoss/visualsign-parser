@@ -177,7 +177,8 @@ fn builtin_idl_program_name(p: &ProgramType) -> &'static str {
     }
 }
 
-/// Program IDs registered by in-crate preset visualizers.
+/// Program IDs registered in-crate: by a preset visualizer, or by an IDL compiled in
+/// ahead of its preset (a [`preset_idl_configs`] entry).
 ///
 /// Built once at first use from `available_visualizers()` so new presets
 /// stay covered as they land. Each preset declares the program IDs it
@@ -200,6 +201,7 @@ fn preset_program_ids() -> &'static BTreeSet<&'static str> {
                 }
             }
         }
+        set.extend(preset_idl_configs().keys().map(String::as_str));
         set
     })
 }
@@ -207,7 +209,7 @@ fn preset_program_ids() -> &'static BTreeSet<&'static str> {
 /// Is the program ID one we refuse to let callers override?
 ///
 /// Superset of `canonical_name(...).is_some()` plus every program ID
-/// registered by an in-crate preset visualizer (Kamino, Meteora, Drift
+/// registered in-crate by a preset visualizer or a compiled-in IDL (Kamino, Meteora, Drift
 /// preset paths, `swig_wallet`, `dflow_aggregator`, etc.). Even when a
 /// preset has no canonical string (and thus drives its own rendering),
 /// caller IDL bodies for that program ID must still be rejected so a
@@ -275,8 +277,8 @@ pub fn is_reserved_canonical_name(name: &str) -> bool {
     .any(|p| builtin_idl_program_name(p) == name)
 }
 
-/// The IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID
-/// included here so that decode path can use these idls.
+/// The in-crate Anchor IDL JSON, keyed by program ID, for the decode path: every
+/// IDL-backed preset's IDL, plus any IDL compiled in ahead of its preset.
 fn preset_idl_configs()
 -> &'static std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
     use solana_parser::{CustomIdl, CustomIdlConfig};
@@ -285,6 +287,15 @@ fn preset_idl_configs()
         OnceLock::new();
     PRESET_IDL_CONFIGS.get_or_init(|| {
         const ENTRIES: &[(&str, &str)] = &[
+            // Abra: compiled in ahead of its preset; see `preset_program_ids`.
+            (
+                "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+                include_str!("abra/abrafi_backed_token.json"),
+            ),
+            (
+                "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+                include_str!("abra/abrafi_staking_liquid.json"),
+            ),
             (
                 "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
                 include_str!("../presets/dflow_aggregator/dflow_aggregator.json"),
@@ -545,5 +556,36 @@ mod tests {
         // with a rendered canonical label.
         assert!(!is_reserved_canonical_name("system program"));
         assert!(!is_reserved_canonical_name("System Program "));
+    }
+
+    /// An IDL compiled in ahead of its preset registers and trusts its program like a preset.
+    #[test]
+    fn compiled_in_abra_idls_register_their_programs() {
+        for program_id in [
+            "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+            "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+        ] {
+            assert!(preset_program_ids().contains(program_id), "{program_id}");
+            assert!(is_trusted_program(program_id), "{program_id}");
+            assert_eq!(
+                registered_source(program_id, &std::collections::BTreeMap::new()),
+                crate::intermediate::RegisteredSource::Preset,
+                "{program_id}"
+            );
+            let idl = preset_idl_records()
+                .get(program_id)
+                .and_then(|record| record.custom_idl.as_ref());
+            assert!(
+                idl.is_some_and(|idl| !idl.instructions.is_empty()),
+                "{program_id} has a decoded IDL with instructions"
+            );
+            for instruction in idl
+                .map(|idl| idl.instructions.as_slice())
+                .unwrap_or_default()
+            {
+                let len = instruction.discriminator.as_ref().map_or(0, Vec::len);
+                assert_eq!(len, 8, "{program_id} {}", instruction.name);
+            }
+        }
     }
 }
