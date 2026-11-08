@@ -177,22 +177,59 @@ pub enum Command {
     ExecuteSubPlan = 0x21,
 }
 
-/// Maps raw command bytes to `(raw_index, Command)` pairs.
-///
-/// Bytes that do not decode to a known [`Command`] are skipped. The retained
-/// `raw_index` is the position of that byte in the original `commands` byte
-/// string, which is what the Universal Router uses on-chain to index into the
-/// `inputs` array (`dispatch(commands[i], inputs[i])`). Preserving the raw
-/// index is what keeps the visualizer aligned with the on-chain dispatcher
-/// when any command byte is dropped here (input-index misalignment bug).
-fn map_commands(raw: &[u8]) -> Vec<(usize, Command)> {
-    let mut out = Vec::with_capacity(raw.len());
-    for (idx, &b) in raw.iter().enumerate() {
-        if let Ok(cmd) = Command::try_from(b) {
-            out.push((idx, cmd));
+/// `FLAG_ALLOW_REVERT` in a command byte: the command may fail without
+/// reverting the whole `execute` call.
+const FLAG_ALLOW_REVERT: u8 = 0x80;
+
+/// Mask that leaves the command type of a command byte (`COMMAND_TYPE_MASK`).
+const COMMAND_TYPE_MASK: u8 = 0x3f;
+
+/// One command byte of an `execute` call, as the on-chain dispatcher reads it.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct MappedCommand {
+    /// Position of the byte in `commands`, which is also its index in `inputs`.
+    raw_index: usize,
+    /// The command type (`byte & 0x3f`), or `None` when it is not a known [`Command`].
+    command: Option<Command>,
+    /// The command type bits, kept for display when `command` is `None`.
+    type_bits: u8,
+    allow_revert: bool,
+}
+
+impl MappedCommand {
+    /// Name shown for the command, with the allow-revert marker when set.
+    fn label(&self) -> String {
+        let name = match self.command {
+            Some(cmd) => format!("{cmd:?}"),
+            None => format!("Unknown command 0x{:02x}", self.type_bits),
+        };
+        if self.allow_revert {
+            format!("{name} (allow revert)")
+        } else {
+            name
         }
     }
-    out
+}
+
+/// Maps every raw command byte to a [`MappedCommand`].
+///
+/// The dispatcher masks each byte with `0x3f` and reads `FLAG_ALLOW_REVERT`
+/// from bit 7, so both are decoded here. No byte is dropped, and
+/// `raw_index` is the position the Universal Router uses to index into the
+/// `inputs` array (`dispatch(commands[i], inputs[i])`).
+fn map_commands(raw: &[u8]) -> Vec<MappedCommand> {
+    raw.iter()
+        .enumerate()
+        .map(|(raw_index, &b)| {
+            let type_bits = b & COMMAND_TYPE_MASK;
+            MappedCommand {
+                raw_index,
+                command: Command::try_from(type_bits).ok(),
+                type_bits,
+                allow_revert: b & FLAG_ALLOW_REVERT != 0,
+            }
+        })
+        .collect()
 }
 
 /// Visualizer for Uniswap Universal Router
@@ -263,25 +300,39 @@ impl UniversalRouterVisualizer {
         registry: Option<&ContractRegistry>,
     ) -> Option<SignablePayloadField> {
         let mapped = map_commands(commands);
-        // Display-only view that preserves the historical fallback-text format
-        // (a flat `Vec<Command>`). The pairing with `inputs` below uses the
-        // raw command-byte index to stay aligned with the on-chain dispatcher,
-        // even when some command bytes are skipped above.
-        let mapped_cmds_only: Vec<Command> = mapped.iter().map(|(_, c)| *c).collect();
+        // Display-only view of the command names for the fallback text.
+        let command_labels: Vec<String> = mapped.iter().map(MappedCommand::label).collect();
         let mut detail_fields = Vec::new();
 
-        for (display_idx, (raw_idx, cmd)) in mapped.iter().enumerate() {
-            // Pair with `inputs[raw_idx]`, NOT `inputs[display_idx]`. The
-            // Universal Router's Solidity dispatcher iterates the raw command
-            // byte string and calls `dispatch(commands[i], inputs[i])` indexed
-            // by raw command position, so any command byte that fails
-            // `Command::try_from` here (for example a valid command with the
-            // high `FLAG_ALLOW_REVERT` bit set) must still consume its slot in
-            // `inputs` from the visualizer's perspective. Indexing by the
-            // post-filter `display_idx` would silently shift later commands
-            // onto earlier inputs and let a malicious caller display benign
-            // data for an operation that executes with different values.
-            let input_bytes = inputs.get(*raw_idx).map(|b| &b.0[..]);
+        for (display_idx, entry) in mapped.iter().enumerate() {
+            // Pair with `inputs[raw_index]`. The Universal Router's Solidity
+            // dispatcher calls `dispatch(commands[i], inputs[i])` indexed by
+            // raw command position, and no command byte is dropped here, so
+            // every command keeps its own slot in `inputs`.
+            let input_bytes = inputs.get(entry.raw_index).map(|b| &b.0[..]);
+
+            // A command type this visualizer does not know is shown, not skipped.
+            let Some(cmd) = &entry.command else {
+                let input_text = match input_bytes {
+                    Some(bytes) => format!("Input: 0x{}", hex::encode(bytes)),
+                    None => "Input: None".to_string(),
+                };
+                detail_fields.push(SignablePayloadField::PreviewLayout {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{} {input_text}", entry.label()),
+                        label: format!("Command {}", display_idx + 1),
+                    },
+                    preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                        title: Some(visualsign::SignablePayloadFieldTextV2 {
+                            text: entry.label(),
+                        }),
+                        subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text: input_text }),
+                        condensed: None,
+                        expanded: None,
+                    },
+                });
+                continue;
+            };
 
             // Decode command-specific parameters
             let field = if let Some(bytes) = input_bytes {
@@ -357,6 +408,23 @@ impl UniversalRouterVisualizer {
                 _ => field,
             };
 
+            // Show that the command may fail without reverting the call.
+            let wrapped_field = match wrapped_field {
+                SignablePayloadField::PreviewLayout {
+                    common,
+                    mut preview_layout,
+                } if entry.allow_revert => {
+                    if let Some(title) = preview_layout.title.as_mut() {
+                        title.text.push_str(" (allow revert)");
+                    }
+                    SignablePayloadField::PreviewLayout {
+                        common,
+                        preview_layout,
+                    }
+                }
+                other => other,
+            };
+
             detail_fields.push(wrapped_field);
         }
 
@@ -375,16 +443,16 @@ impl UniversalRouterVisualizer {
             common: SignablePayloadFieldCommon {
                 fallback_text: if let Some(dl) = &deadline {
                     format!(
-                        "Uniswap Universal Router Execute: {} commands ({:?}), deadline {}",
-                        mapped_cmds_only.len(),
-                        mapped_cmds_only,
+                        "Uniswap Universal Router Execute: {} commands ([{}]), deadline {}",
+                        command_labels.len(),
+                        command_labels.join(", "),
                         dl
                     )
                 } else {
                     format!(
-                        "Uniswap Universal Router Execute: {} commands ({:?})",
-                        mapped_cmds_only.len(),
-                        mapped_cmds_only
+                        "Uniswap Universal Router Execute: {} commands ([{}])",
+                        command_labels.len(),
+                        command_labels.join(", ")
                     )
                 },
                 label: "Universal Router".to_string(),
@@ -395,11 +463,11 @@ impl UniversalRouterVisualizer {
                 }),
                 subtitle: if let Some(dl) = &deadline {
                     Some(visualsign::SignablePayloadFieldTextV2 {
-                        text: format!("{} commands, deadline {}", mapped_cmds_only.len(), dl),
+                        text: format!("{} commands, deadline {}", command_labels.len(), dl),
                     })
                 } else {
                     Some(visualsign::SignablePayloadFieldTextV2 {
-                        text: format!("{} commands", mapped_cmds_only.len()),
+                        text: format!("{} commands", command_labels.len()),
                     })
                 },
                 condensed: None,
@@ -1925,12 +1993,10 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_unrecognized_command() {
-        // 0xff is not a valid Command, so it is skipped. The remaining
-        // `Transfer` byte is at raw index 1, so it must pair with
-        // `inputs[1] = 0x02` (NOT `inputs[0] = 0x01`). Pairing with the
-        // post-filter index 0 would show the user `Transfer` decoded from
-        // 0x01 while the on-chain dispatcher executes Transfer with the real
-        // 0x02 payload (input-index misalignment when skipping unrecognized bytes).
+        // 0xff is not a valid Command (type 0x3f, allow-revert set), so it is
+        // shown as unknown with its own input. The `Transfer` byte is at raw
+        // index 1, so it must pair with `inputs[1] = 0x02` (NOT
+        // `inputs[0] = 0x01`).
         let commands = vec![0xff, Command::Transfer as u8];
         let inputs = vec![vec![0x01], vec![0x02]];
         let deadline = 0u64;
@@ -1942,7 +2008,7 @@ mod tests {
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "Uniswap Universal Router Execute: 1 commands ([Transfer])"
+                    fallback_text: "Uniswap Universal Router Execute: 2 commands ([Unknown command 0x3f (allow revert), Transfer])"
                         .to_string(),
                     label: "Universal Router".to_string(),
                 },
@@ -1951,30 +2017,55 @@ mod tests {
                         text: "Uniswap Universal Router Execute".to_string(),
                     }),
                     subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: "1 commands".to_string(),
+                        text: "2 commands".to_string(),
                     }),
                     condensed: None,
                     expanded: Some(SignablePayloadFieldListLayout {
-                        fields: vec![AnnotatedPayloadField {
-                            signable_payload_field: SignablePayloadField::PreviewLayout {
-                                common: SignablePayloadFieldCommon {
-                                    fallback_text: "Transfer: 0x02".to_string(),
-                                    label: "Command 1".to_string(),
+                        fields: vec![
+                            AnnotatedPayloadField {
+                                signable_payload_field: SignablePayloadField::PreviewLayout {
+                                    common: SignablePayloadFieldCommon {
+                                        fallback_text:
+                                            "Unknown command 0x3f (allow revert) Input: 0x01"
+                                                .to_string(),
+                                        label: "Command 1".to_string(),
+                                    },
+                                    preview_layout: SignablePayloadFieldPreviewLayout {
+                                        title: Some(SignablePayloadFieldTextV2 {
+                                            text: "Unknown command 0x3f (allow revert)"
+                                                .to_string(),
+                                        }),
+                                        subtitle: Some(SignablePayloadFieldTextV2 {
+                                            text: "Input: 0x01".to_string(),
+                                        }),
+                                        condensed: None,
+                                        expanded: None,
+                                    },
                                 },
-                                preview_layout: SignablePayloadFieldPreviewLayout {
-                                    title: Some(SignablePayloadFieldTextV2 {
-                                        text: "Transfer".to_string(),
-                                    }),
-                                    subtitle: Some(SignablePayloadFieldTextV2 {
-                                        text: "Failed to decode parameters".to_string(),
-                                    }),
-                                    condensed: None,
-                                    expanded: None,
-                                },
+                                static_annotation: None,
+                                dynamic_annotation: None,
                             },
-                            static_annotation: None,
-                            dynamic_annotation: None,
-                        }],
+                            AnnotatedPayloadField {
+                                signable_payload_field: SignablePayloadField::PreviewLayout {
+                                    common: SignablePayloadFieldCommon {
+                                        fallback_text: "Transfer: 0x02".to_string(),
+                                        label: "Command 2".to_string(),
+                                    },
+                                    preview_layout: SignablePayloadFieldPreviewLayout {
+                                        title: Some(SignablePayloadFieldTextV2 {
+                                            text: "Transfer".to_string(),
+                                        }),
+                                        subtitle: Some(SignablePayloadFieldTextV2 {
+                                            text: "Failed to decode parameters".to_string(),
+                                        }),
+                                        condensed: None,
+                                        expanded: None,
+                                    },
+                                },
+                                static_annotation: None,
+                                dynamic_annotation: None,
+                            },
+                        ],
                     }),
                 },
             }
@@ -1985,25 +2076,18 @@ mod tests {
     fn test_visualize_tx_commands_allow_revert_flag_preserves_alignment() {
         // Regression: the exact input-index misalignment attack scenario.
         //
-        // `0x80` is `FLAG_ALLOW_REVERT | V3SwapExactIn (0x00)`. Today the
-        // visualizer does not strip the high bit, so `Command::try_from(0x80)`
-        // fails and the byte is skipped. On-chain, however, the Solidity
+        // `0x80` is `FLAG_ALLOW_REVERT | V3SwapExactIn (0x00)`. The Solidity
         // dispatcher masks off the flag and executes V3SwapExactIn with
-        // `inputs[0]` anyway, then proceeds to `Transfer` with `inputs[1]`.
+        // `inputs[0]`, then proceeds to `Transfer` with `inputs[1]`.
         //
-        // Before this fix, the visualizer would pair the surviving `Transfer`
-        // command with `inputs[0]` (the swap payload) instead of `inputs[1]`
-        // (the real transfer payload), letting a malicious dApp display a
-        // benign-looking transfer while a different transfer actually
-        // executes. After the fix, `Transfer` is at raw index 1 and must
-        // pair with `inputs[1]`.
+        // The visualizer must pair `Transfer` (raw index 1) with `inputs[1]`
+        // (the real transfer payload), not `inputs[0]` (the swap payload),
+        // or a malicious dApp could display a benign-looking transfer while
+        // a different transfer executes.
         //
         // Compose the flagged byte from its parts so the test still
         // matches its narrative if `Command::V3SwapExactIn`'s discriminant
-        // is ever reassigned. Today the result is `0x80` and `try_from`
-        // fails, so the byte is still dropped; this regression test
-        // continues to assert alignment, not flag masking.
-        const FLAG_ALLOW_REVERT: u8 = 0x80;
+        // is ever reassigned.
         let flag_allow_revert_v3_swap_exact_in: u8 =
             FLAG_ALLOW_REVERT | (Command::V3SwapExactIn as u8);
 
@@ -2044,10 +2128,6 @@ mod tests {
         let expanded = preview_layout.expanded.expect("expanded section");
 
         // Locate the Transfer field by title rather than by positional index.
-        // This keeps the alignment assertion independent of filtering policy:
-        // if a follow-up adds `FLAG_ALLOW_REVERT` masking (so `0x80` decodes
-        // as `V3SwapExactIn` and survives), the Transfer field will move from
-        // index 0 to index 1 without breaking this test's stated purpose.
         let transfer_preview = expanded
             .fields
             .iter()
@@ -2071,8 +2151,7 @@ mod tests {
 
         // The visualizer must display the real Transfer payload (to=0x2222...,
         // amount=42), proving it consumed `inputs[1]` (the raw index of the
-        // Transfer byte) and NOT `inputs[0]` (the decoy at the post-filter
-        // index 0).
+        // Transfer byte) and NOT `inputs[0]` (the decoy).
         assert!(
             subtitle_text.contains("42"),
             "Transfer subtitle must reflect the real amount=42 payload, got: {subtitle_text}",
@@ -2111,7 +2190,8 @@ mod tests {
             panic!("Expected PreviewLayout");
         };
         let expanded = preview_layout.expanded.expect("expanded section");
-        assert_eq!(expanded.fields.len(), 2);
+        // The unknown byte is shown, so all three commands are listed.
+        assert_eq!(expanded.fields.len(), 3);
 
         let SignablePayloadField::PreviewLayout { common: c0, .. } =
             &expanded.fields[0].signable_payload_field
@@ -2125,9 +2205,82 @@ mod tests {
         else {
             panic!("Expected PreviewLayout for command 1");
         };
+        assert_eq!(
+            c1.fallback_text,
+            "Unknown command 0x3f (allow revert) Input: 0xbb"
+        );
+
+        let SignablePayloadField::PreviewLayout { common: c2, .. } =
+            &expanded.fields[2].signable_payload_field
+        else {
+            panic!("Expected PreviewLayout for command 2");
+        };
         // Transfer is at raw index 2, so it must pair with `inputs[2] = 0xcc`,
         // not `inputs[1] = 0xbb`.
-        assert_eq!(c1.fallback_text, "Transfer: 0xcc");
+        assert_eq!(c2.fallback_text, "Transfer: 0xcc");
+    }
+
+    #[test]
+    fn test_map_commands_masks_flag_and_keeps_every_byte() {
+        let mapped = map_commands(&[0x8a, 0x10, 0x3f, 0xbf]);
+        let summary: Vec<(usize, Option<Command>, bool)> = mapped
+            .iter()
+            .map(|m| (m.raw_index, m.command, m.allow_revert))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (0, Some(Command::Permit2Permit), true),
+                (1, Some(Command::V4Swap), false),
+                (2, None, false),
+                (3, None, true),
+            ]
+        );
+        assert_eq!(mapped[0].label(), "Permit2Permit (allow revert)");
+        assert_eq!(mapped[3].label(), "Unknown command 0x3f (allow revert)");
+    }
+
+    #[test]
+    fn test_visualize_tx_commands_shows_allow_revert_permit2_permit() {
+        // `0x8a` is `FLAG_ALLOW_REVERT | Permit2Permit`; it executes on chain,
+        // so it must appear in the count, the fallback text and the fields.
+        let mut permit_single = vec![0u8; 192];
+        permit_single[12..32].copy_from_slice(&[0x72; 20]);
+        permit_single[44..64].copy_from_slice(&[0xff; 20]);
+        let commands = vec![0x8a, Command::V4Swap as u8];
+        let inputs = vec![permit_single, vec![0xaa]];
+        let input = encode_execute_call(&commands, inputs, 0);
+
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, None)
+            .unwrap();
+
+        let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = result
+        else {
+            panic!("Expected PreviewLayout");
+        };
+        assert_eq!(
+            common.fallback_text,
+            "Uniswap Universal Router Execute: 2 commands ([Permit2Permit (allow revert), V4Swap])"
+        );
+        assert_eq!(preview_layout.subtitle.unwrap().text, "2 commands");
+        let expanded = preview_layout.expanded.expect("expanded section");
+        assert_eq!(expanded.fields.len(), 2);
+        let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = &expanded.fields[0].signable_payload_field
+        else {
+            panic!("Expected PreviewLayout for command 0");
+        };
+        assert_eq!(common.label, "Permit2 Permit");
+        assert_eq!(
+            preview_layout.title.as_ref().unwrap().text,
+            "Permit2 Permit (allow revert)"
+        );
     }
 
     #[test]

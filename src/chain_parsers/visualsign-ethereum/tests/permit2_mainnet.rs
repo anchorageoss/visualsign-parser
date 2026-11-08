@@ -373,7 +373,6 @@ fn known_misrenders_610_render_correctly() {
 }
 
 #[test]
-#[ignore = "known bug #611: Universal Router commands with FLAG_ALLOW_REVERT are dropped from the display"]
 fn known_misrenders_611_render_correctly() {
     assert_known_misrenders_fixed(611);
 }
@@ -384,11 +383,11 @@ fn known_misrenders_611_render_correctly() {
 /// test and skip that issue's entries here. Keep the entries themselves:
 /// `assert_known_misrenders_fixed` reads the same fixtures.
 // TODO(#610): skip the #610 entries here once the inline-permit fallback is fixed.
-// TODO(#611): skip the #611 entry here once allow-revert commands are shown.
 #[test]
 fn known_misrenders_still_render_as_today() {
     let (registry, _) = ContractRegistry::with_default_protocols();
-    for m in KNOWN_MISRENDERS {
+    // #611 is fixed: `known_misrenders_611_render_correctly` covers its entry.
+    for m in KNOWN_MISRENDERS.iter().filter(|m| m.issue != 611) {
         let (to, data) = read_fixture(m.fixture);
         let report = check(&registry, to, &data);
         assert!(
