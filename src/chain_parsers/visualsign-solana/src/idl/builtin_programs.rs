@@ -287,6 +287,15 @@ fn preset_idl_configs()
         OnceLock::new();
     PRESET_IDL_CONFIGS.get_or_init(|| {
         const ENTRIES: &[(&str, &str)] = &[
+            // Abra: compiled in ahead of its preset; see `preset_program_ids`.
+            (
+                "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+                include_str!("abra/abrafi_backed_token.json"),
+            ),
+            (
+                "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+                include_str!("abra/abrafi_staking_liquid.json"),
+            ),
             (
                 "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
                 include_str!("../presets/abra/abrafi_backed_token.json"),
@@ -431,6 +440,7 @@ pub fn preset_idl_records()
                         program_type: None,
                         custom_idl: Some(idl),
                         custom_idl_json: Some(json.clone()),
+                        custom_idl_hash: None,
                         override_builtin: true,
                         is_preset: true,
                     },
