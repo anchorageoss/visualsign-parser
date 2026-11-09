@@ -3,8 +3,9 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, MAX_CALL_DEPTH, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind, available_visualizers, visualize_with_any,
+    InstructionVisualizer, MAX_CALL_DEPTH, NamedIdlAccounts, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind, available_visualizers, name_idl_accounts,
+    remaining_account_label, visualize_with_any,
 };
 use config::SquadsMultisigConfig;
 use solana_instruction::{AccountMeta, Instruction};
@@ -236,33 +237,33 @@ fn parse_squads_instruction(
     })
 }
 
+/// Name the instruction's accounts against the IDL, flattening account groups
+/// (composite `Accounts` structs) so members and the accounts after a group
+/// land on the right addresses.
 fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
     accounts: &[AccountMeta],
-) -> BTreeMap<String, String> {
-    let mut named_accounts = BTreeMap::new();
-
+) -> NamedIdlAccounts {
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
             .as_ref()
             .is_some_and(|disc| data.len() >= disc.len() && data[..disc.len()] == *disc)
     });
 
-    if let Some(idl_instruction) = idl_instruction {
-        for (index, account_meta) in accounts.iter().enumerate() {
-            if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
-            }
+    match idl_instruction {
+        Some(instruction) => {
+            let account_strs: Vec<String> =
+                accounts.iter().map(|meta| meta.pubkey.to_string()).collect();
+            name_idl_accounts(instruction, &account_strs)
         }
+        None => NamedIdlAccounts::default(),
     }
-
-    named_accounts
 }
 
 struct SquadsParsedInstruction {
     parsed: SolanaParsedInstructionData,
-    named_accounts: BTreeMap<String, String>,
+    named_accounts: NamedIdlAccounts,
 }
 
 /// `(title, condensed_fields, expanded_fields)` returned by the various `build_*` helpers.
@@ -305,7 +306,7 @@ fn build_parsed_fields(
 /// those propagate up so the caller can decide whether to surface them.
 fn try_build_vault_transaction_fields(
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &BTreeMap<String, String>,
+    named_accounts: &NamedIdlAccounts,
     program_id: &str,
     context: &VisualizerContext,
 ) -> Result<Option<SquadsPreviewFields>, VisualSignError> {
@@ -347,7 +348,7 @@ fn try_build_vault_transaction_fields(
 
     // Derive the vault PDA so downstream visualizers that compare `context.sender()`
     // attribute the inner instruction's signer to the vault, not the outer fee-payer.
-    let inner_sender_account = vault_pda_account(named_accounts, vault_index);
+    let inner_sender_account = vault_pda_account(&named_accounts.named, vault_index);
 
     // Visualize inner instructions using the full visualizer framework; each child
     // context is built at parent depth + 1 so re-entry is bounded at MAX_CALL_DEPTH.
@@ -383,8 +384,11 @@ fn try_build_vault_transaction_fields(
     ];
 
     // Named accounts from the outer instruction
-    for (account_name, account_address) in named_accounts {
+    for (account_name, account_address) in &named_accounts.named {
         expanded_fields.push(create_text_field(account_name, account_address)?);
+    }
+    for (index, pubkey) in named_accounts.remaining.iter().enumerate() {
+        expanded_fields.push(create_text_field(&remaining_account_label(index), pubkey)?);
     }
 
     // Decoded inner instructions
@@ -585,7 +589,7 @@ fn visualize_inner_instructions(
 
 fn build_generic_fields(
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &BTreeMap<String, String>,
+    named_accounts: &NamedIdlAccounts,
     program_id: &str,
 ) -> Result<SquadsPreviewFields, VisualSignError> {
     let title = format!("Squads Multisig: {}", parsed.instruction_name);
@@ -606,8 +610,11 @@ fn build_generic_fields(
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];
 
-    for (account_name, account_address) in named_accounts {
+    for (account_name, account_address) in &named_accounts.named {
         expanded_fields.push(create_text_field(account_name, account_address)?);
+    }
+    for (index, pubkey) in named_accounts.remaining.iter().enumerate() {
+        expanded_fields.push(create_text_field(&remaining_account_label(index), pubkey)?);
     }
 
     for (key, value) in &parsed.program_call_args {
@@ -865,9 +872,53 @@ mod tests {
             .collect();
         let first = build_named_accounts(&data, idl, &metas);
         let second = build_named_accounts(&data, idl, &metas);
-        let first_keys: Vec<&String> = first.keys().collect();
-        let second_keys: Vec<&String> = second.keys().collect();
+        let first_keys: Vec<&String> = first.named.keys().collect();
+        let second_keys: Vec<&String> = second.named.keys().collect();
         assert_eq!(first_keys, second_keys, "BTreeMap iteration must be stable");
+        Ok(())
+    }
+
+    #[test]
+    fn test_group_members_and_following_accounts_land_on_right_addresses() -> TestResult {
+        // vaultTransactionCreateFromBuffer nests a composite
+        // vaultTransactionCreate group (5 members) before transactionBuffer
+        // and creator. Pairing top-level IDL accounts by position (the old
+        // bug) shifted transactionBuffer and creator onto the wrong
+        // addresses.
+        let idl = get_squads_idl().ok_or("Squads IDL should load successfully")?;
+        let disc = idl
+            .instructions
+            .iter()
+            .find(|i| i.name == "vaultTransactionCreateFromBuffer")
+            .and_then(|i| i.discriminator.as_ref())
+            .ok_or("vaultTransactionCreateFromBuffer must have a discriminator")?
+            .clone();
+        let metas: Vec<AccountMeta> = (1u8..=7)
+            .map(|i| AccountMeta::new_readonly(make_pubkey(i), false))
+            .collect();
+
+        let named = build_named_accounts(&disc, idl, &metas);
+
+        // Group members take the group's prefix and the group's positions.
+        assert_eq!(
+            named.named.get("vaultTransactionCreate.multisig"),
+            Some(&metas[0].pubkey.to_string())
+        );
+        assert_eq!(
+            named.named.get("vaultTransactionCreate.systemProgram"),
+            Some(&metas[4].pubkey.to_string())
+        );
+        // Accounts after the group keep their own names at the flattened
+        // positions (5 group members come first).
+        assert_eq!(
+            named.named.get("transactionBuffer"),
+            Some(&metas[5].pubkey.to_string())
+        );
+        assert_eq!(
+            named.named.get("creator"),
+            Some(&metas[6].pubkey.to_string())
+        );
+        assert!(named.remaining.is_empty());
         Ok(())
     }
 
@@ -946,7 +997,7 @@ mod tests {
             idl_source: solana_parser::IdlSource::Custom,
             idl_hash: String::new(),
         };
-        let named: BTreeMap<String, String> = BTreeMap::new();
+        let named = NamedIdlAccounts::default();
         let sender = SolanaAccount {
             account_key: make_pubkey(0).to_string(),
             signer: false,
