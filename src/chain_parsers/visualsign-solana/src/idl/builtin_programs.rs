@@ -341,6 +341,10 @@ fn preset_idl_configs()
                 include_str!("../presets/kamino_vault/kamino_vault.json"),
             ),
             (
+                "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD",
+                include_str!("../presets/marinade_finance/marinade_finance.json"),
+            ),
+            (
                 "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
                 include_str!("../presets/metadao_conditional_vault/metadao_conditional_vault.json"),
             ),
@@ -556,6 +560,17 @@ mod tests {
         // with a rendered canonical label.
         assert!(!is_reserved_canonical_name("system program"));
         assert!(!is_reserved_canonical_name("System Program "));
+    }
+
+    #[test]
+    fn marinade_finance_preset_idl_is_registered() {
+        // Registration alone is not enough: a preset IDL that fails to parse
+        // is dropped from the records without an error, so assert that it
+        // made it through to the decoded records the intermediate path uses.
+        let record = preset_idl_records()
+            .get("MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD")
+            .expect("marinade_finance preset IDL must be registered and parse");
+        assert!(record.custom_idl.is_some());
     }
 
     /// An IDL compiled in ahead of its preset registers and trusts its program like a preset.
