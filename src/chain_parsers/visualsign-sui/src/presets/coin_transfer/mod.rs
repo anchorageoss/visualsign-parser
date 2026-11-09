@@ -1,6 +1,6 @@
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::truncate_address;
-use crate::utils::{CoinObject, decode_number, parse_numeric_argument, parse_result_command_index};
+use crate::utils::{CoinObject, parse_numeric_argument, split_coin_amount};
 
 use crate::types::{SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg};
 use crate::types::SuiAddress;
@@ -156,43 +156,18 @@ fn resolve_object(
     }
 }
 
-fn resolve_amount(
-    commands: &[SuiCommand],
-    inputs: &[SuiCallArg],
-    object_argument: SuiArgument,
-) -> Result<Option<u64>, VisualSignError> {
-    let SuiArgument::Result(_) = object_argument else {
-        return Ok(None);
-    };
-
-    // `object_argument` is a `Result(N)`. Use the result-specific helper so the
-    // command index is extracted explicitly, never silently coerced via the
-    // input-index path.
-    let command = commands
-        .get(parse_result_command_index(object_argument)? as usize)
-        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
-
-    match command {
-        SuiCommand::SplitCoins(_, input_coin_args) if input_coin_args.len() == 1 => {
-            let amount_arg = inputs
-                .get(parse_numeric_argument(input_coin_args[0])? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Amount argument not found".into(),
-                ))?;
-
-            Ok(Some(decode_number::<u64>(amount_arg)?))
-        }
-        _ => Ok(None),
-    }
-}
-
 fn visualize_transfer_command(
     context: &VisualizerContext,
     receiver: SuiAddress,
     object_sent_to_receiver: &CoinObject,
     object_argument: SuiArgument,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let amount = resolve_amount(context.commands(), context.inputs(), object_argument)?;
+    let amount = split_coin_amount(
+        context.commands(),
+        context.inputs(),
+        object_argument,
+        context.command_index(),
+    )?;
 
     let (amount_str, title_text, amount_field) = match amount {
         Some(amount) => {
