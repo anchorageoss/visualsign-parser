@@ -3,4 +3,4 @@
 # scripts/fuzz-nightly.sh moves this pin weekly (.github/workflows/fuzz-nightly.yml) and fails if stable
 # can build the fuzz targets, which would mean the pin is no longer needed. The OSS-Fuzz build reads it too.
 [toolchain]
-channel = "nightly-2026-10-15"
+channel = "nightly-2026-11-09"
