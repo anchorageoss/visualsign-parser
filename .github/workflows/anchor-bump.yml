@@ -1,0 +1,100 @@
+name: Anchor Bump
+
+# The anchor-cli image installs a pinned Anchor release binary (version +
+# sha256 in .github/anchor.env, mirrored as the Containerfile ARG defaults).
+# Weekly: (1) pick the newest release at least 7 days old, rewrite the pins,
+# build the image and smoke-test the new binary; (2) a separate job that runs
+# no repository code applies the validated version and hash with sed and opens
+# or updates the PR. The base image digest is bumped separately by Dependabot
+# (docker ecosystem, /images/anchor-cli).
+#
+# Opening the PR needs "Allow GitHub Actions to create and approve pull
+# requests" in the repo settings. A PR created with GITHUB_TOKEN does not start
+# other workflows, so run the usual CI on it by hand.
+
+on:
+  schedule:
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Picks, downloads and verifies the candidate binary, then builds and
+  # smoke-tests the image with it. It holds no write token: it only reports
+  # the validated version and hash for open-bump-pr to apply.
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pin.outputs.version }}
+      sha256: ${{ steps.pin.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Move the pins to the newest eligible release
+        id: pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          scripts/bump-anchor.sh
+          git diff --quiet && exit 0
+          {
+            grep -E '^ANCHOR_VERSION=' .github/anchor.env | cut -d= -f2- | sed 's/^/version=/'
+            grep -E '^ANCHOR_SHA256=' .github/anchor.env | cut -d= -f2- | sed 's/^/sha256=/'
+          } >> "$GITHUB_OUTPUT"
+      - name: Build the image
+        run: docker build -f images/anchor-cli/Containerfile -t anchor-cli images/anchor-cli
+      - name: "Smoke: anchor --version"
+        run: docker run --rm anchor-cli --version
+      - name: "Smoke: fetch the Jupiter IDL from mainnet"
+        run: |
+          docker run --rm anchor-cli idl fetch JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 \
+            --provider.cluster mainnet > jup.json
+          test -s jup.json
+          jq -e 'type == "object"' jup.json > /dev/null
+
+  # Holds the write token and runs no repository code: it re-applies
+  # validate's version and hash with sed, then commits and pushes.
+  open-bump-pr:
+    needs: validate
+    if: needs.validate.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # This job pushes the bump branch with this token.
+          persist-credentials: true
+      - name: Open or update the bump PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SHA256: ${{ needs.validate.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "error: unexpected version '$VERSION'" >&2; exit 1; }
+          [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "error: unexpected sha256 '$SHA256'" >&2; exit 1; }
+          sed -i "s/^ANCHOR_VERSION=.*/ANCHOR_VERSION=$VERSION/" .github/anchor.env
+          sed -i "s/^ANCHOR_SHA256=.*/ANCHOR_SHA256=$SHA256/" .github/anchor.env
+          sed -i "s/^ARG ANCHOR_VERSION=.*/ARG ANCHOR_VERSION=$VERSION/" images/anchor-cli/Containerfile
+          sed -i "s/^ARG ANCHOR_SHA256=.*/ARG ANCHOR_SHA256=$SHA256/" images/anchor-cli/Containerfile
+          git diff --quiet && { echo "pins already $VERSION"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c bot/anchor-bump
+          git commit -am "ci(anchor): bump the anchor-cli pin to $VERSION"
+          git push --force origin bot/anchor-bump
+          title="ci(anchor): bump the anchor-cli pin to $VERSION"
+          body="Weekly bump. \`scripts/bump-anchor.sh\` picked anchor $VERSION (at least 7 days old), downloaded the release binary and verified its sha256 against the digest the GitHub API records for the asset, and the built image passed the \`--version\` and mainnet \`idl fetch\` smoke tests."
+          existing=$(gh pr list --head bot/anchor-bump --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            gh pr create --base main --head bot/anchor-bump --title "$title" --body "$body"
+          else
+            # The force-push moved the open PR to a newer release; keep its title and body in step.
+            gh pr edit "$existing" --title "$title" --body "$body"
+          fi

@@ -1,27 +1,31 @@
-# Builds the third-party Anchor CLI (v0.31.1), not this repo's crates, so it is not
-# tied to src/rust-toolchain.toml. Bump the Rust image together with the Anchor tag,
-# rebuild, and re-resolve both digests locally.
-FROM rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 AS build
+# Anchor CLI image: the pinned release binary, not a source build.
+#
+# The version, its sha256 and the upstream repo are mirrored in
+# .github/anchor.env; scripts/bump-anchor.sh --check (CI) fails if they drift
+# apart. The weekly anchor-bump workflow moves both when a release at least
+# 7 days old is available; Dependabot (docker ecosystem, /images/anchor-cli)
+# bumps the base image digest.
+#
+# `anchor idl fetch <program> --provider.cluster mainnet` needs only the
+# anchor binary and CA certificates; the Solana CLI is not required. This holds
+# for the 0.32 line only: from 1.0 it shells out to npx (see anchor.env).
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       pkg-config libssl-dev build-essential curl ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Solana CLI (required by anchor for RPC calls)
-RUN curl -sSfL https://release.anza.xyz/v2.2.4/install | sh
-ENV PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
+ARG ANCHOR_VERSION=0.32.2
+ARG ANCHOR_SHA256=b3cdc15f3db924c2b11a7c16ceff21ad3da239ddde4e53f33df18e52e0461645
+ARG ANCHOR_REPO=otter-sec/anchor
 
-# Install Anchor CLI
-RUN cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli
+# BuildKit verifies the checksum before the layer is committed; --chmod makes
+# the fetched binary executable without a second layer. The release binaries
+# are built against a recent glibc; trixie (glibc 2.41) satisfies them.
+ADD --checksum=sha256:${ANCHOR_SHA256} --chmod=0755 \
+    https://github.com/${ANCHOR_REPO}/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu \
+    /usr/local/bin/anchor
 
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=build /usr/local/cargo/bin/anchor /usr/local/bin/anchor
-COPY --from=build /root/.local/share/solana /root/.local/share/solana
-ENV PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
-
+RUN useradd --system --create-home --shell /usr/sbin/nologin anchor
+USER anchor
 ENTRYPOINT ["anchor"]
