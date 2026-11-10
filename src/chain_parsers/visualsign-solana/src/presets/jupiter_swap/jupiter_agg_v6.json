@@ -150,6 +150,11 @@
       "code": 6026,
       "msg": "Bonding curve already completed",
       "name": "BondingCurveAlreadyCompleted"
+    },
+    {
+      "code": 6027,
+      "msg": "Swap program ID is invalid",
+      "name": "IncorrectSwapProgramId"
     }
   ],
   "events": [
@@ -425,6 +430,87 @@
         249
       ],
       "name": "close_token"
+    },
+    {
+      "accounts": [
+        {
+          "address": "9RAufBfjGQjDfrwxeyKmZWPADHSb8HcoqCdrmpqvCr1g",
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "address": "2bG7DS2DDM63kirXvduSJC8TXycjVTgWvHN3xcwXrrB8",
+          "name": "wallet",
+          "writable": true
+        },
+        {
+          "name": "program_authority"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "id",
+          "type": "u8"
+        }
+      ],
+      "discriminator": [
+        146,
+        124,
+        14,
+        0,
+        181,
+        113,
+        114,
+        147
+      ],
+      "name": "withdraw_token_account_excess_lamports"
+    },
+    {
+      "accounts": [
+        {
+          "name": "payer",
+          "signer": true,
+          "writable": true
+        },
+        {
+          "name": "associated_token_account",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "system_program"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "close_authority"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        83,
+        104,
+        192,
+        150,
+        180,
+        71,
+        156,
+        198
+      ],
+      "name": "create_idempotent_associated_token_account"
     },
     {
       "accounts": [
@@ -1638,6 +1724,20 @@
       }
     },
     {
+      "name": "BisonFiPredictSide",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Yes"
+          },
+          {
+            "name": "No"
+          }
+        ]
+      }
+    },
+    {
       "name": "Swap",
       "type": {
         "kind": "enum",
@@ -2629,6 +2729,561 @@
               }
             ],
             "name": "DynamicV2"
+          },
+          {
+            "name": "PumpSwapBuyV3WithCashbackClaim"
+          },
+          {
+            "name": "PumpSwapSellV3WithCashbackClaim"
+          },
+          {
+            "name": "PumpWrappedBuyV4WithCashbackClaim"
+          },
+          {
+            "name": "PumpWrappedSellV4WithCashbackClaim"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_bid",
+                "type": "bool"
+              }
+            ],
+            "name": "GoonFiV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "claim_cashback",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpWrappedBuyV5"
+          },
+          {
+            "fields": [
+              {
+                "name": "claim_cashback",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpWrappedSellV5"
+          },
+          {
+            "name": "ZeroFiSwapV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": {
+                    "name": "BisonFiPredictSide"
+                  }
+                }
+              },
+              {
+                "name": "is_buy",
+                "type": "bool"
+              }
+            ],
+            "name": "BisonFiPredict"
+          },
+          {
+            "name": "ByrealDynamicV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "swap_id",
+                "type": "u64"
+              },
+              {
+                "name": "base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "Flux"
+          },
+          {
+            "name": "VaultLiquidSellLst"
+          },
+          {
+            "fields": [
+              {
+                "name": "lst_amount",
+                "type": "u64"
+              }
+            ],
+            "name": "VaultLiquidBuyLst"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "KipseliV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": {
+                    "name": "Side"
+                  }
+                }
+              },
+              {
+                "name": "instr_id",
+                "type": "u32"
+              }
+            ],
+            "name": "Deriverse"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_x",
+                "type": "bool"
+              }
+            ],
+            "name": "Hadron"
+          },
+          {
+            "name": "BinaryFi"
+          },
+          {
+            "fields": [
+              {
+                "name": "zero_for_one",
+                "type": "bool"
+              }
+            ],
+            "name": "Metric"
+          },
+          {
+            "fields": [
+              {
+                "name": "swap0to1",
+                "type": "bool"
+              }
+            ],
+            "name": "JupiterLendDexSwap"
+          },
+          {
+            "fields": [
+              {
+                "name": "base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "Gatorswap"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_global",
+                "type": "bool"
+              },
+              {
+                "name": "taker_buy",
+                "type": "bool"
+              }
+            ],
+            "name": "Flint"
+          },
+          {
+            "fields": [
+              {
+                "name": "base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "Denali"
+          },
+          {
+            "name": "PerenaStarV2Deposit"
+          },
+          {
+            "fields": [
+              {
+                "name": "external_liquidity_source",
+                "type": "u8"
+              }
+            ],
+            "name": "PerenaStarV2WithdrawFromExternal"
+          },
+          {
+            "fields": [
+              {
+                "name": "swap_type",
+                "type": {
+                  "defined": {
+                    "name": "SanctumSolsSwapType"
+                  }
+                }
+              }
+            ],
+            "name": "SanctumSols"
+          },
+          {
+            "fields": [
+              {
+                "name": "swap_type",
+                "type": {
+                  "defined": {
+                    "name": "HyloSwapType"
+                  }
+                }
+              }
+            ],
+            "name": "HyloV2"
+          },
+          {
+            "name": "SanctumPamm"
+          },
+          {
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": {
+                    "name": "Side"
+                  }
+                }
+              }
+            ],
+            "name": "Archer"
+          },
+          {
+            "name": "TrenchWrappedBuy"
+          },
+          {
+            "name": "TrenchWrappedSell"
+          },
+          {
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ],
+            "name": "BisonFiMarketBacked"
+          },
+          {
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": {
+                    "name": "Side"
+                  }
+                }
+              }
+            ],
+            "name": "TesseraVV2"
+          },
+          {
+            "name": "Stableswap"
+          },
+          {
+            "name": "BinaryFiV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "KipseliV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "kind",
+                "type": {
+                  "defined": {
+                    "name": "PerenaTrancheKind"
+                  }
+                }
+              }
+            ],
+            "name": "PerenaStarV2TrancheDeposit"
+          },
+          {
+            "fields": [
+              {
+                "name": "kind",
+                "type": {
+                  "defined": {
+                    "name": "PerenaTrancheKind"
+                  }
+                }
+              },
+              {
+                "name": "external_liquidity_source",
+                "type": {
+                  "option": "u8"
+                }
+              }
+            ],
+            "name": "PerenaStarV2TrancheWithdrawFromExternal"
+          },
+          {
+            "fields": [
+              {
+                "name": "sell_base",
+                "type": "bool"
+              }
+            ],
+            "name": "Quay"
+          },
+          {
+            "fields": [
+              {
+                "name": "claimed_ms",
+                "type": "u64"
+              },
+              {
+                "name": "seed_rng",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token",
+                "type": {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                }
+              },
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "HumidiFiRouter"
+          },
+          {
+            "fields": [
+              {
+                "name": "router_id",
+                "type": "u64"
+              },
+              {
+                "name": "claimed_ms",
+                "type": "u64"
+              },
+              {
+                "name": "seed_rng",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token",
+                "type": {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                }
+              },
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "HumidiFiRouterV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "claim_cashback",
+                "type": "bool"
+              },
+              {
+                "name": "allow_partial_fill",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpWrappedBuyV6"
+          },
+          {
+            "name": "HyloRouter"
+          },
+          {
+            "fields": [
+              {
+                "name": "quote_to_base",
+                "type": "bool"
+              }
+            ],
+            "name": "Memefun"
+          },
+          {
+            "fields": [
+              {
+                "name": "router_id",
+                "type": "u64"
+              },
+              {
+                "name": "generation",
+                "type": "u64"
+              },
+              {
+                "name": "minted",
+                "type": "u64"
+              },
+              {
+                "name": "expiry",
+                "type": "u64"
+              },
+              {
+                "name": "seed_rng",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token",
+                "type": {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                }
+              },
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "HumidiFiRouterV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "allow_partial_fill",
+                "type": "bool"
+              },
+              {
+                "name": "close_user_volume_accumulator",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpWrappedBuyV7"
+          },
+          {
+            "fields": [
+              {
+                "name": "close_user_volume_accumulator",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpWrappedSellV6"
+          },
+          {
+            "fields": [
+              {
+                "name": "close_user_volume_accumulator",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpSwapBuyV4"
+          },
+          {
+            "fields": [
+              {
+                "name": "close_user_volume_accumulator",
+                "type": "bool"
+              }
+            ],
+            "name": "PumpSwapSellV4"
+          },
+          {
+            "name": "ZeroFiSwapV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "DenaliV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": {
+                    "name": "Side"
+                  }
+                }
+              }
+            ],
+            "name": "QuantumV2"
+          },
+          {
+            "name": "DrFraudsworthSolBuy"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_zig",
+                "type": "bool"
+              }
+            ],
+            "name": "DrFraudsworthSolSell"
+          },
+          {
+            "name": "DrFraudsworthSplBuy"
+          },
+          {
+            "name": "DrFraudsworthSplSell"
+          },
+          {
+            "name": "DrFraudsworthVaultConvert"
+          },
+          {
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ],
+            "name": "BisonFiMarketBackedV2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PerenaTrancheKind",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Junior"
+          },
+          {
+            "name": "Senior"
           }
         ]
       }
@@ -2732,6 +3387,200 @@
               }
             ],
             "name": "GoonFiV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "is_bid",
+                "type": "bool"
+              }
+            ],
+            "name": "GoonFiV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              },
+              {
+                "name": "remaining_accounts_info",
+                "type": {
+                  "option": {
+                    "defined": {
+                      "name": "RemainingAccountsInfo"
+                    }
+                  }
+                }
+              }
+            ],
+            "name": "WhirlpoolV2"
+          },
+          {
+            "name": "ZeroFiSwapV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ],
+            "name": "BisonFiMarketBacked"
+          },
+          {
+            "name": "RaydiumClmmV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": {
+                    "name": "Side"
+                  }
+                }
+              }
+            ],
+            "name": "TesseraVV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "claimed_ms",
+                "type": "u64"
+              },
+              {
+                "name": "seed_rng",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token",
+                "type": {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                }
+              },
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "HumidiFiRouter"
+          },
+          {
+            "fields": [
+              {
+                "name": "router_id",
+                "type": "u64"
+              },
+              {
+                "name": "claimed_ms",
+                "type": "u64"
+              },
+              {
+                "name": "seed_rng",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token",
+                "type": {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                }
+              },
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "HumidiFiRouterV2"
+          },
+          {
+            "fields": [
+              {
+                "name": "router_id",
+                "type": "u64"
+              },
+              {
+                "name": "generation",
+                "type": "u64"
+              },
+              {
+                "name": "minted",
+                "type": "u64"
+              },
+              {
+                "name": "expiry",
+                "type": "u64"
+              },
+              {
+                "name": "seed_rng",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token",
+                "type": {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                }
+              },
+              {
+                "name": "is_base_to_quote",
+                "type": "bool"
+              }
+            ],
+            "name": "HumidiFiRouterV3"
+          },
+          {
+            "name": "ZeroFiSwapV3"
+          },
+          {
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ],
+            "name": "BisonFiMarketBackedV2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SanctumSolsSwapType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Claim"
+          },
+          {
+            "name": "ClaimHolding"
           }
         ]
       }
@@ -2797,6 +3646,11 @@
       }
     },
     {
+      "docs": [
+        "Changing these fields breaks downstream IDL users and Ultra, which parses",
+        "this event by hardcoded byte offset. Ship the matching `parseSwapEvents`",
+        "change in jup-ag/swap-api first."
+      ],
       "name": "SwapEventV2",
       "type": {
         "fields": [
