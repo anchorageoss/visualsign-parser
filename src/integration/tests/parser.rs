@@ -1262,6 +1262,130 @@ async fn parser_near_intent_envelope_e2e() {
     integration::Builder::new().execute(test).await
 }
 
+/// Every hop of a NEAR Intents round trip (wrap, deposit, signed swap,
+/// withdraw) through the real parser: each hop names itself and shows its
+/// amounts. Exact shapes are pinned by the single-transaction tests above.
+///
+/// The transaction hex is generated like `intents_tx_hex` in
+/// `visualsign-near/src/cli_plugin.rs`: a `Transaction::V0` from `alice.near`,
+/// nonce 1, 30 Tgas, with the deposit noted on each hop. The hops' amounts are
+/// independent constants; change them together.
+#[tokio::test]
+async fn parser_near_intents_journey_e2e() {
+    async fn test(test_args: TestArgs) {
+        // alice.near -> wrap.near, near_deposit, 1 NEAR attached.
+        const WRAP: &str = "0a000000616c6963652e6e656172000000000000000000000000000000000000000000000000000000000000000000010000000000000009000000777261702e6e656172000000000000000000000000000000000000000000000000000000000000000001000000020c0000006e6561725f6465706f7369740000000000e057eb481b0000000000a1edccce1bc2d3000000000000";
+        // alice.near -> wrap.near, ft_transfer_call to intents.near.
+        const DEPOSIT: &str = "0a000000616c6963652e6e656172000000000000000000000000000000000000000000000000000000000000000000010000000000000009000000777261702e6e656172000000000000000000000000000000000000000000000000000000000000000001000000021000000066745f7472616e736665725f63616c6c4c0000007b2272656365697665725f6964223a22696e74656e74732e6e656172222c22616d6f756e74223a2231303030303030303030303030303030303030303030303030222c226d7367223a22227d00e057eb481b000001000000000000000000000000000000";
+        // alice.near -> intents.near, ft_withdraw of the swap's proceeds:
+        // {"token":"usdc.near","receiver_id":"alice.near","amount":"998"}.
+        const WITHDRAW: &str = "0a000000616c6963652e6e65617200000000000000000000000000000000000000000000000000000000000000000001000000000000000c000000696e74656e74732e6e656172000000000000000000000000000000000000000000000000000000000000000001000000020b00000066745f77697468647261773f0000007b22746f6b656e223a22757364632e6e656172222c2272656365697665725f6964223a22616c6963652e6e656172222c22616d6f756e74223a22393938227d00e057eb481b000001000000000000000000000000000000";
+        // The swap itself: a DefusePayload inside a NEP-413 message envelope,
+        // which is what a NEAR wallet is asked to sign.
+        const SWAP: &str = r#"{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2100-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"token_diff\",\"diff\":{\"nep141:wrap.near\":\"-1000000000000000000000000\",\"nep141:usdc.near\":\"998\"}}]}","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"intents.near"}"#;
+
+        let mut client = test_args.parser_client.unwrap();
+
+        async fn hop(
+            client: &mut generated::parser::parser_service_client::ParserServiceClient<
+                tonic::transport::Channel,
+            >,
+            payload: &str,
+        ) -> serde_json::Value {
+            let response = client
+                .parse(tonic::Request::new(ParseRequest {
+                    include_intermediate_output: false,
+                    unsigned_payload: payload.to_string(),
+                    chain: Chain::Near as i32,
+                    chain_metadata: None,
+                    payment_marker: vec![],
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            let parsed = response.parsed_transaction.unwrap().payload.unwrap();
+            validate_safe_charset(&parsed.parsed_payload);
+            serde_json::from_str(&parsed.parsed_payload).unwrap()
+        }
+
+        /// The one field labelled `label`. Every field carries Label and
+        /// FallbackText whatever its type.
+        fn field<'a>(payload: &'a serde_json::Value, label: &str) -> &'a serde_json::Value {
+            let matches: Vec<_> = payload["Fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|f| f["Label"] == label)
+                .collect();
+            assert_eq!(matches.len(), 1, "one {label} field expected: {payload}");
+            matches[0]
+        }
+
+        /// The full text a signer reads for `label`.
+        fn text<'a>(payload: &'a serde_json::Value, label: &str) -> &'a str {
+            field(payload, label)["FallbackText"].as_str().unwrap()
+        }
+
+        /// A typed amount's value and unit, plus fallback text that must agree.
+        fn assert_amount(payload: &serde_json::Value, label: &str, amount: &str, unit: &str) {
+            let field = field(payload, label);
+            assert_eq!(field["Type"], "amount_v2", "{label}: {field}");
+            assert_eq!(field["AmountV2"]["Amount"], amount, "{label}: {field}");
+            assert_eq!(field["AmountV2"]["Abbreviation"], unit, "{label}: {field}");
+            assert_eq!(field["FallbackText"], format!("{amount} {unit}"), "{label}");
+        }
+
+        // 1. Wrap 1 NEAR (the amount is the attached deposit).
+        let wrapped = hop(&mut client, WRAP).await;
+        assert_eq!(wrapped["Title"], "Wrap", "{wrapped}");
+        assert_eq!(text(&wrapped, "To"), "wrap.near");
+        assert_eq!(text(&wrapped, "Method"), "near_deposit");
+        assert_amount(&wrapped, "Deposit", "1", "NEAR");
+
+        // 2. Deposit the 1 wNEAR (10^24 base units) into the verifier. A
+        //    standard NEP-141 call with no token metadata, so base units; this
+        //    changes on purpose if wrap.near's NEP-141 calls render in wNEAR.
+        let deposited = hop(&mut client, DEPOSIT).await;
+        assert_eq!(text(&deposited, "To"), "wrap.near");
+        assert_eq!(text(&deposited, "Method"), "ft_transfer_call");
+        assert_eq!(text(&deposited, "Recipient"), "intents.near");
+        assert_amount(
+            &deposited,
+            "Amount",
+            "1000000000000000000000000",
+            "raw token units",
+        );
+        assert_amount(&deposited, "Deposit", "0.000000000000000000000001", "NEAR");
+
+        // 3. The swap: 1 wNEAR for 998 base units of usdc.near, as a message.
+        let swap = hop(&mut client, SWAP).await;
+        assert_eq!(swap["Title"], "NEAR Intent: Token Diff", "{swap}");
+        assert_eq!(text(&swap, "Intent"), "Token Diff");
+        assert_eq!(text(&swap, "Signer"), "alice.near");
+        // The spent side resolves through the seed table: symbol, scaled amount.
+        assert_amount(&swap, "Send", "1", "wNEAR");
+        // The received side does not resolve, so it must render as its asset
+        // id, marked unresolved, never as units that look scaled.
+        assert_eq!(text(&swap, "Receive"), "998 (unresolved nep141:usdc.near)");
+        assert!(
+            !swap.to_string().contains("signer_id"),
+            "a rendered intent must not leave raw payload JSON on screen: {swap}"
+        );
+
+        // 4. Withdraw the proceeds: the 998 usdc.near base units the swap
+        //    received, back to alice.near.
+        let withdrawn = hop(&mut client, WITHDRAW).await;
+        assert_eq!(text(&withdrawn, "To"), "intents.near");
+        assert_eq!(text(&withdrawn, "Method"), "ft_withdraw");
+        assert_eq!(text(&withdrawn, "Token"), "usdc.near");
+        assert_eq!(text(&withdrawn, "Recipient"), "alice.near");
+        assert_amount(&withdrawn, "Amount", "998", "raw token units");
+        assert_amount(&withdrawn, "Deposit", "0.000000000000000000000001", "NEAR");
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
 #[tokio::test]
 async fn parser_near_rejects_input_that_is_neither_transaction_nor_intent() {
     async fn test(test_args: TestArgs) {
