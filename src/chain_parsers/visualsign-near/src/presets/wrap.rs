@@ -1,13 +1,8 @@
-//! `wrap.near`: the NEAR <-> wNEAR contract.
+//! `wrap.near`: the NEAR <-> wNEAR contract (NEAR-only, so not in
+//! `visualsign-intents`).
 //!
-//! A NEAR dApp rather than a cross-chain protocol, so it is decoded here rather
-//! than in `visualsign-intents`: nothing outside NEAR can produce a call to it.
-//!
-//! Keyed by account as well as method. `near_deposit` and `near_withdraw` are
-//! this contract's own methods, not NEP-141 standard ones, so another contract
-//! could define the same names with a different meaning -- unlike `ft_transfer`
-//! and `ft_withdraw`, which mean one thing on every token and are keyed by
-//! method alone in [`crate::actions`].
+//! Keyed by account as well as method: `near_deposit` and `near_withdraw` are
+//! this contract's own methods, unlike the NEP-141 methods in [`crate::actions`].
 
 use serde::Deserialize;
 use visualsign::SignablePayloadField;
@@ -16,12 +11,8 @@ use visualsign::field_builders::create_amount_field;
 
 use crate::fmt::format_near;
 
-/// The wNEAR contract on each network.
-///
-/// Not keyed by network: `wrap.testnet` matches under mainnet too. That is safe
-/// only because `network_mismatch` in `render_on_chain` refuses a `.testnet`
-/// receiver under mainnet (and `.near` under testnet) before any action
-/// renders; keep that guard if this list changes.
+/// The wNEAR contract on each network. Not keyed by network: safe only because
+/// `network_mismatch` in `render_on_chain` refuses a cross-network receiver first.
 const WRAP_CONTRACTS: [&str; 2] = ["wrap.near", "wrap.testnet"];
 
 const NEAR_DEPOSIT: &str = "near_deposit";
@@ -40,13 +31,8 @@ struct NearWithdrawArgs {
 #[serde(deny_unknown_fields)]
 struct NoArgs {}
 
-/// The action label for a wrap contract call this build fully understands, or
-/// `None`.
-///
-/// `None` when the args do not decode, so the payload title cannot claim more
-/// than the rendered fields do -- the discipline `partially_decoded_label`
-/// applies to the deploy variants, enforced here by construction rather than by
-/// a separate qualifier.
+/// The action label for a wrap contract call, or `None` when the args do not
+/// decode, so the title never claims more than the fields show.
 #[must_use]
 pub fn label(receiver_id: &str, method: &str, args: &[u8]) -> Option<&'static str> {
     if !WRAP_CONTRACTS.contains(&receiver_id) {
@@ -62,13 +48,8 @@ pub fn label(receiver_id: &str, method: &str, args: &[u8]) -> Option<&'static st
     }
 }
 
-/// Decode a wrap contract call's args.
-///
-/// Only `near_withdraw` carries any: `near_deposit` takes none, and the NEAR it
-/// wraps arrives as the attached deposit, which the FunctionCall renderer
-/// already shows. Fail-closed like the standard-method decoder -- anything that
-/// is not exactly the known shape returns `None` and falls back to raw data,
-/// because a partially decoded arg set must not look fully understood.
+/// Decode a wrap contract call's args (only `near_withdraw` has any).
+/// Fail-closed: anything but the exact known shape returns `None` (raw data).
 pub fn decode_args(
     receiver_id: &str,
     method: &str,
@@ -86,15 +67,8 @@ pub fn decode_args(
 }
 
 /// The amount a `near_withdraw` moves, or `None` when the args are not exactly
-/// the known shape.
-///
-/// The single parse behind both [`label`] and [`decode_args`]: `amount` is a
-/// JSON string, so a value that deserializes can still fail to be a number, and
-/// a label derived from a weaker check than the fields would let the title claim
-/// an unwrap the body never rendered.
-///
-/// Digits only, as NEP-141's U128 string is: `str::parse::<u128>` alone also
-/// takes a leading `+`.
+/// the known shape. Shared by [`label`] and [`decode_args`] so they agree.
+/// Digits only: `str::parse::<u128>` alone also takes a leading `+`.
 fn withdraw_amount(args: &[u8]) -> Option<u128> {
     let amount = serde_json::from_slice::<NearWithdrawArgs>(args)
         .ok()?
@@ -152,9 +126,7 @@ mod tests {
         assert_eq!(label("wrap.testnet", "near_deposit", b""), Some("Wrap"));
     }
 
-    /// `near_deposit` and `near_withdraw` are this contract's own names, not
-    /// NEP-141 standard ones, so another contract's identically-named method
-    /// must not borrow the label.
+    /// Another contract's identically-named methods are not a wrap.
     #[test]
     fn another_contract_with_the_same_method_names_is_not_a_wrap() {
         let args = format!(r#"{{"amount":"{ONE_NEAR}"}}"#);
@@ -182,8 +154,7 @@ mod tests {
         }
     }
 
-    /// The title may not claim more than the fields show, so args that do not
-    /// decode yield no label and the call falls back to a raw-data render.
+    /// Args that do not decode yield no label.
     #[test]
     fn args_that_do_not_decode_yield_no_label() {
         for bad in [
@@ -207,8 +178,7 @@ mod tests {
         }
     }
 
-    /// A deposit takes no args at all, so anything present means this build does
-    /// not understand the call.
+    /// A deposit carrying any args yields no label.
     #[test]
     fn a_deposit_carrying_args_yields_no_label() {
         assert_eq!(

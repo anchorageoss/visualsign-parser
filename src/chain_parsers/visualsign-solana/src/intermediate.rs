@@ -178,7 +178,8 @@ pub enum RegisteredSource {
     /// Matched `idl::builtin_programs`'s `NATIVE_PROGRAM_NAMES` list (native
     /// runtime / core SPL programs).
     Native,
-    /// Matched an in-crate preset visualizer's program ID
+    /// Matched an in-crate preset visualizer's program ID, or an IDL compiled in ahead
+    /// of its preset (see `idl::builtin_programs::preset_program_ids`)
     Preset,
     /// Matched a program known only via `solana_parser::ProgramType`
     ThirdParty,
@@ -1217,7 +1218,7 @@ fn parse_partially_decoded_instruction_idl(
 /// `IdlRegistry::get_all_configs()`), which `SolanaMetadata` doesn't carry.
 /// `message` is the compiled form for the native decode; it must line up with
 /// `value.instructions` one-to-one and is dropped otherwise.
-fn build_intermediate_output(
+pub(crate) fn build_intermediate_output(
     value: &SolanaMetadata,
     message: Option<&VersionedMessage>,
     caller_idl_program_ids: &BTreeMap<String, CustomIdlConfig>,
@@ -1263,7 +1264,21 @@ fn build_intermediate_output(
 // -- Extraction --------------------------------------------------------------
 
 /// Parse the transaction once via `solana_parser::parse_transaction_with_idl_records`
-/// and project the result into a Borsh-friendly intermediate output.
+/// and return the structured metadata.
+///
+/// This is the single structured decode of the transaction. The
+/// human-readable `SignablePayload`'s transfer fields and the Borsh-friendly
+/// [`SolanaIntermediateOutput`] are both derived from the value returned
+/// here, so those two cannot diverge by decoding the same bytes twice.
+/// Instruction-level rendering is not yet a projection of this value (see
+/// `core/visualsign.rs`).
+///
+/// The intermediate is *not* a pure function of this value: [`build_intermediate_output`]
+/// also takes the caller-IDL program ids, because each instruction's
+/// `registered_source` records whether its program had a registered IDL --
+/// something `SolanaMetadata` does not carry. So the property is one decode
+/// feeding both views, with the intermediate carrying registry-derived
+/// provenance the rendered payload does not.
 ///
 /// `raw_message_hex` is the hex-encoded serialized message (or full
 /// transaction); `full_transaction` toggles which form is being passed in,
@@ -1272,23 +1287,16 @@ fn build_intermediate_output(
 /// `pub(crate)` (not `pub`) because it takes the crate-private `IdlRegistry`;
 /// the schema types above are `pub` so external consumers can still decode the
 /// emitted bytes.
-///
-/// Eventual architecture (tracked, not yet implemented): the structured decode
-/// should become the single source of truth from which the VisualSign payload
-/// is generated, and these bytes should be passed through as-is rather than
-/// re-parsed here. Today this re-parses once, best-effort, alongside the
-/// existing VisualSign generation path.
 // `disallowed_types`: the `solana_parser::parse_transaction_with_idl_records`
 // API requires a `HashMap` for its record argument. We build one only as a
 // transient adapter from the deterministic `BTreeMap` caches; it never feeds
 // serialized output, so determinism is unaffected.
 #[allow(clippy::disallowed_types)]
-pub(crate) fn extract_solana_intermediate_output(
+pub(crate) fn parse_solana_metadata(
     raw_message_hex: &str,
     full_transaction: bool,
     idl_registry: &IdlRegistry,
-    max_fee_lamports: u64,
-) -> Result<SolanaIntermediateOutput, VisualSignError> {
+) -> Result<SolanaMetadata, VisualSignError> {
     let configs = idl_registry.get_all_configs();
     let caller_records = caller_idl_records(configs).ok_or_else(|| {
         VisualSignError::ParseError(TransactionParseError::DecodeError(
@@ -1307,29 +1315,42 @@ pub(crate) fn extract_solana_intermediate_output(
         )))
     })?;
 
-    let metadata = response
+    response
         .solana_parsed_transaction
         .payload
-        .as_ref()
-        .and_then(|p| p.transaction_metadata.as_ref())
+        .and_then(|p| p.transaction_metadata)
         .ok_or_else(|| {
             VisualSignError::ParseError(TransactionParseError::DecodeError(
                 "solana_parser returned no transaction_metadata".to_string(),
             ))
-        })?;
+        })
+}
 
+/// Parse a transaction and project it into the Borsh-friendly intermediate
+/// output.
+///
+/// Thin wrapper over [`parse_solana_metadata`]; prefer calling that directly
+/// and projecting when the caller also needs the metadata for rendering, so the
+/// transaction is decoded exactly once.
+pub(crate) fn extract_solana_intermediate_output(
+    raw_message_hex: &str,
+    full_transaction: bool,
+    idl_registry: &IdlRegistry,
+    max_fee_lamports: u64,
+) -> Result<SolanaIntermediateOutput, VisualSignError> {
+    let metadata = parse_solana_metadata(raw_message_hex, full_transaction, idl_registry)?;
     let message = versioned_message(raw_message_hex, full_transaction);
     Ok(build_intermediate_output(
-        metadata,
+        &metadata,
         message.as_ref(),
-        configs,
+        idl_registry.get_all_configs(),
         max_fee_lamports,
     ))
 }
 
 /// The message in compiled form, best-effort: on a miss the native decode
 /// falls back to the static accounts.
-fn versioned_message(raw_hex: &str, full_transaction: bool) -> Option<VersionedMessage> {
+pub(crate) fn versioned_message(raw_hex: &str, full_transaction: bool) -> Option<VersionedMessage> {
     let bytes = visualsign::encodings::decode_hex(raw_hex).ok()?;
     if full_transaction {
         bincode::deserialize::<VersionedTransaction>(&bytes)
@@ -1781,6 +1802,7 @@ mod tests {
             program_type: None,
             custom_idl: Some(serde_json::from_str(idl_json).unwrap()),
             custom_idl_json: Some(idl_json.to_string()),
+            custom_idl_hash: None,
             override_builtin: true,
             is_preset: false,
         };
@@ -2660,5 +2682,57 @@ mod tests {
             borsh::from_slice::<SolanaIntermediateOutput>(&bytes).expect("round trip"),
             output
         );
+    }
+
+    /// An IDL compiled in under `preset_idl_configs` decodes here and reports `Preset`,
+    /// with or without a preset visualizer for the program.
+    #[test]
+    fn compiled_in_idl_decodes_as_preset() {
+        let program_id = "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ";
+        let idl = crate::idl::builtin_programs::preset_idl_records()
+            .get(program_id)
+            .and_then(|record| record.custom_idl.as_ref())
+            .expect("Abra backed-token IDL is compiled in");
+        let mint = idl
+            .instructions
+            .iter()
+            .find(|instruction| instruction.name == "mint")
+            .expect("mint instruction");
+        let mut data = mint.discriminator.clone().expect("discriminator");
+        data.extend_from_slice(&25_000_000u64.to_le_bytes());
+        let user = solana_pubkey::Pubkey::new_unique();
+        let accounts = mint
+            .accounts
+            .iter()
+            .map(|account| {
+                if account.name == "user" {
+                    solana_instruction::AccountMeta::new(user, true)
+                } else {
+                    solana_instruction::AccountMeta::new(solana_pubkey::Pubkey::new_unique(), false)
+                }
+            })
+            .collect();
+        let instruction = solana_instruction::Instruction {
+            program_id: program_id.parse().expect("program id"),
+            accounts,
+            data,
+        };
+        let message = solana_message::Message::new(&[instruction], Some(&user));
+        let message_hex = hex::encode(bincode::serialize(&message).expect("serialize"));
+
+        let output =
+            extract_solana_intermediate_output(&message_hex, false, &IdlRegistry::new(), 5_105_000)
+                .expect("solana_parser accepts the message");
+        let instruction = &output.instructions[0];
+        assert_eq!(instruction.program_key, program_id);
+        assert_eq!(instruction.registered_source, RegisteredSource::Preset);
+        assert!(instruction.solana_json_parsed_data.is_none());
+        let parsed = instruction
+            .parsed_instruction_data
+            .as_ref()
+            .expect("decoded with the compiled-in IDL");
+        assert_eq!(parsed.instruction_name, "mint");
+        assert_eq!(parsed.program_call_args_json, r#"{"amount":25000000}"#);
+        assert_eq!(parsed.named_accounts.get("user"), Some(&user.to_string()));
     }
 }

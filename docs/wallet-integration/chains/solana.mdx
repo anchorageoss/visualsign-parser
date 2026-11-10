@@ -46,4 +46,8 @@ A wallet should treat these errors as "do not sign", not fall back to showing th
 
 A message can also be the signed bytes of a NEAR Intents WebAuthn (passkey) authorization. The Ed25519 WebAuthn check in NEAR Intents verifies the signature directly over `authenticator_data || sha256(client_data_json)`. It checks the flags byte, but not the relying-party hash or the origin. So a message of at least 69 bytes whose byte 32 passes that flags check can be such an authorization for a payload from the signer's NEAR account: a dApp can grind the last 32 bytes, a SHA-256 digest, until they look like text. No length or charset rule rules this out, so the 32-byte rule above does not cover it.
 
-The parser flags these messages instead of refusing them, because ordinary text matches the shape often. A flagged message renders as usual, with a `Warning` text field first (and, in a build with the `diagnostics` feature, a `message::near_intents_webauthn_shape` diagnostic). The wallet must treat a flagged message as "do not sign" unless it means to make a NEAR Intents WebAuthn authorization.
+The parser flags these messages instead of refusing them, because ordinary text matches the shape often. A flagged message renders as usual, with a `Warning` text field first (and, in a build with the `diagnostics` feature, a `message::near_intents_webauthn_shape` diagnostic).
+
+The trigger is a single bit pattern in byte 32, so about 3 in 8 messages of 69 bytes or more are flagged, typical sign-in text included. How to present the flag is the wallet's decision. A blanket "do not sign" on every flagged message would mostly fire on ordinary text and teach users to dismiss it. A dApp that wants its messages unflagged can make byte 32 fail the check, for example with an even byte such as a space, which leaves UP clear.
+
+The flag covers the message path only. It says nothing about other signing paths, such as transactions.

@@ -370,7 +370,9 @@ Compare mode (above) regenerates with Sonnet and Opus into separate scratch dirs
 
 ## Step 8: What's next — semantic refinement (optional, follow-up)
 
-Your preset compiles, registers, and survives a roundtrip. A wallet user signing one of these transactions will, however, see raw arg names and integer values, not a recognizable summary. The skill's scope ends here. To make the preset wallet-readable, three options:
+Your preset compiles, registers, and survives a roundtrip. A wallet user signing one of these transactions will, however, see raw arg names and integer values, not a recognizable summary. The skill's scope ends here.
+
+If the program's user actions match a family catalogued in the `solana-add-preset` skill (today: receipt tokens -- vaults, backed tokens, liquid staking with a request/claim exit), use that skill instead: the preset becomes a profile on a shared renderer. Otherwise, to make the preset wallet-readable, three options:
 
 1. **Ship as-is.** For low-traffic programs or where structural display is enough, this is acceptable — the new preset is strictly better than the `unknown_program` fallback.
 

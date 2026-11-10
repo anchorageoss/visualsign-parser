@@ -149,10 +149,8 @@ const PAYLOAD_VERSION: i64 = 0;
 /// `payload_type` for a NEAR transaction, matching the other chain crates'
 /// convention (`"SolanaTx"`, `"TronTx"`).
 const PAYLOAD_TYPE: &str = "NearTx";
-/// `payload_type` for an off-chain signature: a NEP-413 envelope or an intents
-/// payload signed directly. Decided by what the signature covers, not by what
-/// it carries, so intents rendered from either are still a message. See
-/// "payload_type names the chain and what is signed" in CLAUDE.md.
+/// `payload_type` for an off-chain signature (a NEP-413 envelope or a directly
+/// signed intents payload): named for what is signed, not what it carries.
 const MESSAGE_PAYLOAD_TYPE: &str = "NearMessage";
 
 /// Converts a [`NearTransaction`] into a VisualSign [`SignablePayload`].
@@ -394,49 +392,27 @@ fn decode_intents(
     .map_err(intents_error)
 }
 
-/// Render a NEP-413 off-chain message envelope.
+/// Render a NEP-413 off-chain message envelope, plus the NEAR Intents its
+/// `message` carries (re-serialized through the intents crate's byte entry point).
 ///
-/// NEP-413 wraps an arbitrary `message`, so the envelope says who the message is
-/// for without saying what it does. When the message carries NEAR Intents the
-/// intents render too: a signer approving a token movement has to see the
-/// movement rather than an escaped JSON string.
-///
-/// The extracted payload is re-serialized and passed to the intents crate's
-/// byte-level entry point, the same one every other path renders through, so
-/// the intents render keeps a public API free of `defuse-*` types. (Decoding
-/// the envelope, in `tx.rs`, does use `defuse_core` and `defuse_nep413`
-/// directly.) The re-encoding drops an empty `intents` list, which is fine:
-/// a payload is classified by its envelope keys, so it still renders as the
-/// cancel it is.
-///
-/// Every row the envelope itself supplies carries a `NEP-413` label prefix.
-/// `extract_defuse_payload` derives `verifying_contract` from `recipient` and
-/// reuses the envelope's `nonce`, so an envelope carrying intents renders those
-/// two values twice: once as the envelope states them, once as the intents view
-/// reads them back. The prefix marks which row is which, so the repetition
-/// reads as one value seen from two sides rather than as two rows that
-/// disagree. `Network` keeps its bare label -- it is the resolved network, not
-/// an envelope field, and every NEAR path renders it identically.
+/// Envelope rows carry a `NEP-413` label prefix: the intents view repeats the
+/// recipient (as verifying contract) and nonce, and the prefix tells the two
+/// apart. `Network` keeps its bare label since it is not an envelope field.
 fn render_nep413_envelope(
     json: &str,
     options: &VisualSignOptions,
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    // Decoded under the same rules as `NearTransaction::from_string`, not a
-    // plain serde parse: the enum is public, so this envelope may never have
-    // passed through string decoding, and an intent-shaped message that does not
-    // decode must be refused here rather than shown as text.
+    // Same rules as string decoding: the enum is public, so this envelope may
+    // never have gone through `NearTransaction::from_string`.
     let (payload, intents) =
         crate::tx::decode_nep413(json).map_err(VisualSignError::ConversionError)?;
 
-    // The resolved network is part of every token-metadata signed scope, so the
-    // payload shows which network that scope was checked against -- the same
-    // field, for the same reason, as the intents and on-chain paths render.
+    // Token-metadata signed scopes include the network, so show which one.
     let mut fields = vec![
         create_text_field("Network", network.display_name())?.signable_payload_field,
-        // Escaped like the message and callback URL: `recipient` is free text
-        // the caller supplies, and an unescaped line break in it could forge a
+        // Escaped: caller-supplied free text, and a line break could forge a
         // second field on the signer's screen.
         create_address_field(
             "NEP-413 Recipient",
@@ -461,9 +437,8 @@ fn render_nep413_envelope(
         );
     }
 
-    // `decode_nep413` classifies the message: `None` is free text, the ordinary
-    // case for this envelope, and an intent-shaped message that does not
-    // extract has already been refused.
+    // `None` is free text; an intent-shaped message that does not extract was
+    // already refused by `decode_nep413`.
     let Some(intents) = intents else {
         fields.push(
             create_text_field("NEP-413 Message", &escape_display_text(&payload.message))?
@@ -570,9 +545,8 @@ fn title_for(actions: &[Action], receiver_id: &str) -> String {
         [single] if crate::actions::is_partially_decoded(single) => {
             crate::actions::partially_decoded_label(single)
         }
-        // A recognized contract call names itself, so a signer reads "Wrap"
-        // rather than "Function Call". The preset returns None unless the args
-        // decoded, so the title never outruns the fields.
+        // A recognized contract call names itself ("Wrap"); the preset returns
+        // None unless the args decoded.
         [single] => crate::actions::receiver_action_label(single, receiver_id).to_string(),
         _ => "NEAR Transaction".to_string(),
     }
@@ -705,9 +679,7 @@ mod tests {
         )
     }
 
-    /// The NEAR leg of the intents journey: wrapping NEAR into wNEAR. The amount
-    /// rides as the attached deposit, which the FunctionCall render already
-    /// shows; what the preset adds is a title that names the operation.
+    /// A `wrap.near` deposit is titled "Wrap", not "Function Call".
     #[test]
     fn a_wrap_names_itself_rather_than_rendering_as_a_function_call() {
         let payload = NearVisualSignConverter::new()
@@ -743,9 +715,8 @@ mod tests {
         assert!(json.contains("wNEAR"), "an unwrap moves wNEAR: {json}");
     }
 
-    /// In a multi-action transaction each wrap call names itself in its
-    /// `Action` boundary as the single-action title does, and a call the preset
-    /// does not recognize keeps the generic label.
+    /// Each wrap call in a multi-action transaction names its `Action` boundary;
+    /// an unrecognized call keeps the generic label.
     #[test]
     fn wraps_name_themselves_in_multi_action_boundaries() {
         let call = |method: &str, args: &str| {
@@ -779,8 +750,7 @@ mod tests {
         assert_eq!(payload.title, "NEAR Transaction");
     }
 
-    /// The same method name on another contract is not a wrap, so the title
-    /// stays generic and the args render as raw data.
+    /// `near_withdraw` on another contract is not a wrap: generic title, raw args.
     #[test]
     fn the_same_method_on_another_contract_is_not_titled_a_wrap() {
         let tx = near_tx_as(
@@ -1594,9 +1564,8 @@ mod tests {
         )
     }
 
-    /// `payload_type` names what the signature covers: a transaction is
-    /// `NearTx`; a NEP-413 envelope and an intents payload signed directly are
-    /// messages, whatever they carry.
+    /// `payload_type` is `NearTx` for a transaction and a message type for
+    /// NEP-413 and raw intents payloads.
     #[test]
     fn payload_type_names_what_the_signature_covers() {
         let convert = |tx| {
@@ -1625,10 +1594,7 @@ mod tests {
         assert_eq!(carrying_intents.payload_type, "NearMessage");
     }
 
-    /// A NEP-413 message carrying no intents renders its text, plus the
-    /// envelope fields that say who the message is for. The envelope is
-    /// structured even when its message is not, so a signer sees the recipient
-    /// and nonce the signature binds.
+    /// A NEP-413 free-text message renders the text plus recipient and nonce.
     #[test]
     fn nep413_plain_message_renders_as_text() {
         let payload = render_nep413(
@@ -1649,9 +1615,7 @@ mod tests {
         );
     }
 
-    /// The nonce is part of what the signature covers, so it renders. Hex
-    /// rather than the envelope's base64, matching how the rest of the payload
-    /// renders byte strings.
+    /// The NEP-413 nonce renders as hex, like other byte strings.
     #[test]
     fn nep413_nonce_renders_as_hex() {
         use base64::Engine;
@@ -1670,9 +1634,7 @@ mod tests {
         assert_eq!(labeled_text(&payload, "NEP-413 Nonce"), expected);
     }
 
-    /// The callback URL is optional in the envelope, so it renders only when
-    /// one is present: an empty field would suggest the signature binds a
-    /// callback it does not.
+    /// The callback URL renders only when the envelope carries one.
     #[test]
     fn nep413_renders_the_callback_url_only_when_the_envelope_carries_one() {
         let with_url = render_nep413(
@@ -1699,12 +1661,8 @@ mod tests {
         );
     }
 
-    /// The enum is public, so a NEP-413 envelope built directly reaches the
-    /// converter without string decoding. A message with an intents request's
-    /// `signer_id` and `deadline` but an undeclared `action` key is refused,
-    /// not shown as text: without `intents` it extracts as a cancel, which the
-    /// `action` key would ride along with unseen. JSON without those keys is
-    /// still free text.
+    /// A cancel-shaped message (`signer_id` + `deadline`) with an undeclared
+    /// key is refused, not shown as text; JSON without those keys stays text.
     #[test]
     fn nep413_json_message_with_the_intents_keys_and_an_undeclared_key_is_refused() {
         let message =
@@ -1729,12 +1687,8 @@ mod tests {
         );
     }
 
-    /// A cancel is signable over NEP-413 too. `"intents": []` used to fail
-    /// here: the extracted payload is re-encoded for the intents render, and
-    /// `DefuseIntents` drops an empty list when it serializes, so the re-encoded
-    /// JSON had no `intents` key and was classified as not intents. Both the
-    /// empty and the absent form render as a cancel with the signer,
-    /// verifying contract, deadline and nonce.
+    /// A NEP-413 cancel renders whether `intents` is empty or absent (re-encoding
+    /// drops an empty list).
     #[test]
     fn nep413_message_without_intents_renders_as_a_cancel() {
         for message in [
@@ -1769,9 +1723,7 @@ mod tests {
         }
     }
 
-    /// NEP-413 takes the verifying contract from its `recipient`, so intents
-    /// addressed elsewhere render like a normal intent. The verifier rejects
-    /// them, but the signer is told.
+    /// Intents whose `recipient` is not the verifier still render, flagged.
     #[test]
     fn nep413_intents_for_another_recipient_are_flagged() {
         let flagged = |recipient: &str| {
@@ -1792,9 +1744,7 @@ mod tests {
         assert!(!flagged("intents.near"));
     }
 
-    /// A NEP-413 envelope whose message carries intents renders the intents.
-    /// A signer approving a token movement has to see the movement rather than
-    /// the escaped JSON string that carries it.
+    /// A NEP-413 message carrying intents renders the intents, not escaped JSON.
     #[test]
     fn nep413_framed_intent_renders_the_intent_rather_than_escaped_json() {
         let payload = render_nep413(
@@ -1821,10 +1771,7 @@ mod tests {
         );
     }
 
-    /// The intents path reached through a NEP-413 envelope enforces the
-    /// resolved network exactly as the raw-message path does. The envelope
-    /// supplies `verifying_contract` from its own `recipient`, so a new field
-    /// feeds the check and must not skip it.
+    /// Intents inside NEP-413 enforce the resolved network like the raw path.
     #[test]
     fn nep413_framed_intent_enforces_the_resolved_network() {
         let err = NearVisualSignConverter::new()
@@ -1861,10 +1808,8 @@ mod tests {
             .collect()
     }
 
-    /// An envelope carrying intents renders the same recipient and nonce twice:
-    /// once as the envelope states them, once as the intents view reads them
-    /// back out. The envelope's rows carry a prefix so a signer reads one value
-    /// seen from two sides rather than two rows that appear to disagree.
+    /// Envelope rows carry the `NEP-413` prefix, distinguishing them from the
+    /// intents rows that repeat recipient and nonce.
     #[test]
     fn nep413_framed_intent_distinguishes_envelope_rows_from_intent_rows() {
         let payload = render_nep413(
@@ -1901,9 +1846,8 @@ mod tests {
         }
     }
 
-    /// Message, recipient and callback URL are caller-supplied and reach a
-    /// signer's screen, so a character that could forge a line break or
-    /// reorder the rendering is escaped rather than passed through.
+    /// Message, recipient and callback URL escape line breaks and reordering
+    /// characters.
     #[test]
     fn nep413_envelope_text_is_escaped() {
         let payload = render_nep413(
@@ -1941,10 +1885,8 @@ mod tests {
         );
     }
 
-    /// The NEP-413 rules hold when a caller builds `NearTransaction::Nep413`
-    /// directly instead of decoding a string: an intent-shaped message that does
-    /// not decode is refused, not rendered as a "NEAR Message", and so are an
-    /// undeclared envelope key and an undeclared key inside the intents.
+    /// A directly built `NearTransaction::Nep413` gets the string decoder's
+    /// refusals: undecodable intents, undeclared envelope or intent keys.
     #[test]
     fn a_directly_built_nep413_envelope_is_held_to_the_decoding_rules() {
         let render = |envelope: String| {
@@ -2036,9 +1978,7 @@ mod tests {
         assert_eq!(callbacks.len(), texts.len(), "{callbacks:?}");
     }
 
-    /// The intents a NEP-413 message carries render in place of the raw message,
-    /// so their free text has to be reversible too: NFT token ids `é` and `?`
-    /// stay distinct through a complete envelope.
+    /// NFT token ids `é` and `?` stay distinct inside a NEP-413 envelope.
     #[test]
     fn nep413_carried_nft_token_ids_that_a_marker_would_collapse_stay_distinct() {
         let shown = |token_id: &str| {

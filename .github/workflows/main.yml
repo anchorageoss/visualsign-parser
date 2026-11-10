@@ -57,6 +57,8 @@ jobs:
             git --no-pager diff
             exit 1
           fi
+      # `make lint` includes `lint-shell`, which runs its digest-pinned
+      # shellcheck image rather than whatever the runner image ships.
       - name: Run linters
         run: make -C src lint
       # The Rust cache above doesn't cover ~/.cargo/bin, so cache the pinned
@@ -89,8 +91,11 @@ jobs:
       # `--locked` for the same reason the narrow-build checks use it: this
       # crate keeps its own Cargo.lock, so without it a stale lock is silently
       # updated in CI instead of failing.
+      #
+      # Run from the crate dir: rustup picks its rust-toolchain.toml (1.94.0)
+      # from the working directory, not from --manifest-path.
       - name: Lint and test the deploy helper (separate workspace)
+        working-directory: tools/tvc-deploy
         run: |
-          cargo clippy --locked --manifest-path tools/tvc-deploy/Cargo.toml \
-            --all-targets -- -D warnings
-          cargo test --locked --manifest-path tools/tvc-deploy/Cargo.toml
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
