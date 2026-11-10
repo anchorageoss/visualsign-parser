@@ -41,7 +41,7 @@ pub(crate) fn chain_metadata_bytes(
 #[derive(Clone)]
 pub enum PaymentPolicy {
     /// No payment enforcement. Used by local-dev / direct-gRPC callers, and
-    /// by every call site today (no binary constructs `Required` yet).
+    /// by any binary started without `--require-payment-marker-pubkey`.
     Disabled,
     /// Require a valid gateway-signed VPM in `ParseRequest.payment_marker`.
     Required {

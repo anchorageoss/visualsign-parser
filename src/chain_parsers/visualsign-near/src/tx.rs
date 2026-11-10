@@ -1,36 +1,14 @@
-//! NEAR input decoding. The three accepted inputs are envelopes -- what a
-//! signature covers -- rather than applications of them:
+//! NEAR input decoding. Inputs are envelopes, i.e. what a signature covers:
 //!
 //! - a borsh transaction, signed over `sha256(borsh(tx))`;
 //! - a NEP-413 off-chain message, signed over `sha256(borsh(tag || payload))`;
 //! - a raw message, signed over its own bytes.
 //!
-//! NEAR Intents is content rather than a fourth envelope. A `DefusePayload`
-//! rides in a raw message under the `RawEd25519` standard and inside `message`
-//! under NEP-413, and rendering recognizes it in either, so the envelope decides
-//! what is signed and the content decides what is shown. NEP-413 is NEAR's own
-//! message-signing standard; the verifier documents `RawEd25519` as Phantom's
-//! convention for Solana wallets. Both reach the same verifier, so both decode
-//! here, and a NEAR wallet signing for a NEAR account produces NEP-413.
-//!
-//! Borsh bytes are never valid JSON, so a successful borsh decode is a
-//! transaction and any other input is tried as an envelope. Each JSON envelope
-//! is decoded strictly: every top-level key must be one its type declares. The
-//! typed decoders alone ignore unknown keys, so without this an object holding
-//! both envelopes' fields would decode as a `DefusePayload` while a NEP-413
-//! wallet signs the borsh envelope instead, and an extra key (or a misspelled
-//! one, such as `callback_url` for `callbackUrl`) would be signed without being
-//! shown. Strict key sets also make the two envelopes disjoint for every
-//! input, not only for well-formed ones: a `DefusePayload` declares
-//! `signer_id`, `verifying_contract` and `deadline`, which NEP-413 does not, and
-//! NEP-413 declares `message` and `recipient`, which a `DefusePayload` does not.
-//! The intents a NEP-413 `message` carries are held to the same rule.
-//!
-//! A raw message is accepted only when its content is recognized -- today, a
-//! `DefusePayload`. Unrecognized bytes are rejected rather than rendered
-//! opaquely, so nothing the parser cannot read reaches a signer under an
-//! attestation. NEP-413 differs because its envelope is itself structured: the
-//! recipient and nonce are read even when the message it carries is free text.
+//! NEAR Intents (`DefusePayload`) is content inside a raw message or a NEP-413
+//! `message`, not a fourth envelope. JSON envelopes are decoded strictly (every
+//! top-level key must be declared), so an unread key is never signed unseen and
+//! the two envelopes are disjoint. A raw message is accepted only when its
+//! content is a `DefusePayload`; NEP-413 accepts free text.
 
 use crate::primitives::{SignedTransaction, Transaction};
 use defuse_core::intents::DefuseIntents;
@@ -47,20 +25,11 @@ use visualsign_intents::strict;
 pub enum NearTransaction {
     /// A borsh-decoded NEAR transaction (`near::sign_transaction`).
     OnChain(Transaction),
-    /// A raw message, signed over its own bytes -- the `RawEd25519` standard,
-    /// which the verifier documents as Phantom's convention for Solana wallets.
-    /// NEP-413 is NEAR's own message-signing standard, so a NEAR wallet signing
-    /// for a NEAR account produces [`Self::Nep413`] instead. The verifier
-    /// accepts either from an ed25519 key, so both are decoded.
-    ///
-    /// Kept as the validated raw text: the signature covers the string itself
-    /// rather than a digest of a re-serialization, so the bytes rendering reads
-    /// have to be the bytes that get signed.
+    /// A raw message signed over its own bytes (`RawEd25519`). Kept as the
+    /// validated raw text, since rendering must read the exact signed bytes.
     RawMessage(String),
-    /// A NEP-413 off-chain message envelope, kept as the validated raw text --
-    /// rendering re-parses it. NEP-413 wraps an arbitrary `message`, so this
-    /// envelope carries a signing request for any purpose, of which NEAR Intents
-    /// is one.
+    /// A NEP-413 off-chain message envelope, kept as the validated raw text
+    /// (rendering re-parses it). Its `message` may or may not be NEAR Intents.
     Nep413(String),
 }
 
@@ -110,11 +79,8 @@ impl NearTransaction {
         }
         // Validate eagerly so malformed input is rejected at parse time
         // rather than at render time.
-        // The typed decode needs every required envelope key and defaults a
-        // missing `intents` to an empty list: such a payload only spends the
-        // nonce (a cancel) and is a raw intents message like any other. A failed
-        // decode keeps serde's own cause. Each intent is held to its own kind's
-        // keys as well as the envelope.
+        // A missing `intents` defaults to empty: a cancel, still a raw intents
+        // message. Each intent is also held to its own kind's keys.
         let intent_err = match serde_json::from_str::<DefusePayload<DefuseIntents>>(trimmed)
             .map_err(|e| e.to_string())
             .and_then(|_| {
@@ -130,17 +96,14 @@ impl NearTransaction {
             Err(e) => e,
         };
 
-        // NEP-413 is tried second. With strict key sets the envelopes are
-        // disjoint for every input, so the order decides only which causes
-        // appear when input is neither.
+        // Strict key sets make the envelopes disjoint, so order only affects
+        // which causes are reported.
         let nep413_err = match decode_nep413(trimmed) {
             Ok(_) => return Ok(Self::Nep413(trimmed.to_string())),
             Err(e) => e,
         };
 
-        // The causes are appended rather than interpolated into the summary, so
-        // the sentence naming the accepted formats stays contiguous for callers
-        // that match on it.
+        // Causes go after the summary so callers can match the format list.
         let borsh_cause = borsh_failure
             .as_deref()
             .unwrap_or("input is not hex or base64");
@@ -153,29 +116,16 @@ impl NearTransaction {
 }
 
 /// Decode `json` as `T`, then refuse any top-level key outside `allowed`.
-///
-/// The typed decode runs first, so a malformed envelope reports serde's own
-/// cause (including a repeated struct field, which serde refuses; a repeated
-/// key inside a map-valued field such as `token_diff.diff` or
-/// `transfer.tokens` keeps its last value, as the contract does). The key
-/// check, shared
-/// with every chain that renders intents, then catches what serde would
-/// silently drop.
+/// The typed decode runs first so malformed input reports serde's own cause.
 fn strict_decode<T: DeserializeOwned>(json: &str, allowed: &[&str]) -> Result<T, String> {
     let value = serde_json::from_str::<T>(json).map_err(|e| e.to_string())?;
     strict::require_declared_keys(json.as_bytes(), allowed)?;
     Ok(value)
 }
 
-/// Decode a NEP-413 envelope under every rule [`NearTransaction::Nep413`]
-/// promises: only the keys NEP-413 declares, and a `message` that is either an
-/// intents request held to its own key set or free text. Returns the intents
-/// the message carries, or `None` when it is free text.
-///
-/// Shared by string decoding and the converter, because the enum is public: a
-/// caller can build `NearTransaction::Nep413` without going through
-/// [`NearTransaction::from_string_with_options`], and the rules have to hold for
-/// that envelope too.
+/// Decode a NEP-413 envelope strictly, returning the intents its `message`
+/// carries or `None` for free text. Shared with the converter because the enum
+/// is public and can bypass [`NearTransaction::from_string_with_options`].
 pub(crate) fn decode_nep413(
     json: &str,
 ) -> Result<(Nep413Payload, Option<DefusePayload<DefuseIntents>>), String> {
@@ -184,20 +134,9 @@ pub(crate) fn decode_nep413(
     Ok((payload, intents))
 }
 
-/// The intents a NEP-413 `message` carries, held to the same rule as a raw
-/// `DefusePayload`: every key must be one the decoder reads. A message that is
-/// not [intent-shaped](visualsign_intents::is_nep413_message_intent_shaped) is
-/// free text and renders as such.
-///
-/// The message is classified before extraction by its keys: an `intents` key,
-/// or both `signer_id` and `deadline`. The second form with no `intents`
-/// extracts as a payload that only spends the nonce, which is how a pending
-/// signed request is cancelled, so it renders as a cancel rather than as text;
-/// with a key outside the declared set it is refused, like any intents
-/// message. A message that is intent-shaped but does not extract (an intent kind
-/// this build does not know, `intents: null`) is refused rather than treated as
-/// free text: showing it as a plain message would put raw JSON in front of a
-/// signer for an intent the parser could not interpret.
+/// The intents a NEP-413 `message` carries, strictly decoded, or `None` when it
+/// is not [intent-shaped](visualsign_intents::is_nep413_message_intent_shaped).
+/// An intent-shaped message that does not extract is refused, not shown as text.
 fn nep413_intents(payload: &Nep413Payload) -> Result<Option<DefusePayload<DefuseIntents>>, String> {
     if !visualsign_intents::is_nep413_message_intent_shaped(payload.message.as_bytes()) {
         return Ok(None);
@@ -616,9 +555,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// A NEP-413 envelope carrying a plain message. `recipient` is what the
-    /// signature binds the message to; it is not an account id in the general
-    /// case, since NEP-413 is used for web sign-in where it is a domain.
+    /// A NEP-413 envelope carrying a plain message. `recipient` need not be an
+    /// account id (web sign-in uses a domain).
     const PLAIN_NEP413: &str = r#"{"message":"Sign in to app.example.com","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"app.example.com"}"#;
 
     /// A sign-in message whose keys overlap an intents request's (`signer_id`,
@@ -641,10 +579,8 @@ mod tests {
         assert_eq!(tx.transaction_type(), "NEAR Message");
     }
 
-    /// The decoder tries `DefusePayload` before NEP-413, so the order is
-    /// immaterial only if neither format parses as the other. Asserted at the
-    /// serde layer rather than through the decoder, because it is serde's
-    /// required-field sets that make the ordering safe.
+    /// Neither format's serde decode accepts the other, so decode order is
+    /// immaterial.
     #[test]
     fn the_two_json_envelopes_are_disjoint() {
         assert!(
@@ -660,11 +596,8 @@ mod tests {
         );
     }
 
-    /// A NEP-413 envelope carrying intents stays a NEP-413 envelope. The
-    /// envelope decides what the signature covers -- `sha256(borsh(tag ||
-    /// payload))` here, the message's own bytes for a raw message -- so
-    /// decoding this as a raw message would attest a digest the signer never
-    /// produces.
+    /// A NEP-413 envelope carrying intents decodes as NEP-413, not a raw
+    /// message: the envelope decides what bytes are signed.
     #[test]
     fn a_nep413_envelope_carrying_intents_stays_an_envelope() {
         let tx = NearTransaction::from_string(NEP413_FRAMED_INTENT).expect("decode");
@@ -707,10 +640,7 @@ mod tests {
         }
     }
 
-    /// An object holding both envelopes' fields decodes as neither. Before
-    /// strict key sets it decoded as a raw `DefusePayload`, while a NEP-413
-    /// wallet would sign the borsh envelope instead: the render and the
-    /// signature would describe different bytes.
+    /// An object holding both envelopes' fields decodes as neither.
     #[test]
     fn an_object_with_both_envelopes_fields_is_refused() {
         let both = with_fields(
@@ -727,8 +657,7 @@ mod tests {
         }
     }
 
-    /// A key the decoder does not read is signed without being shown, so it is
-    /// refused on either envelope and named in the refusal.
+    /// An undeclared key is refused, by name, on either envelope.
     #[test]
     fn an_undeclared_key_is_refused_on_either_envelope() {
         for base in [SWAP_INTENT, PLAIN_NEP413] {
@@ -740,9 +669,8 @@ mod tests {
         }
     }
 
-    /// NEP-413's JSON form is camelCase. A snake_case `callback_url` would be
-    /// dropped by the typed decoder, so the signer would never see the URL
-    /// their wallet binds; it is refused by name instead.
+    /// A snake_case `callback_url` (NEP-413 uses `callbackUrl`) is refused by
+    /// name rather than silently dropped.
     #[test]
     fn a_snake_case_callback_url_is_refused() {
         let message = decode_error(&with_fields(
@@ -775,9 +703,8 @@ mod tests {
         assert!(message.contains("\"extra\""), "{message}");
     }
 
-    /// A NEP-413 message that is intent-shaped (a JSON object naming `intents`)
-    /// but does not decode is refused rather than accepted as free text: an
-    /// unknown intent kind and `intents: null` both.
+    /// An intent-shaped NEP-413 message that does not decode (unknown kind,
+    /// `intents: null`) is refused, not accepted as free text.
     #[test]
     fn nep413_intent_shaped_message_that_does_not_decode_is_refused() {
         for inner in [
@@ -795,9 +722,7 @@ mod tests {
         }
     }
 
-    /// A NEP-413 message that is JSON but not an intents request is free text:
-    /// other applications sign structured messages too, and those keep
-    /// rendering as the text they are.
+    /// A JSON NEP-413 message that is not an intents request is free text.
     #[test]
     fn a_nep413_message_that_is_json_but_not_intents_still_decodes() {
         let envelope = serde_json::json!({
@@ -812,9 +737,8 @@ mod tests {
         ));
     }
 
-    /// A key inside an intent that its kind does not declare is refused on
-    /// both envelopes: `native_withdraw` has no `memo`, so the typed decode
-    /// would drop it and the signer would never see it.
+    /// A key an intent kind does not declare (`memo` on `native_withdraw`) is
+    /// refused on both envelopes.
     #[test]
     fn an_undeclared_key_inside_an_intent_is_refused_on_either_envelope() {
         let intent =
@@ -839,11 +763,8 @@ mod tests {
         }
     }
 
-    /// A message with an intents request's `signer_id` and `deadline` extracts
-    /// as a payload even with no `intents`: one that only spends the nonce (a
-    /// cancel), so it is intents rather than free text. With a key the intents
-    /// message does not declare (`action`), it would be signed without that key
-    /// being shown, so it is refused rather than shown as text.
+    /// A message with `signer_id` and `deadline` but no `intents` is a cancel,
+    /// not free text; with an undeclared key (`action`) it is refused.
     #[test]
     fn a_nep413_message_with_the_intents_keys_is_intents_without_an_intents_list() {
         let envelope = |message: &str| {
@@ -866,10 +787,8 @@ mod tests {
         assert!(matches!(decode_nep413(&free), Ok((_, None))));
     }
 
-    /// `intents` is optional in a `DefusePayload`: one with every envelope key
-    /// and no `intents` only spends its nonce, which is how a pending signed
-    /// request is cancelled, so it decodes as a raw intents message. JSON with
-    /// only some of the envelope keys is neither envelope.
+    /// A `DefusePayload` without `intents` decodes as a cancel; JSON with only
+    /// some envelope keys is neither envelope.
     #[test]
     fn a_raw_defuse_payload_without_intents_is_a_raw_message() {
         let without_intents = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#;
@@ -882,9 +801,7 @@ mod tests {
         assert!(message.contains("DefusePayload"), "{message}");
     }
 
-    /// A key that appears twice has no single value to render, so either
-    /// envelope refuses it rather than keeping whichever value the parser saw
-    /// last.
+    /// A repeated top-level key is refused on either envelope.
     #[test]
     fn a_repeated_key_is_refused_on_either_envelope() {
         let defuse = r#"{"signer_id":"alice.near","signer_id":"mallory.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[]}"#;
@@ -897,9 +814,7 @@ mod tests {
         }
     }
 
-    /// `recipient` is what a NEP-413 signature binds the message to, so an
-    /// envelope without one is rejected rather than rendered with the field
-    /// blank.
+    /// A NEP-413 envelope without `recipient` is rejected.
     #[test]
     fn decode_rejects_a_nep413_envelope_without_a_recipient() {
         let result = NearTransaction::from_string(

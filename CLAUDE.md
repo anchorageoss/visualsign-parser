@@ -9,7 +9,8 @@ All commands run from `src/`:
 ```bash
 make -C src build          # Build all workspace crates
 make -C src test           # Build all, then run all tests (integration tests need binaries)
-make -C src lint           # fmt-check, then cargo clippy --all-targets -- -D warnings
+make -C src lint           # fmt-check, lint-shell, then cargo clippy --all-targets -- -D warnings
+make -C src lint-shell     # shellcheck every tracked shell script in the digest-pinned container
 make -C src fmt            # cargo fmt + rustfmt on Solana presets/integrations (plain `cargo fmt` misses them)
 make -C src fmt-check      # Same file set as fmt, check only
 make -C src generated      # Regenerate protobuf types (tonic_build), then fmt
@@ -32,6 +33,22 @@ cargo run --bin parser_cli --features serve -- serve --chain ethereum --network 
 ```
 
 CI requires: codegen produces no diff, clippy passes with `-D warnings`, all tests pass. Protoc version and hashes are pinned in `.github/protoc.env` (install locally with `scripts/install-protoc.sh`).
+
+**Dependencies are always strictly pinned and validated before they are added or bumped** (full rule: `docs/contributor-guides/best-practices.mdx`, "Pin and validate every dependency").
+- Pin exactly:
+  - crates through a committed `Cargo.lock` and `--locked`;
+  - `cargo install --locked --version =X.Y.Z`;
+  - Actions by full commit SHA;
+  - images by `tag@sha256:` digest;
+  - downloaded binaries by version plus a checked SHA-256.
+- Never use `latest`, floating tags, `curl | sh`, or an implicit `PATH` tool for a check CI also runs.
+- Before adding or bumping, check:
+  - the release is at least 7 days old and not yanked (advisory fixes excepted);
+  - the publisher and provenance;
+  - `cargo audit`;
+  - new transitive crates, build scripts and proc-macros;
+  - a `--locked` build and test of every affected workspace.
+- Record what you checked in the PR.
 
 ## Architecture
 

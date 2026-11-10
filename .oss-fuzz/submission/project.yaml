@@ -1,0 +1,8 @@
+homepage: "https://github.com/anchorageoss/visualsign-parser"
+language: rust
+primary_contact: "prasanna@anchorlabs.com"
+main_repo: "https://github.com/anchorageoss/visualsign-parser"
+sanitizers:
+  - address
+fuzzing_engines:
+  - libfuzzer

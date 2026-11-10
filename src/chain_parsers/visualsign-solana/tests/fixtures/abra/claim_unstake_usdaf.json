@@ -1,0 +1,83 @@
+{
+  "description": "Abra unstake claim collecting 2.000638 USDaf from the signer's escrow (mainnet)",
+  "source": "https://solscan.io/tx/2b5sBk8L5rYr8X1cCU3hKW8BA6agEb9wdp5inxw4L7R4MhxgiTsQVztZsZMBX6KWzfetGoqse9eRFdx7KVdXBYfX",
+  "signature": "2b5sBk8L5rYr8X1cCU3hKW8BA6agEb9wdp5inxw4L7R4MhxgiTsQVztZsZMBX6KWzfetGoqse9eRFdx7KVdXBYfX",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "4 instructions: [0] System advanceNonce, [1-2] ComputeBudget, [3] Abra claim_unstake. Testing instruction [3].",
+  "instruction_index": 3,
+  "instruction_data": "NJ46BCWZsx6fgQen8PaELw",
+  "program_id": "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+  "accounts": [
+    {
+      "pubkey": "DgxFn9RHndaPdRx9y7LC6XBTbVWQzhqWYGc1oxi5T3Ed",
+      "signer": false,
+      "writable": true,
+      "description": "state"
+    },
+    {
+      "pubkey": "BmLfxNK2VkXxZgLAp9v64ENJqcVPZESDQ9U3SqxqsSSv",
+      "signer": true,
+      "writable": true,
+      "description": "user"
+    },
+    {
+      "pubkey": "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+      "signer": false,
+      "writable": false,
+      "description": "underlying_token_mint"
+    },
+    {
+      "pubkey": "susdLJ23peDWNrXk44p5gb8Z8J8FvPMRjYrRHeWnh7b",
+      "signer": false,
+      "writable": true,
+      "description": "liquid_staking_token_mint"
+    },
+    {
+      "pubkey": "E9T8ta4xJgCSpKovaTuSpLuLTQGfoq5QVpmuxBgdgsGU",
+      "signer": false,
+      "writable": true,
+      "description": "user_liquid_staking_token_account"
+    },
+    {
+      "pubkey": "74sSAVU4ELgAevgPKDzBi6qv2TTYQF7NqGvS6ZVaYiV4",
+      "signer": false,
+      "writable": true,
+      "description": "user_underlying_token_account"
+    },
+    {
+      "pubkey": "9pke46FNJFNXYaNNMwyjAci8egcoZovLuQ9jF3TrMo6G",
+      "signer": false,
+      "writable": true,
+      "description": "escrow_token_account"
+    },
+    {
+      "pubkey": "AedBbuiBQrsM2toUMSCBSWyNUFyMVQtHp1qe2kbEaQuE",
+      "signer": false,
+      "writable": true,
+      "description": "user_unstake_request"
+    },
+    {
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "signer": false,
+      "writable": false,
+      "description": "associated_token_program"
+    },
+    {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "writable": false,
+      "description": "token_program"
+    }
+  ],
+  "expected_title": "Collect USDaf from Abra",
+  "expected_fields": {
+    "instruction": "claim_unstake",
+    "discriminator": "ac7175b2dff5f776",
+    "action": "Collect",
+    "amount": "2.000638",
+    "claim_underlying_amount": "2000638",
+    "recipient": "74sSAVU4ELgAevgPKDzBi6qv2TTYQF7NqGvS6ZVaYiV4",
+    "collected_from": "9pke46FNJFNXYaNNMwyjAci8egcoZovLuQ9jF3TrMo6G",
+    "raw_data": "ac7175b2dff5f776fe861e0000000000"
+  }
+}

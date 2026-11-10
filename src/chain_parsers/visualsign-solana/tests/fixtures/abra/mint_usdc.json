@@ -1,0 +1,91 @@
+{
+  "description": "Abra mint of USDaf for 25 USDC (mainnet)",
+  "source": "https://solscan.io/tx/5AJadQmfsmDeSfzVJijTHr6ANZmnedSSYSYzRMhosFQL3NromR13iey9Z3JacFfudZmmsPVMcEegP4uzfcbsFx5H",
+  "signature": "5AJadQmfsmDeSfzVJijTHr6ANZmnedSSYSYzRMhosFQL3NromR13iey9Z3JacFfudZmmsPVMcEegP4uzfcbsFx5H",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "4 instructions: [0] System advanceNonce, [1-2] ComputeBudget, [3] Abra mint. Testing instruction [3].",
+  "instruction_index": 3,
+  "instruction_data": "7KtNeCYPFVxgfqJuVCFXDq",
+  "program_id": "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+  "accounts": [
+    {
+      "pubkey": "9eUcxpxHn7ZpcEKw5eGofPNZiSVSCESjWcmwJCjFgETE",
+      "signer": false,
+      "writable": false,
+      "description": "state"
+    },
+    {
+      "pubkey": "BmLfxNK2VkXxZgLAp9v64ENJqcVPZESDQ9U3SqxqsSSv",
+      "signer": true,
+      "writable": true,
+      "description": "user"
+    },
+    {
+      "pubkey": "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+      "signer": false,
+      "writable": true,
+      "description": "abrafi_backed_token_mint"
+    },
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": true,
+      "description": "collateral_token_mint"
+    },
+    {
+      "pubkey": "74sSAVU4ELgAevgPKDzBi6qv2TTYQF7NqGvS6ZVaYiV4",
+      "signer": false,
+      "writable": true,
+      "description": "user_abrafi_backed_token_account"
+    },
+    {
+      "pubkey": "9aM4REREtw521NFNkDVRo6RVrww8CNugeDJY4JjkHaH1",
+      "signer": false,
+      "writable": true,
+      "description": "user_collateral_token_account"
+    },
+    {
+      "pubkey": "dqttTLpHzRj7CiKHPRQ7M43GYXB6iZ2U6vBn6oBZnDB",
+      "signer": false,
+      "writable": true,
+      "description": "treasury_token_account"
+    },
+    {
+      "pubkey": "HzNSaUxVHrgcvqdyDM7jBdJSjwVZF49z3rxahpgJNmm1",
+      "signer": false,
+      "writable": false,
+      "description": "mint_whitelist"
+    },
+    {
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "signer": false,
+      "writable": false,
+      "description": "associated_token_program"
+    },
+    {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "writable": false,
+      "description": "token_program"
+    },
+    {
+      "pubkey": "11111111111111111111111111111111",
+      "signer": false,
+      "writable": false,
+      "description": "system_program"
+    }
+  ],
+  "expected_title": "Supply USDC to Mint USDaf",
+  "expected_fields": {
+    "instruction": "mint",
+    "discriminator": "3339e12fb69289a6",
+    "action": "Mint",
+    "amount": "25",
+    "signer": "BmLfxNK2VkXxZgLAp9v64ENJqcVPZESDQ9U3SqxqsSSv",
+    "recipient": "74sSAVU4ELgAevgPKDzBi6qv2TTYQF7NqGvS6ZVaYiV4",
+    "paid_to": "dqttTLpHzRj7CiKHPRQ7M43GYXB6iZ2U6vBn6oBZnDB",
+    "collateral_token_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "abrafi_backed_token_mint": "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+    "raw_data": "3339e12fb69289a640787d0100000000"
+  }
+}

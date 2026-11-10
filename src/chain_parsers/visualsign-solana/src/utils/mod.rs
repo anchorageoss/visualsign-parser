@@ -124,6 +124,25 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
         },
     );
 
+    // Abra, verified 2026-11-05 via the Jupiter token list (decimals, mint authorities); it
+    // names the first mint "USDAF" and has no metadata for sUSDaf, so symbols follow the issuer.
+    tokens.insert(
+        "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+        TokenInfo {
+            symbol: "USDaf",
+            name: "USDaf",
+            decimals: 6,
+        },
+    );
+    tokens.insert(
+        "susdLJ23peDWNrXk44p5gb8Z8J8FvPMRjYrRHeWnh7b",
+        TokenInfo {
+            symbol: "sUSDaf",
+            name: "Staked USDaf",
+            decimals: 6,
+        },
+    );
+
     tokens
 }
 
@@ -273,86 +292,4 @@ mod tests {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-pub mod test_utils {
-    use crate::core::VisualizerContext;
-    use crate::transaction_string_to_visual_sign;
-    use solana_instruction::Instruction;
-    use solana_message::compiled_instruction::CompiledInstruction;
-    use solana_parser::solana::structs::SolanaAccount;
-    use solana_pubkey::Pubkey;
-    use visualsign::SignablePayload;
-    use visualsign::vsptrait::VisualSignOptions;
-
-    pub fn payload_from_b64(data: &str) -> SignablePayload {
-        transaction_string_to_visual_sign(
-            data,
-            VisualSignOptions {
-                include_intermediate_output: false,
-                metadata: None,
-                decode_transfers: true,
-                transaction_name: None,
-                developer_config: None,
-            },
-        )
-        .expect("Failed to visualize tx commands")
-    }
-
-    /// Owned wire data for one `VisualizerContext` built from a resolved `Instruction`:
-    /// program at `account_keys[0]`, accounts after it, first account as the sender.
-    pub struct InstructionTestContext {
-        sender: SolanaAccount,
-        compiled: CompiledInstruction,
-        account_keys: Vec<Pubkey>,
-        registry: crate::idl::IdlRegistry,
-    }
-
-    impl InstructionTestContext {
-        pub fn from_instruction(instruction: &Instruction) -> Self {
-            let mut account_keys = vec![instruction.program_id];
-            account_keys.extend(instruction.accounts.iter().map(|m| m.pubkey));
-            let compiled = CompiledInstruction {
-                program_id_index: 0,
-                accounts: (1..=instruction.accounts.len() as u8).collect(),
-                data: instruction.data.clone(),
-            };
-            let sender = SolanaAccount {
-                account_key: instruction
-                    .accounts
-                    .first()
-                    .map(|m| m.pubkey.to_string())
-                    .unwrap_or_default(),
-                signer: true,
-                writable: true,
-            };
-            Self {
-                sender,
-                compiled,
-                account_keys,
-                registry: crate::idl::IdlRegistry::new(),
-            }
-        }
-
-        /// For tests that point an account at an index outside `account_keys` (unresolved ALT entry).
-        pub fn compiled_mut(&mut self) -> &mut CompiledInstruction {
-            &mut self.compiled
-        }
-
-        pub fn context(&self) -> VisualizerContext<'_> {
-            VisualizerContext::new(
-                &self.sender,
-                &self.compiled,
-                &self.account_keys,
-                &self.registry,
-                0,
-            )
-        }
-    }
-
-    pub fn assert_has_field(payload: &SignablePayload, label: &str) {
-        payload
-            .fields
-            .iter()
-            .find(|f| f.label() == label)
-            .unwrap_or_else(|| panic!("Should have a {label} field"));
-    }
-}
+pub mod test_utils;

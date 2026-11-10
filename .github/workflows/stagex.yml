@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
-      id-token: write
       contents: write  # `gh release edit` (mirror TVC details onto release notes)
       packages: write
     env:
@@ -66,7 +65,29 @@ jobs:
         # same commit's action.
         uses: ./.github/actions/docker-setup # zizmor: ignore[self-repository] see comment above
         with:
+          # Optional: only used to log in to Docker Hub for pull rate limits.
+          # The action skips the login when this is empty (forks, fork PRs).
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
+
+      - name: Resolve image name
+        id: image
+        shell: bash
+        env:
+          OWNER: ${{ github.repository_owner }}
+          TARGET_NAME: ${{ matrix.target.name }}
+          # A fork PR's run executes here with a read-only token and no
+          # secrets, so it can't publish anywhere. Build it, skip login/push.
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          # Publish under the owner of the repo running the workflow, so a fork
+          # running stagex in its own repo pushes to its own namespace.
+          # ghcr.io only accepts lowercase paths; owner logins can have capitals.
+          echo "repo=ghcr.io/${OWNER,,}/${TARGET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ "$IS_FORK_PR" == "true" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build ${{ matrix.target.name }}
         id: build
@@ -74,6 +95,9 @@ jobs:
         env:
           GH_REF_TYPE: ${{ github.ref_type }}
           GH_REF_NAME: ${{ github.ref_name }}
+          # The repository running this workflow, so a fork's images say they came
+          # from the fork. For anchorageoss this equals the Makefile default.
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           if [[ "$GH_REF_TYPE" == "tag" && "$GH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GH_REF_NAME#v}"
@@ -104,6 +128,13 @@ jobs:
             echo "ERROR: VERSION='$VERSION' produced non-semver SEMVER='$SEMVER'" >&2
             exit 1
           fi
+          # The docs tell anyone rebuilding this commit to check VERSION against
+          # this exact shape before pasting it into `make`. Fail here if the
+          # workflow ever emits anything else, so that check stays true.
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[A-Za-z0-9-]+)?$ ]]; then
+            echo "ERROR: VERSION='$VERSION' is not MAJOR.MINOR.PATCH[+build]" >&2
+            exit 1
+          fi
           if [[ "$IS_RELEASE_BUILD" == "1" ]]; then
             echo "semver_tag=v$SEMVER" >> "$GITHUB_OUTPUT"
           else
@@ -113,13 +144,51 @@ jobs:
           # publish on every build (PR, branch, release) without risking
           # cross-branch overwrites.
           echo "sha_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
+          # VERSION is compiled into the binary, so anyone rebuilding this
+          # commit to compare digests needs the exact string.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_url=$SOURCE_URL" >> "$GITHUB_OUTPUT"
+          make VERSION="$VERSION" SOURCE_URL="$SOURCE_URL" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
         run: |
           env -C out/${{ matrix.target.name }} tar -cf - . | docker load
 
+      - name: Record build inputs and digest
+        shell: bash
+        env:
+          TARGET_NAME: ${{ matrix.target.name }}
+          VERSION: ${{ steps.build.outputs.version }}
+          SOURCE_URL: ${{ steps.build.outputs.source_url }}
+          SHA_TAG: ${{ steps.build.outputs.sha_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Lets a maintainer reproduce this build (`make VERSION=... SOURCE_URL=...`
+          # at the same commit) and compare digests without trusting the pushed image.
+          manifest_digest=$(jq -r '.manifests[0].digest' "out/${TARGET_NAME}/index.json")
+          {
+            echo "## Build: ${TARGET_NAME}"
+            echo ""
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              # A pull request run checks out GitHub's temporary merge of the head into
+              # the base. That commit isn't in the fork, so it can't be fetched to
+              # rebuild; record the head and base it was made from instead.
+              echo "- **PR head commit**: \`${PR_HEAD_SHA}\`"
+              echo "- **PR base commit**: \`${PR_BASE_SHA}\`"
+              echo "- **Merge commit built** (temporary; can't be fetched, so this build can't be reproduced exactly): \`${SHA_TAG}\`"
+            else
+              echo "- **Commit**: \`${SHA_TAG}\`"
+            fi
+            echo "- **VERSION**: \`${VERSION}\`"
+            echo "- **SOURCE_URL**: \`${SOURCE_URL}\`"
+            echo "- **OCI manifest digest** (\`out/${TARGET_NAME}/index.json\`): \`${manifest_digest}\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Login to GHCR
+        if: steps.image.outputs.publish == 'true'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # GITHUB_ACTOR is the runner's default env var for github.actor.
@@ -127,7 +196,9 @@ jobs:
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Upload to GHCR
+        if: steps.image.outputs.publish == 'true'
         env:
+          IMAGE_REPO: ${{ steps.image.outputs.repo }}
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
           SHA_TAG: ${{ steps.build.outputs.sha_tag }}
         run: |
@@ -141,14 +212,26 @@ jobs:
           [ -n "$SEMVER_TAG" ] && all_tags+=( "$SEMVER_TAG" )
           [ -n "$SHA_TAG" ]    && all_tags+=( "$SHA_TAG" )
           for tag in "${all_tags[@]}"; do
-              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
+              # A registry tag allows only [A-Za-z0-9_.-], at most 128 characters, and
+              # can't start with "." or "-". Branch names can hold "/" (`feature/x`),
+              # which a manual run on that branch would otherwise fail to tag. The
+              # usual tags (latest, main, pr-N, vX.Y.Z, a 40-char sha) pass unchanged.
+              safe_tag=$(printf '%s' "$tag" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^[.-]*//' | cut -c1-128)
+              [ -n "$safe_tag" ] || continue
+              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "${IMAGE_REPO}:${safe_tag}"
           done
-          docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
+          docker image push --all-tags "${IMAGE_REPO}"
 
       - name: TVC deployment details
-        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_http_server'
+        # Needs the pushed image's registry digest, so only after a push. Uses
+        # nothing but this repo's own GITHUB_TOKEN, so it also runs in forks
+        # and points at the fork's image.
+        if: >-
+          steps.image.outputs.publish == 'true' &&
+          (matrix.target.name == 'parser_app' || matrix.target.name == 'parser_http_server')
         shell: bash
         env:
+          IMAGE_REPO: ${{ steps.image.outputs.repo }}
           TARGET_NAME: ${{ matrix.target.name }}
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
           SHA_TAG: ${{ steps.build.outputs.sha_tag }}
@@ -158,7 +241,7 @@ jobs:
           # the always-unique commit SHA on PR/branch builds where SEMVER
           # isn't reproducible. Both reference the same digest below.
           tvc_tag="${SEMVER_TAG:-$SHA_TAG}"
-          container_url="ghcr.io/anchorageoss/${TARGET_NAME}:${tvc_tag}"
+          container_url="${IMAGE_REPO}:${tvc_tag}"
           container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
           docker create --name tmp-extract "${container_url}" /bin/true
           docker cp "tmp-extract:/${TARGET_NAME}" /tmp/binary

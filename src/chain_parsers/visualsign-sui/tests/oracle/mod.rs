@@ -344,7 +344,7 @@ fn fluid_fixture_cases_match_the_pre_migration_type_oracle() {
         let data: Value = serde_json::from_str(source).unwrap();
         walk_fixtures(&data, name, &mut fixtures);
     }
-    assert_eq!(fixtures.len(), 14);
+    assert_eq!(fixtures.len(), 20);
     for (label, encoded) in fixtures {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&encoded)

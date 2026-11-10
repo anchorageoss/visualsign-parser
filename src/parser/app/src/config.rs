@@ -33,7 +33,8 @@ impl ParserConfig {
     /// / `--accept-signatures-from-pubkey` cmdline flags themselves (e.g. the
     /// non-attested dev gRPC server) but still need a `ParserConfig`. Unlike
     /// [`Self::abi_trust_from_options`], this can't fail. Payment verification is
-    /// disabled: no binary wires up `PaymentPolicy::Required` yet.
+    /// disabled; `parser_http_server` and `parser_grpc_server` build `Required`
+    /// from `--require-payment-marker-pubkey`.
     #[must_use]
     pub fn accept_unsigned() -> Self {
         Self::new(MetadataTrustPolicy::AcceptUnsigned, PaymentPolicy::Disabled)
