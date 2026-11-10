@@ -7,6 +7,7 @@ use solana_pubkey::Pubkey;
 
 mod accounts;
 mod arg_rendering;
+pub(crate) mod idl_accounts;
 mod instructions;
 mod priority_fee;
 pub(crate) mod receipt_token;
@@ -18,6 +19,7 @@ mod visualsign;
 
 pub use accounts::*;
 pub use arg_rendering::format_arg_value;
+pub(crate) use idl_accounts::{NamedIdlAccounts, name_idl_accounts, remaining_account_label};
 pub use instructions::*;
 #[cfg(test)]
 pub(crate) use priority_fee::BASE_FEE_LAMPORTS_PER_SIGNATURE;

@@ -129,6 +129,25 @@ fn parse_jupiter_instruction(data: &[u8]) -> Result<(), VisualSignError> {
 
 **Reference implementation:** [Jupiter swap preset](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-solana/src/presets/jupiter_swap/mod.rs)
 
+### Naming accounts
+
+To show *which* account each pubkey is ("owner", "reserve", ...), name the
+transaction's accounts from the instruction's IDL entry with the core helper
+`crate::core::name_idl_accounts` — never by zipping the instruction's accounts
+with the instruction's top-level IDL accounts by position. Anchor IDLs can
+nest a group of accounts inside one instruction entry (a composite `Accounts`
+struct used as a field); the transaction lists the group's members inline, so
+for an instruction with a group every top-level pairing shifts the names after
+the group onto the wrong addresses.
+
+`name_idl_accounts(instruction, &view.accounts)` flattens groups first
+(members are named `group.member`, nested groups `a.b.c`), pairs by position,
+and returns a `NamedIdlAccounts` with the named accounts plus any accounts the
+IDL does not name as `remaining` — render those as `remaining_account_label`
+fields ("Remaining Account N"). A crate-level parity test pins the helper's
+naming against `solana_parser`'s `create_accounts_map` for every preset IDL,
+so a preset using it can never disagree with the generic IDL renderer.
+
 ## Manual byte decoding
 
 ### When to use

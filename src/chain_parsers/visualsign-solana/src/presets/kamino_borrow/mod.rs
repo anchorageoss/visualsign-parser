@@ -3,14 +3,13 @@
 mod config;
 
 use crate::core::{
-    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionView, InstructionVisualizer, NamedIdlAccounts, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind, name_idl_accounts, remaining_account_label,
 };
 use config::KaminoBorrowConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -109,29 +108,25 @@ fn parse_kamino_borrow_instruction(
     })
 }
 
-fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> BTreeMap<String, String> {
-    let mut named_accounts = BTreeMap::new();
-
+/// Name the instruction's accounts against the IDL, flattening account groups
+/// (composite `Accounts` structs) so members and the accounts after a group
+/// land on the right addresses.
+fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> NamedIdlAccounts {
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
             .as_ref()
             .is_some_and(|disc| data.len() >= disc.len() && data[..disc.len()] == *disc)
     });
 
-    if let Some(idl_instruction) = idl_instruction {
-        for (index, account_str) in accounts.iter().enumerate() {
-            if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_str.clone());
-            }
-        }
+    match idl_instruction {
+        Some(instruction) => name_idl_accounts(instruction, accounts),
+        None => NamedIdlAccounts::default(),
     }
-
-    named_accounts
 }
 
 struct KaminoBorrowParsedInstruction {
     parsed: SolanaParsedInstructionData,
-    named_accounts: BTreeMap<String, String>,
+    named_accounts: NamedIdlAccounts,
 }
 
 fn build_parsed_fields(
@@ -170,8 +165,14 @@ fn build_parsed_fields(
         expanded_fields.push(f);
     }
 
-    for (account_name, account_address) in &instruction.named_accounts {
+    for (account_name, account_address) in &instruction.named_accounts.named {
         if let Ok(f) = create_text_field(account_name, account_address) {
+            expanded_fields.push(f);
+        }
+    }
+
+    for (index, pubkey) in instruction.named_accounts.remaining.iter().enumerate() {
+        if let Ok(f) = create_text_field(&remaining_account_label(index), pubkey) {
             expanded_fields.push(f);
         }
     }
@@ -281,5 +282,41 @@ mod tests {
         let accounts = vec![];
         let result = parse_kamino_borrow_instruction(&short_data, &accounts);
         assert!(result.is_err(), "Short data should return error");
+    }
+
+    #[test]
+    fn test_group_members_and_following_accounts_land_on_right_addresses() {
+        // socializeLossV2 nests two composite account groups
+        // (socializeLossAccounts, farmsAccounts) before the trailing
+        // lendingMarketAuthority and farmsProgram entries. Pairing top-level
+        // IDL accounts by position (the old bug) shifted every name from
+        // lendingMarketAuthority onward onto the wrong address.
+        let idl = get_kamino_borrow_idl().unwrap();
+        let ix = idl
+            .instructions
+            .iter()
+            .find(|i| i.name == "socializeLossV2")
+            .unwrap();
+        let accounts: Vec<String> = (0..9).map(|i| format!("addr{i}")).collect();
+
+        let named = build_named_accounts(ix.discriminator.as_ref().unwrap(), &idl, &accounts);
+
+        // Group members take the group's prefix and the group's positions.
+        assert_eq!(
+            named.named.get("socializeLossAccounts.lendingMarketOwner"),
+            Some(&"addr0".to_string())
+        );
+        assert_eq!(
+            named.named.get("farmsAccounts.reserveFarmState"),
+            Some(&"addr6".to_string())
+        );
+        // Accounts after the groups keep their own names at the flattened
+        // positions (5 + 2 = 7 group members come first).
+        assert_eq!(
+            named.named.get("lendingMarketAuthority"),
+            Some(&"addr7".to_string())
+        );
+        assert_eq!(named.named.get("farmsProgram"), Some(&"addr8".to_string()));
+        assert!(named.remaining.is_empty());
     }
 }
