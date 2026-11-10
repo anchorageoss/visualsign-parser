@@ -1,15 +1,6 @@
-//! Strict key sets for the JSON a signer approves.
-//!
-//! The defuse types decode with serde's default, which ignores keys a type does
-//! not declare. For a signing screen that is wrong: an undeclared key is part of
-//! the bytes the signature covers but never renders, and a misspelled key (a
-//! snake_case `callback_url` for NEP-413's `callbackUrl`) silently drops a field
-//! the wallet does sign. Every chain that renders these payloads decodes the
-//! typed value first, so serde still reports malformed input and repeated struct
-//! fields (a repeated key inside a map-valued field keeps its last value, as in
-//! the contract),
-//! then refuses any top-level key outside the type's declared set and, for an
-//! intents payload, any key an intent's own kind does not declare.
+//! Strict key sets for JSON a signer approves. serde ignores undeclared keys, but
+//! on a signing screen they would be signed unseen (and a misspelled key drops a
+//! field), so callers decode the typed value, then refuse undeclared keys.
 
 /// Top-level keys `DefusePayload<DefuseIntents>` reads: its own fields plus the
 /// flattened `DefuseIntents`.
@@ -35,15 +26,9 @@ const INTENT_TAG: &str = "intent";
 /// Optional fields every withdraw kind declares beyond its token and amount.
 const WITHDRAW_OPTIONAL_KEYS: [&str; 4] = ["memo", "msg", "storage_deposit", "min_gas"];
 
-/// The keys an intent of kind `kind` declares, besides its `intent` tag, as
-/// `defuse-core` (pinned in the workspace) decodes it: each struct's own
-/// fields, flattened ones included (a `transfer`'s `NotifyOnTransfer`), and
-/// serde aliases (`storage_deposit`'s `account_id`). `None` for a kind this
-/// build does not decode.
-///
-/// Keys nested inside a declared field are not listed: `tokens` and `diff`
-/// are maps keyed by asset id, and every entry renders; `state_init` renders
-/// only as "not fully decoded", so its contents are never shown as if read.
+/// Keys an intent of `kind` declares besides `intent`, per the pinned
+/// `defuse-core` (flattened fields and serde aliases included); `None` for a kind
+/// this build does not decode. Keys inside maps such as `tokens` are not listed.
 fn intent_keys(kind: &str) -> Option<Vec<&'static str>> {
     let withdraw = |own: &[&'static str]| {
         let mut keys = own.to_vec();
@@ -83,19 +68,13 @@ fn intent_keys(kind: &str) -> Option<Vec<&'static str>> {
     })
 }
 
-/// Like [`require_declared_keys`] for an intents payload: the envelope's keys
-/// must be in `envelope`, and every intent in its `intents` array may carry
-/// only the keys its kind declares.
-///
-/// The typed decode ignores an undeclared key inside an intent exactly as it
-/// does one on the envelope, so a `native_withdraw` carrying `"memo"` (a field
-/// that kind does not have) would be signed and never shown.
+/// [`require_declared_keys`] for an intents payload: envelope keys must be in
+/// `envelope`, and each intent may carry only its kind's keys.
 ///
 /// # Errors
 ///
-/// When `json` is not a JSON object, carries an undeclared envelope key, or an
-/// intent that is not an object, names no kind this build decodes, or carries
-/// an undeclared key.
+/// When `json` is not a JSON object, has an undeclared key, or has an intent of
+/// an unknown kind.
 pub fn require_declared_payload_keys(json: &[u8], envelope: &[&str]) -> Result<(), String> {
     require_declared_keys(json, envelope)?;
     let value: serde_json::Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
@@ -127,12 +106,11 @@ pub fn require_declared_payload_keys(json: &[u8], envelope: &[&str]) -> Result<(
     Ok(())
 }
 
-/// Top-level keys of the JSON object in `json` that are not in `allowed`, each
-/// quoted so a refusal can name them unambiguously.
+/// Top-level keys of `json` not in `allowed`, quoted.
 ///
 /// # Errors
 ///
-/// When `json` is not valid JSON or not a JSON object.
+/// When `json` is not a JSON object.
 pub fn undeclared_keys(json: &[u8], allowed: &[&str]) -> Result<Vec<String>, String> {
     let value: serde_json::Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
     let object = value.as_object().ok_or("not a JSON object")?;
@@ -143,12 +121,11 @@ pub fn undeclared_keys(json: &[u8], allowed: &[&str]) -> Result<Vec<String>, Str
         .collect())
 }
 
-/// `Ok(())` when every top-level key of `json` is in `allowed`, otherwise a
-/// refusal naming the undeclared keys.
+/// Refuses any top-level key of `json` outside `allowed`.
 ///
 /// # Errors
 ///
-/// When `json` is not a JSON object, or carries a key outside `allowed`.
+/// When `json` is not a JSON object or has an undeclared key.
 pub fn require_declared_keys(json: &[u8], allowed: &[&str]) -> Result<(), String> {
     let unknown = undeclared_keys(json, allowed)?;
     if unknown.is_empty() {
@@ -222,14 +199,7 @@ mod tests {
         );
     }
 
-    /// Each kind's declared set matches the type: an intent carrying every
-    /// declared key (optional ones set to non-default values, so none is
-    /// skipped on serialization) re-encodes with exactly those keys. A listed
-    /// key the type does not have, or a field the list misses, fails here.
-    /// `account_id`, a deserialize-only alias, is checked separately.
-    /// One intent of every kind, carrying every key its kind declares
-    /// (optional ones set to non-default values, so none is skipped on
-    /// serialization).
+    /// One intent of every kind, with every declared key set to a non-default value.
     fn every_kind_with_every_key() -> Vec<String> {
         const STATE_INIT: &str =
             r#"{"V1":{"code":{"hash":"11111111111111111111111111111111"},"data":{}}}"#;
@@ -253,10 +223,8 @@ mod tests {
         ]
     }
 
-    /// The defuse tag of every `Intent` variant. No wildcard arm: a defuse
-    /// bump that adds a variant fails to compile here until it is named, and
-    /// then [`every_intent_variant_has_a_declared_key_set`] fails until the
-    /// key table and the cases above cover it.
+    /// The tag of every `Intent` variant. No wildcard arm, so a new defuse variant
+    /// fails to compile here until it is named.
     fn intent_tag(intent: &Intent) -> &'static str {
         match intent {
             Intent::AddPublicKey(_) => "add_public_key",
@@ -294,6 +262,8 @@ mod tests {
         );
     }
 
+    /// Each kind's declared keys re-encode exactly: a listed key the type lacks,
+    /// or a field the list misses, fails here. `account_id` is checked separately.
     #[test]
     fn every_declared_intent_key_is_a_field_of_its_kind() {
         let cases = every_kind_with_every_key();

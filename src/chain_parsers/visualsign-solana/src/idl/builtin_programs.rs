@@ -177,7 +177,8 @@ fn builtin_idl_program_name(p: &ProgramType) -> &'static str {
     }
 }
 
-/// Program IDs registered by in-crate preset visualizers.
+/// Program IDs registered in-crate: by a preset visualizer, or by an IDL compiled in
+/// ahead of its preset (a [`preset_idl_configs`] entry).
 ///
 /// Built once at first use from `available_visualizers()` so new presets
 /// stay covered as they land. Each preset declares the program IDs it
@@ -200,6 +201,7 @@ fn preset_program_ids() -> &'static BTreeSet<&'static str> {
                 }
             }
         }
+        set.extend(preset_idl_configs().keys().map(String::as_str));
         set
     })
 }
@@ -207,7 +209,7 @@ fn preset_program_ids() -> &'static BTreeSet<&'static str> {
 /// Is the program ID one we refuse to let callers override?
 ///
 /// Superset of `canonical_name(...).is_some()` plus every program ID
-/// registered by an in-crate preset visualizer (Kamino, Meteora, Drift
+/// registered in-crate by a preset visualizer or a compiled-in IDL (Kamino, Meteora, Drift
 /// preset paths, `swig_wallet`, `dflow_aggregator`, etc.). Even when a
 /// preset has no canonical string (and thus drives its own rendering),
 /// caller IDL bodies for that program ID must still be rejected so a
@@ -275,8 +277,8 @@ pub fn is_reserved_canonical_name(name: &str) -> bool {
     .any(|p| builtin_idl_program_name(p) == name)
 }
 
-/// The IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID
-/// included here so that decode path can use these idls.
+/// The in-crate Anchor IDL JSON, keyed by program ID, for the decode path: every
+/// IDL-backed preset's IDL, plus any IDL compiled in ahead of its preset.
 fn preset_idl_configs()
 -> &'static std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
     use solana_parser::{CustomIdl, CustomIdlConfig};
@@ -285,6 +287,15 @@ fn preset_idl_configs()
         OnceLock::new();
     PRESET_IDL_CONFIGS.get_or_init(|| {
         const ENTRIES: &[(&str, &str)] = &[
+            // Abra: compiled in ahead of its preset; see `preset_program_ids`.
+            (
+                "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+                include_str!("../presets/abra/abrafi_backed_token.json"),
+            ),
+            (
+                "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+                include_str!("../presets/abra/abrafi_staking_liquid.json"),
+            ),
             (
                 "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
                 include_str!("../presets/dflow_aggregator/dflow_aggregator.json"),
@@ -328,6 +339,10 @@ fn preset_idl_configs()
             (
                 "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
                 include_str!("../presets/kamino_vault/kamino_vault.json"),
+            ),
+            (
+                "MFv2hWf31Z9kbCa1snEPdcgp7X3GK4Y9EtyMkRxBUGA",
+                include_str!("../presets/marginfi/marginfi.json"),
             ),
             (
                 "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
@@ -417,6 +432,7 @@ pub fn preset_idl_records()
                         program_type: None,
                         custom_idl: Some(idl),
                         custom_idl_json: Some(json.clone()),
+                        custom_idl_hash: None,
                         override_builtin: true,
                         is_preset: true,
                     },
@@ -529,6 +545,30 @@ mod tests {
         assert!(!preset_ids.contains("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"));
     }
 
+    /// Every IDL file under `presets/` must have an `ENTRIES` line, or the intermediate output
+    /// decodes nothing for that program while `registered_source` still says `Preset`.
+    #[test]
+    fn preset_idls_are_registered() {
+        let registered: Vec<&str> = preset_idl_configs()
+            .values()
+            .filter_map(|config| match &config.idl {
+                solana_parser::CustomIdl::Json(json) => Some(json.as_str()),
+                solana_parser::CustomIdl::Parsed(_) => None,
+            })
+            .collect();
+        for (name, json) in crate::PRESET_IDLS {
+            assert!(
+                registered.contains(json),
+                "preset {name} has an IDL file with no ENTRIES line"
+            );
+        }
+        assert_eq!(
+            registered.len(),
+            crate::PRESET_IDLS.len(),
+            "an ENTRIES line has no IDL file under presets/"
+        );
+    }
+
     #[test]
     fn reserved_names_are_blocked() {
         assert!(is_reserved_canonical_name("System Program"));
@@ -544,5 +584,36 @@ mod tests {
         // with a rendered canonical label.
         assert!(!is_reserved_canonical_name("system program"));
         assert!(!is_reserved_canonical_name("System Program "));
+    }
+
+    /// An IDL compiled in ahead of its preset registers and trusts its program like a preset.
+    #[test]
+    fn compiled_in_abra_idls_register_their_programs() {
+        for program_id in [
+            "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+            "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+        ] {
+            assert!(preset_program_ids().contains(program_id), "{program_id}");
+            assert!(is_trusted_program(program_id), "{program_id}");
+            assert_eq!(
+                registered_source(program_id, &std::collections::BTreeMap::new()),
+                crate::intermediate::RegisteredSource::Preset,
+                "{program_id}"
+            );
+            let idl = preset_idl_records()
+                .get(program_id)
+                .and_then(|record| record.custom_idl.as_ref());
+            assert!(
+                idl.is_some_and(|idl| !idl.instructions.is_empty()),
+                "{program_id} has a decoded IDL with instructions"
+            );
+            for instruction in idl
+                .map(|idl| idl.instructions.as_slice())
+                .unwrap_or_default()
+            {
+                let len = instruction.discriminator.as_ref().map_or(0, Vec::len);
+                assert_eq!(len, 8, "{program_id} {}", instruction.name);
+            }
+        }
     }
 }

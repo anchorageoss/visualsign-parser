@@ -2,6 +2,7 @@
 name = "tvc-deploy"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.94"
 description = "Standalone TVC deploy helper for parser_app (operator-key minting + deploy orchestration)"
 
 [[bin]]

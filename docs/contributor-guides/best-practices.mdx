@@ -32,13 +32,44 @@ cargo depgraph --root visualsign-ethereum
 
 **Best practice:** If the complexity and transitive dependency count is too high, consider re-implementing in a simpler way and use the external dependency only in tests for validation.
 
+### Pin and validate every dependency
+
+Every dependency is strictly pinned and validated before it is added or bumped. This covers crates, GitHub Actions, container images, downloaded binaries and the tools CI or `make` runs. A dependency that is not pinned can change under a reviewed commit. A dependency that is not validated is code nobody looked at.
+
+**Pin exactly.** A pin names one artifact, and CI and local runs use the same one.
+
+| Kind | Pin |
+| --- | --- |
+| Rust crates | Commit `Cargo.lock` for every workspace, including `tools/*` and `fuzz/`. Build and test with `--locked`. Git dependencies pin a full commit `rev`, not a branch or tag. |
+| `cargo install` | `--locked` and an exact version: `cargo install cargo-fuzz --locked --version =0.13.1`. |
+| GitHub Actions | A full commit SHA with the release as a comment: `uses: actions/checkout@<40-hex sha> # v5.0.0`. `zizmor` checks this. |
+| Container images | Tag and index digest: `image:v1.2.3@sha256:<digest>`. Applies to Containerfiles, workflows, scripts and Makefile targets. |
+| Downloaded binaries | An exact version and its SHA-256, checked before the binary runs. See `.github/protoc.env` and `scripts/install-protoc.sh`. |
+
+Not allowed:
+- `latest` or any floating tag.
+- Version ranges outside `Cargo.toml` semver requirements.
+- `curl … | sh` installers.
+- Falling back to whatever tool is on `PATH` for a check CI also runs. A local tool can be used only through an explicit opt-in, as with `make lint-shell`'s `SHELLCHECK=shellcheck`.
+
+**Validate before adding or bumping.** Record what you checked in the PR description.
+
+1. **Need.** The dependency passes [Minimize dependencies aggressively](#minimize-dependencies-aggressively). A bump has a reason: a fix, an advisory or a feature we use.
+2. **Age.** The pinned release is at least 7 days old and not yanked. The one exception is the minimum version that fixes a published advisory.
+3. **Provenance.** The publisher is the project's usual owner. For crates, `.cargo_vcs_info.json` matches an upstream tag. For images and binaries, the digest or hash comes from the upstream release, not from a mirror.
+4. **Advisories.** `cargo audit` reports no new advisories. A known advisory that remains is named in the PR with its follow-up.
+5. **New code.** Every new transitive crate is accounted for with `cargo tree -i <crate>`, and build scripts and proc-macros are read, because they run at build time.
+6. **Build.** Every affected workspace builds and tests with `--locked`, including ones CI doesn't cover on that PR (for example `tools/tvc-deploy`).
+
+Dependabot PRs follow the same checks before they are approved.
+
 ### Test thoroughly
 
 Ensure all changes and refactors are tested thoroughly. Use `cargo-llvm-cov` for test coverage:
 
 ```bash
-# Install cargo-llvm-cov (one-time setup)
-cargo install cargo-llvm-cov
+# Install cargo-llvm-cov (one-time setup), pinned per "Pin and validate every dependency"
+cargo install cargo-llvm-cov --locked --version =0.9.1
 
 # Generate HTML report and open in browser
 cargo llvm-cov --workspace --open

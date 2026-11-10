@@ -1,43 +1,19 @@
-//! Solana's entry to the NEAR Intents decoder.
+//! Solana's entry to the NEAR Intents decoder ([`visualsign_intents`]).
 //!
-//! A Solana wallet signs a `DefusePayload` directly under the `raw_ed25519`
-//! standard, where the signature covers the message bytes themselves. So the
-//! intents arrive as the message, with no framing around them -- unlike NEAR,
-//! where they arrive inside a NEP-413 envelope or an `execute_intents` call.
+//! Under `raw_ed25519` a Solana wallet signs the `DefusePayload` bytes directly,
+//! so intents arrive as the message itself. Not under `presets/`, which holds
+//! program-id visualizers that `build.rs` registers.
 //!
-//! The decoding is [`visualsign_intents`], shared with every chain that can
-//! carry a payload. What is Solana-specific is only recognizing one here.
+//! Behind the `intents` feature, off by default, because `near-sdk` links the C
+//! library `secp256k1-sys`. Without it, an intent-shaped message is refused.
 //!
-//! Deliberately not under `presets/`. In this crate that directory means
-//! instruction visualizers dispatched by program id -- `build.rs` scans it and
-//! registers a `<Name>Visualizer` from each subdirectory. Intents arrive in an
-//! off-chain message, never as an instruction, so they are reached from the
-//! message path instead and would be registered against a program that never
-//! matches.
-//!
-//! Behind the `intents` feature, off by default: `visualsign-intents` depends
-//! on `near-sdk`, which pulls `near-crypto` -> `secp256k1-sys`, a C library
-//! that a `--no-default-features` build of this crate otherwise avoids
-//! entirely. Without the feature, a message shaped
-//! like an intents payload is refused rather than shown as text (see
-//! `message_to_visual_sign_payload`).
-//!
-//! A remaining limitation: a Solana wallet signs message bytes as they are, so
-//! a message can mean something to another verifier of the same key.
-//!
-//! - A 32-byte message can be the SHA-256 prehash a NEP-413, SEP-53 or TON
-//!   Connect verifier checks. The message path refuses a 32-byte message
-//!   unless it is all ASCII letters and digits.
-//! - A message of 69 bytes or more can be the signed bytes of a `webauthn`
-//!   (Ed25519) payload: defuse verifies that signature directly over
-//!   `authenticator_data || sha256(client_data_json)` and checks neither the
-//!   rpIdHash nor the origin, so a dApp can grind the trailing digest to look
-//!   like text. No length or charset rule bounds this. The message path flags
-//!   such a message with a warning (see `is_webauthn_shaped`), and the wallet
-//!   must treat a flagged message as do-not-sign unless it means to make a
-//!   NEAR Intents WebAuthn authorization.
-//!
-//! Only the wallet, which sees what the dApp asked for, can rule either out.
+//! Limitations, since a Solana wallet signs message bytes as they are:
+//! - A 32-byte message can be a NEP-413, SEP-53 or TON Connect prehash; the
+//!   message path refuses one unless it is all ASCII letters and digits.
+//! - A message of 69 bytes or more can be a NEAR Intents `webauthn` signature;
+//!   the message path flags it (see `is_webauthn_shaped`). About 3 in 8 long
+//!   texts match, so presentation is the wallet's call. The flag covers the
+//!   message path only, not other signing paths such as transactions.
 
 use std::sync::Arc;
 
@@ -46,18 +22,10 @@ use visualsign::registry::LayeredRegistry;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign_intents::{NearIntentsError, NearTokenRegistry, RenderedEnvelope};
 
-/// Render a message as NEAR Intents, or `Ok(None)` when it is not one.
-///
-/// `Ok(None)` is reserved for a message that is not a `DefusePayload` at all,
-/// which is the ordinary case -- a sign-in challenge, a note. A message that is
-/// intents but fails to render is an error rather than a quiet fallback to text,
-/// so a signer is never shown the raw JSON of something the parser partly
-/// understood.
-///
-/// Assets resolve from the compiled-in seed table only. `ChainMetadata` is a
-/// oneof, so a Solana request carries `SolanaMetadata` and has no field in which
-/// to send NEAR token mappings; an asset outside the seed table renders as its
-/// asset id, marked unresolved.
+/// Render a message as NEAR Intents, or `Ok(None)` when it is not a
+/// `DefusePayload`. A payload that fails to render is an error, never text.
+/// Assets resolve from the compiled-in seed table only (`SolanaMetadata` carries
+/// no NEAR token mappings), so an unknown asset renders unresolved.
 pub fn try_render(
     message: &[u8],
     options: &VisualSignOptions,

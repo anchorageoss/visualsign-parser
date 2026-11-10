@@ -2,13 +2,14 @@ use std::collections::BTreeMap;
 
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
-use solana_parser::solana::structs::SolanaAccount;
+use solana_parser::solana::structs::{Idl, IdlInstruction, SolanaAccount};
 use solana_pubkey::Pubkey;
 
 mod accounts;
 mod arg_rendering;
 mod instructions;
 mod priority_fee;
+pub(crate) mod receipt_token;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod summary_tests;
@@ -256,6 +257,39 @@ pub fn is_unresolved_placeholder(account: &str) -> bool {
     account.starts_with("unresolved(")
 }
 
+/// The IDL instruction whose discriminator prefixes `data`, first in IDL order.
+pub(crate) fn find_idl_instruction<'a>(idl: &'a Idl, data: &[u8]) -> Option<&'a IdlInstruction> {
+    idl.instructions.iter().find(|instruction| {
+        instruction
+            .discriminator
+            .as_ref()
+            .is_some_and(|disc| data.get(..disc.len()) == Some(disc.as_slice()))
+    })
+}
+
+/// Accounts named positionally after an IDL instruction. `complete` is false when fewer
+/// accounts than the IDL lists were passed (omitted optionals), so names may be misaligned.
+pub(crate) struct NamedAccounts {
+    pub accounts: BTreeMap<String, String>,
+    pub complete: bool,
+}
+
+pub(crate) fn name_idl_accounts(
+    instruction: &IdlInstruction,
+    accounts: &[String],
+) -> NamedAccounts {
+    let named = instruction
+        .accounts
+        .iter()
+        .zip(accounts)
+        .map(|(idl_account, account)| (idl_account.name.clone(), account.clone()))
+        .collect();
+    NamedAccounts {
+        accounts: named,
+        complete: accounts.len() >= instruction.accounts.len(),
+    }
+}
+
 impl InstructionView {
     pub fn from_context(context: &VisualizerContext) -> Self {
         let program_id = resolve_program_display(context);
@@ -348,6 +382,16 @@ pub trait InstructionVisualizer {
         None
     }
 
+    /// Both outputs at once; a visualizer whose summary shares the field's decode overrides
+    /// this to decode once.
+    fn visualize_with_summary(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<(AnnotatedPayloadField, Option<TransactionSummary>), VisualSignError> {
+        let field = self.visualize_tx_commands(context)?;
+        Ok((field, self.transaction_summary(context)))
+    }
+
     /// True when the instruction only prepares the transaction (compute budget, nonce advance,
     /// own ATA creation). Anything that moves funds to another party must stay `false`.
     fn is_infrastructure(&self, _context: &VisualizerContext) -> bool {
@@ -388,11 +432,11 @@ pub fn visualize_with_any(
         }
 
         Some(
-            v.visualize_tx_commands(context)
-                .map(|field| VisualizeResult {
+            v.visualize_with_summary(context)
+                .map(|(field, summary)| VisualizeResult {
                     field,
                     kind: v.kind(),
-                    summary: v.transaction_summary(context),
+                    summary,
                     infrastructure: v.is_infrastructure(context),
                 }),
         )
