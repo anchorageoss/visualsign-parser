@@ -746,7 +746,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                 )?
             }
             SolanaTransactionWrapper::Message(envelope) => {
-                message_to_visual_sign_payload(envelope)?
+                message_to_visual_sign_payload(envelope, &options)?
             }
         };
 
@@ -1093,13 +1093,48 @@ fn check_message_domain(message: &[u8]) -> Result<(), VisualSignError> {
     Ok(())
 }
 
+/// Shortest authenticator data defuse's WebAuthn check accepts: a 32-byte
+/// rpIdHash, a flags byte and a 4-byte signature counter.
+const WEBAUTHN_MIN_AUTHENTICATOR_DATA_LEN: usize = 37;
+
+/// Index of the flags byte in WebAuthn authenticator data.
+const WEBAUTHN_FLAGS_INDEX: usize = 32;
+
+/// Whether a signature over `message` can also be a NEAR Intents `webauthn`
+/// signature for the same key. Mirrors defuse's `verify_flags` (`near/intents`
+/// `defuse/v0.4.2`): at least 37 + 32 bytes, and byte 32 has UP set and not BS
+/// without BE. defuse checks neither the rpIdHash nor the origin, so no length or
+/// charset rule excludes this; the message is flagged, not refused.
+fn is_webauthn_shaped(message: &[u8]) -> bool {
+    const UP: u8 = 1 << 0;
+    const BE: u8 = 1 << 3;
+    const BS: u8 = 1 << 4;
+    if message.len() < WEBAUTHN_MIN_AUTHENTICATOR_DATA_LEN + PREHASH_LEN {
+        return false;
+    }
+    message
+        .get(WEBAUTHN_FLAGS_INDEX)
+        .is_some_and(|&flags| flags & UP == UP && !(flags & BE == 0 && flags & BS == BS))
+}
+
+/// Text of the warning a [WebAuthn-shaped](is_webauthn_shaped) message carries.
+const WEBAUTHN_SHAPE_WARNING: &str = "These bytes can also authorize a NEAR Intents WebAuthn \
+     signature: a signature over them may be accepted as a passkey authorization of a NEAR \
+     Intents payload for this key's account. Do not sign unless that is intended.";
+
+/// Rule name of the `Diagnostic` a WebAuthn-shaped message carries.
+#[cfg(feature = "diagnostics")]
+const WEBAUTHN_SHAPE_RULE: &str = "message::near_intents_webauthn_shape";
+
 /// Render an off-chain message.
 ///
 /// The text is escaped before it renders: it is caller-supplied and reaches a
 /// signer's screen, where an unescaped line separator could forge a second
 /// field.
+#[cfg_attr(not(feature = "intents"), allow(unused_variables))]
 fn message_to_visual_sign_payload(
     envelope: &OffChainMessage,
+    options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     // `OffChainMessage` has public fields, so an embedder can build the wrapper
     // without the envelope decoder. Check the address here too, so a
@@ -1112,15 +1147,15 @@ fn message_to_visual_sign_payload(
     }
     // Here rather than at decode, so a directly built wrapper is held to it too.
     check_message_domain(envelope.message.as_bytes())?;
-    Ok(SignablePayload::new(
-        0,
-        "Solana Message".to_string(),
-        None,
-        vec![
-            create_text_field("Message", &escape_display_text(&envelope.message))?
-                .signable_payload_field,
-            // Not escaped: checked above to be a base58 Solana address, and
-            // base58 has no character that needs escaping.
+
+    // Render the intents, not the JSON that encodes them. The envelope's Solana
+    // address keeps the plain-message label ([`SIGNING_ADDRESS_LABEL`]); the
+    // intents' "Signer" is the NEAR `signer_id`. No WebAuthn-shape check: a payload
+    // that decodes ends in JSON closing bytes, so a chosen trailing digest is impractical.
+    #[cfg(feature = "intents")]
+    if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
+        let mut fields = rendered.fields;
+        fields.push(
             create_address_field(
                 SIGNING_ADDRESS_LABEL,
                 &envelope.signer_address,
@@ -1130,9 +1165,83 @@ fn message_to_visual_sign_payload(
                 None,
             )?
             .signable_payload_field,
-        ],
+        );
+        return Ok(SignablePayload::new(
+            0,
+            rendered.title,
+            None,
+            fields,
+            MESSAGE_PAYLOAD_TYPE.to_string(),
+        ));
+    }
+    // A build without the decoder can't show what such a message does, and
+    // showing its JSON as a harmless "Solana Message" would let it be signed
+    // as text. Refused instead.
+    #[cfg(not(feature = "intents"))]
+    if looks_like_intents(envelope.message.as_bytes()) {
+        return Err(VisualSignError::ConversionError(
+            "the message is shaped like a NEAR Intents payload, and this build was compiled \
+             without the `intents` feature that renders one"
+                .to_string(),
+        ));
+    }
+    let mut fields = Vec::new();
+    // Flagged, not refused: ordinary text matches this shape often, and only
+    // the wallet knows whether the dApp meant to ask for a WebAuthn
+    // authorization. First, so the signer reads it before the text.
+    let webauthn_shaped = is_webauthn_shaped(envelope.message.as_bytes());
+    if webauthn_shaped {
+        fields.push(create_text_field("Warning", WEBAUTHN_SHAPE_WARNING)?.signable_payload_field);
+    }
+    fields.push(
+        create_text_field("Message", &escape_display_text(&envelope.message))?
+            .signable_payload_field,
+    );
+    // Not escaped: checked above to be a base58 Solana address, and base58 has
+    // no character that needs escaping.
+    fields.push(
+        create_address_field(
+            SIGNING_ADDRESS_LABEL,
+            &envelope.signer_address,
+            None,
+            None,
+            None,
+            None,
+        )?
+        .signable_payload_field,
+    );
+    #[cfg(feature = "diagnostics")]
+    if webauthn_shaped {
+        fields.push(
+            visualsign::field_builders::create_diagnostic_field(
+                WEBAUTHN_SHAPE_RULE,
+                "message",
+                visualsign::lint::Severity::Warn,
+                WEBAUTHN_SHAPE_WARNING,
+                None,
+            )
+            .signable_payload_field,
+        );
+    }
+    Ok(SignablePayload::new(
+        0,
+        "Solana Message".to_string(),
+        None,
+        fields,
         MESSAGE_PAYLOAD_TYPE.to_string(),
     ))
+}
+
+/// Same rule as `visualsign_intents::is_intent_shaped`, kept here so a build
+/// without the `intents` feature can still refuse one; a test checks they agree.
+#[cfg(any(not(feature = "intents"), test))]
+fn looks_like_intents(message: &[u8]) -> bool {
+    const REQUIRED: [&str; 4] = ["signer_id", "verifying_contract", "deadline", "nonce"];
+    serde_json::from_slice::<serde_json::Value>(message).is_ok_and(|value| {
+        value.as_object().is_some_and(|o| {
+            o.contains_key("intents") || REQUIRED.iter().all(|k| o.contains_key(*k))
+        })
+    })
 }
 
 /// `payload_type` for an off-chain message: what the signature covers is a
@@ -4210,6 +4319,40 @@ mod tests {
     }
 }
 
+/// A message whose signature is also a valid `webauthn` signature for the
+/// `DefusePayload` here, since defuse checks neither the rpIdHash nor the origin.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod webauthn_vector {
+    use solana_sha256_hasher::hash;
+
+    /// The authenticator data: 32 bytes of text where the rpIdHash would be,
+    /// the flags byte `!` (0x21: UP set, BE and BS clear), and 4 bytes where
+    /// the signature counter would be.
+    pub(super) const AUTHENTICATOR_DATA: &[u8; 37] = b"Sign in to example.app with code! 42 ";
+
+    /// The `DefusePayload` the signature authorizes: a transfer of 1 wNEAR out
+    /// of the implicit account of [`SIGNING_SEED`]'s key. Only the `intents`
+    /// build verifies the signature, so only it uses this.
+    #[cfg(feature = "intents")]
+    pub(super) const PAYLOAD: &str = r#"{"signer_id":"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c","verifying_contract":"intents.near","deadline":"2030-01-01T00:00:00Z","nonce":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","intents":[{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1000000000000000000000000"}}]}"#;
+
+    /// Client data for [`PAYLOAD`]. The number in `origin` was ground until the
+    /// SHA-256 of this text was valid UTF-8, so the message fits a JSON string.
+    pub(super) const CLIENT_DATA_JSON: &str = r#"{"type":"webauthn.get","challenge":"tuGYunE2dMgi_4ikey50MfmnPil7VzPyCIAn_IgDqq8","origin":"https://example.app/26657251"}"#;
+
+    /// The ed25519 seed of the key that signs.
+    #[cfg(feature = "intents")]
+    pub(super) const SIGNING_SEED: [u8; 32] = [7; 32];
+
+    /// `AUTHENTICATOR_DATA || sha256(CLIENT_DATA_JSON)`: 69 bytes.
+    pub(super) fn message() -> String {
+        let mut bytes = AUTHENTICATOR_DATA.to_vec();
+        bytes.extend_from_slice(&hash(CLIENT_DATA_JSON.as_bytes()).to_bytes());
+        String::from_utf8(bytes).expect("CLIENT_DATA_JSON was chosen so its digest is UTF-8")
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod solana_message_tests {
@@ -4610,6 +4753,106 @@ mod solana_message_tests {
             .map(|result| result.payload)
     }
 
+    fn has_webauthn_warning(payload: &SignablePayload) -> bool {
+        payload.fields.iter().any(|f| {
+            matches!(f, SignablePayloadField::TextV2 { common, text_v2 }
+                if common.label == "Warning" && text_v2.text == WEBAUTHN_SHAPE_WARNING)
+        })
+    }
+
+    /// A message of `len` ASCII bytes with `flags` at the WebAuthn flags index.
+    fn with_flags_byte(flags: u8, len: usize) -> String {
+        let mut bytes = vec![b'a'; len];
+        bytes[WEBAUTHN_FLAGS_INDEX] = flags;
+        String::from_utf8(bytes).expect("ASCII")
+    }
+
+    /// A WebAuthn-shaped message still renders as a message, with a warning first.
+    #[test]
+    fn a_webauthn_shaped_message_renders_with_a_warning() {
+        let message = webauthn_vector::message();
+        let payload = convert_message(&message).expect("flagged, not refused");
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(payload.payload_type, "SolanaMessage");
+        assert_eq!(payload.fields[0].label(), "Warning");
+        assert!(has_webauthn_warning(&payload));
+        assert_eq!(
+            unescape_display_text(&message_text(&payload)).as_deref(),
+            Some(message.as_str())
+        );
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+        payload.validate_charset().expect("charset");
+        #[cfg(feature = "diagnostics")]
+        assert!(payload.fields.iter().any(|f| matches!(
+            f,
+            SignablePayloadField::Diagnostic { diagnostic, .. }
+                if diagnostic.rule == WEBAUTHN_SHAPE_RULE && diagnostic.level == "warn"
+        )));
+    }
+
+    /// 37 bytes of authenticator data plus a 32-byte digest is the shortest
+    /// message defuse's check can accept.
+    #[test]
+    fn the_webauthn_shape_starts_at_69_bytes() {
+        for len in [33, 37, 68] {
+            let payload = convert_message(&with_flags_byte(b'!', len)).expect("renders");
+            assert!(!has_webauthn_warning(&payload), "len {len}");
+            assert_eq!(payload.fields.len(), 2, "len {len}");
+        }
+        for len in [69, 70, 500] {
+            let payload = convert_message(&with_flags_byte(b'!', len)).expect("renders");
+            assert!(has_webauthn_warning(&payload), "len {len}");
+        }
+    }
+
+    /// The flags byte is checked as defuse's `verify_flags` checks it: UP
+    /// (0x01) set, and BS (0x10) not set without BE (0x08). UV is not required.
+    #[test]
+    fn the_webauthn_shape_follows_defuses_flags_check() {
+        for (flags, flagged) in [
+            (b'!', true),  // 0x21: UP
+            (b'A', true),  // 0x41: UP
+            (b'%', true),  // 0x25: UP, UV
+            (b')', true),  // 0x29: UP, BE
+            (b'9', true),  // 0x39: UP, BE, BS
+            (b'1', false), // 0x31: UP, BS without BE
+            (b'q', false), // 0x71: UP, BS without BE
+            (b' ', false), // 0x20: no UP
+            (b'b', false), // 0x62: no UP
+        ] {
+            assert_eq!(
+                is_webauthn_shaped(&[vec![b'a'; 32], vec![flags; 37]].concat()),
+                flagged
+            );
+            let payload = convert_message(&with_flags_byte(flags, 69)).expect("renders");
+            assert_eq!(has_webauthn_warning(&payload), flagged, "{flags:#04x}");
+        }
+        for flags in 0..=u8::MAX {
+            let defuse = flags & 0x01 == 0x01 && !(flags & 0x08 == 0 && flags & 0x10 == 0x10);
+            let mut bytes = vec![b'a'; 69];
+            bytes[WEBAUTHN_FLAGS_INDEX] = flags;
+            assert_eq!(is_webauthn_shaped(&bytes), defuse, "{flags:#04x}");
+        }
+    }
+
+    /// Ordinary text is flagged whenever its byte 32 passes the check: the
+    /// rule is the shape, not whether the text looks crafted.
+    #[test]
+    fn ordinary_long_text_is_flagged_by_its_byte_32() {
+        // Byte 32 is `i` (0x69: UP, BE).
+        let flagged = "Welcome to Example. Please sign in to prove you own this wallet address.";
+        assert_eq!(flagged.as_bytes()[WEBAUTHN_FLAGS_INDEX], b'i');
+        assert!(has_webauthn_warning(
+            &convert_message(flagged).expect("renders")
+        ));
+        // 69 bytes, and byte 32 is `r` (0x72: no UP).
+        let plain = "Welcome to Example. Please confirm you own this wallet address today.";
+        assert_eq!(plain.as_bytes()[WEBAUTHN_FLAGS_INDEX], b'r');
+        let payload = convert_message(plain).expect("renders");
+        assert!(!has_webauthn_warning(&payload));
+        assert_eq!(payload.fields.len(), 2);
+    }
+
     /// A 32-byte message may be the SHA-256 prehash a NEP-413, SEP-53 or TON
     /// Connect verifier checks a signature over, so it is refused unless it is
     /// all ASCII letters and digits, a set a digest essentially never falls in.
@@ -4714,5 +4957,359 @@ mod solana_message_tests {
         let legacy = bincode::serialize(&utf8_transfer_message()).expect("serialize");
         assert!(check_message_domain(&legacy).is_err());
         assert!(check_message_domain(b"Sign in to app.example.com").is_ok());
+    }
+}
+
+/// Without the `intents` feature there is no decoder, so a message shaped like
+/// an intents payload (a cancel included) is refused rather than shown as text.
+#[cfg(all(test, not(feature = "intents")))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_message_without_intents_tests {
+    use super::*;
+    use serde_json::json;
+
+    const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
+
+    fn convert(message: &str) -> Result<SignablePayload, VisualSignError> {
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .map(|result| result.payload)
+    }
+
+    #[test]
+    fn an_intents_shaped_message_is_refused() {
+        for message in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1"}]}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"intents":[]}"#,
+        ] {
+            let err = convert(message).expect_err("an intents payload must not render as text");
+            assert!(err.to_string().contains("`intents` feature"), "{err}");
+        }
+        assert_eq!(
+            convert(r#"{"greeting":"hi"}"#).expect("text").title,
+            "Solana Message"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "intents"))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_intents_message_tests {
+    use super::*;
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use ed25519_dalek::{Signer, SigningKey};
+    use serde_json::json;
+    use std::sync::Arc;
+    use visualsign::registry::LayeredRegistry;
+    use visualsign_intents::NearTokenRegistry;
+    use visualsign_intents::network::SettlementNetwork;
+
+    /// The Solana key that signs. Base58, 32 bytes.
+    const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
+
+    /// A `DefusePayload` withdrawing 1 wNEAR, as a Solana wallet signs it under
+    /// `raw_ed25519`: the payload is the message itself.
+    const INTENTS: &str = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+    fn render(message: &str) -> SignablePayload {
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload
+    }
+
+    fn labels(payload: &SignablePayload) -> Vec<String> {
+        payload
+            .fields
+            .iter()
+            .map(|f| f.label().to_string())
+            .collect()
+    }
+
+    fn field_text(payload: &SignablePayload, label: &str) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
+                    Some(address_v2.address.clone())
+                }
+                _ => None,
+            })
+            // A static message: CodeQL treats anything derived from the payload
+            // as tainted, so the label is not interpolated.
+            .expect("no field with the requested label")
+    }
+
+    /// The bytes of [`webauthn_vector::message`], signed by a Solana wallet as
+    /// a message, make a `webauthn` payload that the intents verifier accepts
+    /// for a transfer out of the key's implicit account.
+    #[test]
+    fn a_webauthn_shaped_message_signs_a_webauthn_intents_payload() {
+        let message = webauthn_vector::message();
+        assert_eq!(message.len(), 69);
+        let key = SigningKey::from_bytes(&webauthn_vector::SIGNING_SEED);
+        let signature = key.sign(message.as_bytes());
+        let public_key = format!(
+            "ed25519:{}",
+            bs58::encode(key.verifying_key().as_bytes()).into_string()
+        );
+        let signed = json!({
+            "standard": "webauthn",
+            "payload": webauthn_vector::PAYLOAD,
+            "public_key": public_key,
+            "signature": format!("ed25519:{}", bs58::encode(signature.to_bytes()).into_string()),
+            "client_data_json": webauthn_vector::CLIENT_DATA_JSON,
+            "authenticator_data": URL_SAFE_NO_PAD.encode(webauthn_vector::AUTHENTICATOR_DATA),
+        });
+        let args = json!({ "signed": [signed] }).to_string();
+        let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        let fields = visualsign_intents::try_decode_execute_intents(
+            args.as_bytes(),
+            &registry,
+            &VisualSignOptions::default(),
+            SettlementNetwork::Mainnet,
+        )
+        .expect("decode");
+        let text = |label: &str| {
+            fields.iter().find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+        };
+        let implicit = hex::encode(key.verifying_key().as_bytes());
+        assert_eq!(
+            text("Signature"),
+            Some(format!(
+                "valid for key {public_key} (derives signer_id {implicit})"
+            ))
+        );
+        assert_eq!(text("Signer"), Some(implicit));
+        assert_eq!(text("To"), Some("attacker.near".to_string()));
+
+        // The same bytes, sent to the parser as a Solana message, still render
+        // as a message, flagged so the signer sees what else they authorize.
+        let payload = render(&message);
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(payload.payload_type, "SolanaMessage");
+        assert_eq!(field_text(&payload, "Warning"), WEBAUTHN_SHAPE_WARNING);
+    }
+
+    /// A message carrying intents renders as intents, and the Solana key that
+    /// will sign still shows. The intents' own "Signer" is the payload's NEAR
+    /// account, so the signing key needs its own field to be visible at all.
+    #[test]
+    fn intents_message_shows_the_signing_address() {
+        let payload = render(INTENTS);
+        let labels = labels(&payload);
+        assert!(
+            labels.iter().any(|l| l == "Intent"),
+            "not rendered as intents: {labels:?}"
+        );
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+        assert_eq!(field_text(&payload, "Signer"), "alice.near");
+        // What the signature covers is a message, whatever it carries.
+        assert_eq!(payload.payload_type, "SolanaMessage");
+    }
+
+    /// The signing address appears once, after the intents' own fields.
+    #[test]
+    fn signing_address_is_the_last_field_and_appears_once() {
+        let labels = labels(&render(INTENTS));
+        assert_eq!(labels.iter().filter(|l| *l == "Signing Address").count(), 1);
+        assert_eq!(labels.last().map(String::as_str), Some("Signing Address"));
+    }
+
+    /// The parser validates the payload's charset before returning it, so the
+    /// intents render must pass that check with the extra field in place.
+    #[test]
+    fn intents_message_passes_charset_validation() {
+        render(INTENTS).validate_charset().expect("charset");
+    }
+
+    /// Intents with an undeclared key are refused, not shown as text: the key would
+    /// be signed unseen.
+    #[test]
+    fn intents_with_an_undeclared_key_are_refused() {
+        let mut intents: serde_json::Value = serde_json::from_str(INTENTS).expect("json");
+        intents["memo"] = json!("hidden");
+        let envelope =
+            json!({ "message": intents.to_string(), "signerAddress": SIGNER }).to_string();
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+            VisualSignOptions::default(),
+        );
+        let Err(err) = result else {
+            panic!("expected a refusal for an undeclared intents key");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+    }
+
+    /// A key an intent's kind does not declare (`memo` on `native_withdraw`) is
+    /// refused, not dropped.
+    #[test]
+    fn an_intent_with_an_undeclared_key_is_refused() {
+        let message = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000","memo":"hidden"}]}"#;
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+            VisualSignOptions::default(),
+        );
+        let Err(err) = result else {
+            panic!("expected a refusal for an undeclared key inside an intent");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+    }
+
+    /// An explicit `min_gas` of `"0"` and an absent one preview differently: they are
+    /// different signed payloads.
+    #[test]
+    fn auth_call_min_gas_zero_and_absent_preview_differently() {
+        let auth = |min_gas: &str| {
+            format!(
+                r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{{"intent":"auth_call","contract_id":"app.near","msg":"go","attached_deposit":"1000000000000000000000000"{min_gas}}}]}}"#
+            )
+        };
+        let defaulted = render(&auth(""));
+        let zero = render(&auth(r#","min_gas":"0""#));
+        // A static message: CodeQL treats rendered fields as tainted.
+        assert!(
+            !labels(&defaulted).iter().any(|l| l == "Min Gas"),
+            "a defaulted min_gas must render no Min Gas field"
+        );
+        assert_eq!(field_text(&zero, "Min Gas"), "0 Tgas");
+        assert_ne!(labels(&defaulted), labels(&zero));
+    }
+
+    /// A message that is not intents still renders as text with its signer.
+    #[test]
+    fn a_plain_message_still_renders_as_text() {
+        let payload = render("Sign in to app.example.com");
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+    }
+
+    /// Intent-shaped JSON that does not decode (an unknown kind, `intents: null`) is
+    /// refused; JSON that names no `intents` still renders as text.
+    #[test]
+    fn intent_shaped_messages_that_do_not_decode_are_refused() {
+        for malformed in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"future_unknown"}]}"#,
+            r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":null}"#,
+        ] {
+            let envelope = json!({ "message": malformed, "signerAddress": SIGNER }).to_string();
+            let result = SolanaVisualSignConverter.to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            );
+            let Err(err) = result else {
+                panic!("an intent-shaped message that does not decode must be refused");
+            };
+            assert!(
+                err.to_string().contains("malformed or unsupported"),
+                "{err}"
+            );
+        }
+        let payload = render(r#"{"greeting":"hi"}"#);
+        assert_eq!(payload.title, "Solana Message");
+    }
+
+    /// A payload with no intents (absent or empty) renders as a cancel: it only
+    /// spends the nonce.
+    #[test]
+    fn a_payload_without_intents_renders_as_a_cancel() {
+        for message in [
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+            r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[]}"#,
+        ] {
+            let payload = render(message);
+            assert_eq!(payload.title, "Cancel: invalidate nonce", "{message}");
+            assert_eq!(payload.payload_type, "SolanaMessage");
+            assert_eq!(field_text(&payload, "Signer"), "alice.near");
+            assert_eq!(field_text(&payload, "Verifying Contract"), "intents.near");
+            assert_eq!(
+                field_text(&payload, "Deadline"),
+                "2999-01-01T00:00:00+00:00"
+            );
+            assert_eq!(
+                field_text(&payload, "Nonce"),
+                "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f"
+            );
+            assert_eq!(field_text(&payload, SIGNING_ADDRESS_LABEL), SIGNER);
+            payload.validate_charset().expect("charset");
+        }
+    }
+
+    /// A cancel carrying a key the envelope does not declare is refused, like
+    /// any other payload with one: the key would be signed without being shown.
+    #[test]
+    fn a_cancel_with_an_undeclared_key_is_refused() {
+        let message = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","action":"login"}"#;
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        let err = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect_err("an undeclared key must be refused");
+        assert!(err.to_string().contains("\"action\""), "{err}");
+    }
+
+    /// The feature-free shape check refuses exactly what the decoder treats as
+    /// intents, so turning the feature off never turns a payload into text.
+    #[test]
+    fn the_feature_free_shape_check_agrees_with_the_decoder() {
+        for message in [
+            INTENTS,
+            r#"{"signer_id":"a","verifying_contract":"b","deadline":"c","nonce":"d"}"#,
+            r#"{"intents":null}"#,
+            r#"{"signer_id":"a","deadline":"c","nonce":"d"}"#,
+            r#"{"greeting":"hi"}"#,
+            "[1,2]",
+            "Sign in to app.example.com",
+        ] {
+            assert_eq!(
+                looks_like_intents(message.as_bytes()),
+                visualsign_intents::is_intent_shaped(message.as_bytes()),
+                "{message}"
+            );
+        }
+    }
+
+    /// With `diagnostics` on, an intents finding is a structured `Diagnostic`,
+    /// not the `Warning` text fallback: the feature has to reach
+    /// `visualsign-intents`, which builds those fields.
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn an_expired_intent_is_a_diagnostic_when_diagnostics_is_on() {
+        let expired = INTENTS.replace("2999-01-01T00:00:00Z", "2020-01-01T00:00:00Z");
+        let payload = render(&expired);
+        assert!(
+            payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.rule == "deadline"
+            )),
+            "expected a deadline Diagnostic, got labels {:?}",
+            labels(&payload)
+        );
+        assert!(
+            !labels(&payload).iter().any(|l| l == "Warning"),
+            "a finding fell back to Warning text"
+        );
     }
 }
