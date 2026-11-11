@@ -64,7 +64,7 @@ solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
 solana-system-interface = { version = "3.3.0", features = ["bincode"] }
 solana-transaction = { version = "6.0.0", features = ["serde"] }
 spl-token-interface = { version = "3.0.0" }
-spl-token-2022-interface = { version = "3.1.2" }
+spl-token-2022-interface = { version = "4.0.0" }
 # Feature-gated; see [features].
 solana-transaction-status = { version = "2.2.7", optional = true }
 solana-rpc-client-types = { version = "2.2.7", optional = true }
