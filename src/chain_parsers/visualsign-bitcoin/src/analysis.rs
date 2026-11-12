@@ -259,7 +259,11 @@ fn check_input_scripts(input: &Input, prevout: &Script) -> Result<(), BitcoinPar
         }
         None => prevout,
     };
-    if spent.is_p2sh() {
+    // Only a P2SH prevout whose redeem_script is absent is unknowable. With a
+    // redeem_script, `spent` is that script, and BIP-174 requires it to be a
+    // witness program when only witness_utxo is given, even if it is itself
+    // P2SH-shaped.
+    if spent.is_p2sh() && input.redeem_script.is_none() {
         return Ok(());
     }
     if input.non_witness_utxo.is_none()

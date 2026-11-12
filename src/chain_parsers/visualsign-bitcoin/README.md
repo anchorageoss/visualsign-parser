@@ -16,7 +16,9 @@ spirit as the Solana surfpool lane.
   `gen_bip_vectors.py` from a pinned commit of bitcoin/bips, sha256 recorded).
   Invalid vectors must be rejected, valid ones must render the same outputs,
   input amounts and fee as rust-bitcoin's own PSBT accessors, and PSBTv2 must be
-  refused. Known gaps are listed in the file and pinned by `#[ignore]`d tests.
+  refused. Every vector is asserted on its own, with no allow-list of known
+  gaps, so a newly accepted invalid vector or a newly rejected valid one fails
+  the test.
 - `tests/mainnet_test.rs` rebuilds unsigned PSBTs from six confirmed mainnet
   transactions (P2PKH, P2SH-P2WPKH, P2WPKH, P2WSH, P2TR, OP_RETURN; raw
   transactions and the explorer's view in `tests/fixtures/mainnet/`) and checks
