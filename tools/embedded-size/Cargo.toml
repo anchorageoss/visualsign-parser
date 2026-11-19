@@ -1,0 +1,43 @@
+[package]
+name = "embedded-size"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "embedded-size-bin"
+path = "src/main.rs"
+
+[features]
+default = []
+eth = ["dep:visualsign-ethereum"]
+tron = ["dep:visualsign-tron"]
+unspec = ["dep:visualsign-unspecified"]
+solana = ["dep:visualsign-solana"]
+sui = ["dep:visualsign-sui"]
+near = ["dep:visualsign-near"]
+
+[dependencies]
+visualsign = { path = "../../src/visualsign" }
+visualsign-ethereum = { path = "../../src/chain_parsers/visualsign-ethereum", default-features = false, optional = true }
+visualsign-tron = { path = "../../src/chain_parsers/visualsign-tron", default-features = false, optional = true }
+visualsign-unspecified = { path = "../../src/chain_parsers/visualsign-unspecified", optional = true }
+visualsign-solana = { path = "../../src/chain_parsers/visualsign-solana", default-features = false, optional = true }
+visualsign-sui = { path = "../../src/chain_parsers/visualsign-sui", optional = true }
+visualsign-near = { path = "../../src/chain_parsers/visualsign-near", default-features = false, optional = true }
+serde_json = "1"
+
+# Size-tuned profile: `cargo build --profile embedded`. Solana currently needs
+# lto = "thin" (fat LTO fails to load spl_token_2022's bitcode).
+[profile.embedded]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Standalone: not a member of src/ (normal builds, lint and tests are unaffected).
+[workspace]
