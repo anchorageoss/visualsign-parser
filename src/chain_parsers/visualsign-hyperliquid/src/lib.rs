@@ -18,6 +18,7 @@
 pub mod cli_plugin;
 pub mod hash;
 pub mod input;
+pub mod intermediate;
 pub mod l1;
 mod render;
 pub mod tx;
