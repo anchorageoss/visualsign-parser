@@ -15096,6 +15096,7 @@ name = "visualsign-hyperliquid"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "borsh 1.6.0",
  "clap",
  "hex",
  "parser_cli_core",

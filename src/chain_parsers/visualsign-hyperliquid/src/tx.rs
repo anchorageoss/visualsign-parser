@@ -6,6 +6,7 @@ use visualsign::vsptrait::{
 };
 
 use crate::input::{self, L1Request, Request, UserSignedRequest};
+use crate::intermediate;
 use crate::render;
 
 /// A verified Hyperliquid signing request.
@@ -43,13 +44,22 @@ impl VisualSignConverter<HyperliquidTransaction> for HyperliquidVisualSignConver
         transaction: HyperliquidTransaction,
         options: VisualSignOptions,
     ) -> Result<ConversionResult, VisualSignError> {
+        let include_intermediate_output = options.include_intermediate_output;
         let payload = match &transaction {
             HyperliquidTransaction::L1(req) => render::l1_payload(req, options.transaction_name)?,
             HyperliquidTransaction::UserSigned(req) => {
                 render::user_signed_payload(req, options.transaction_name)?
             }
         };
-        Ok(ConversionResult::new(payload))
+        if !include_intermediate_output {
+            return Ok(ConversionResult::new(payload));
+        }
+        let output = intermediate::build_intermediate_output(&transaction)
+            .map_err(VisualSignError::DecodeError)?;
+        let bytes = borsh::to_vec(&output).map_err(|e| {
+            VisualSignError::DecodeError(format!("failed to encode intermediate output: {e}"))
+        })?;
+        Ok(ConversionResult::with_intermediate(payload, bytes))
     }
 }
 
