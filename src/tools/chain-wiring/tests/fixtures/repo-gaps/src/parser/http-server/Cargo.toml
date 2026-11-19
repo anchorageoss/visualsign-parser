@@ -1,0 +1,8 @@
+[package]
+name = "parser_http_server"
+version = "0.0.0"
+
+[features]
+default = ["gappy", "vsock"]
+vsock = []
+gappy = ["parser_app/gappy"]
