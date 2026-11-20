@@ -3,14 +3,13 @@
 mod config;
 
 use crate::core::{
-    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionView, InstructionVisualizer, NamedIdlAccounts, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind, name_idl_accounts, remaining_account_label,
 };
 use config::MetadaoFutarchyConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -65,28 +64,25 @@ fn load_idl() -> Result<Idl, VisualSignError> {
         .map_err(|e| VisualSignError::DecodeError(format!("Failed to decode bundled IDL: {e}")))
 }
 
+/// Name the instruction's accounts against the IDL, flattening account groups
+/// (composite `Accounts` structs) so members and the accounts after a group
+/// land on the right addresses.
 fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
     accounts: &[String],
-) -> BTreeMap<String, String> {
-    let mut named = BTreeMap::new();
+) -> NamedIdlAccounts {
     if instruction_data.len() < 8 {
-        return named;
+        return NamedIdlAccounts::default();
     }
     let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
         inst.discriminator
             .as_ref()
             .is_some_and(|disc| &instruction_data[0..8] == disc.as_slice())
     }) else {
-        return named;
+        return NamedIdlAccounts::default();
     };
-    for (index, account_str) in accounts.iter().enumerate() {
-        if let Some(idl_account) = idl_instruction.accounts.get(index) {
-            named.insert(idl_account.name.clone(), account_str.clone());
-        }
-    }
-    named
+    name_idl_accounts(idl_instruction, accounts)
 }
 
 fn format_arg_value(value: &serde_json::Value) -> String {
@@ -102,7 +98,7 @@ fn build_visualization(
     program_id: &str,
     data: &[u8],
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &BTreeMap<String, String>,
+    named_accounts: &NamedIdlAccounts,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let program_id_str = program_id;
     let title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
@@ -116,12 +112,15 @@ fn build_visualization(
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];
 
-    let mut account_keys: Vec<&String> = named_accounts.keys().collect();
+    let mut account_keys: Vec<&String> = named_accounts.named.keys().collect();
     account_keys.sort();
     for key in account_keys {
-        if let Some(addr) = named_accounts.get(key) {
+        if let Some(addr) = named_accounts.named.get(key) {
             expanded_fields.push(create_text_field(key, addr)?);
         }
+    }
+    for (index, pubkey) in named_accounts.remaining.iter().enumerate() {
+        expanded_fields.push(create_text_field(&remaining_account_label(index), pubkey)?);
     }
 
     for (key, value) in &parsed.program_call_args {
@@ -167,6 +166,7 @@ fn build_visualization(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::core::idl_accounts::flattened_account_names;
     use solana_pubkey::Pubkey;
 
     fn dummy_account_strings(count: usize) -> Vec<String> {
@@ -240,16 +240,57 @@ mod tests {
         let named = build_named_accounts(&idl, &data, &accounts);
 
         assert_eq!(
-            named.len(),
+            named.named.len(),
             spot_swap.accounts.len(),
             "every IDL account should be named"
         );
         for idl_account in &spot_swap.accounts {
             assert!(
-                named.contains_key(&idl_account.name),
+                named.named.contains_key(&idl_account.name),
                 "missing named account `{}`",
                 idl_account.name
             );
         }
+        assert!(named.remaining.is_empty());
+    }
+
+    #[test]
+    fn test_group_members_and_following_accounts_land_on_right_addresses() {
+        // collectMeteoraDammFees nests a composite
+        // meteoraClaimPositionFeesAccounts group (15 members) after six
+        // top-level accounts, with systemProgram and friends after it.
+        // Pairing top-level IDL accounts by position (the old bug) shifted
+        // every name from systemProgram onward onto the wrong address.
+        let idl = load_idl().expect("IDL must load");
+        let ix = idl
+            .instructions
+            .iter()
+            .find(|i| i.name == "collectMeteoraDammFees")
+            .expect("collectMeteoraDammFees present");
+        let names = flattened_account_names(ix);
+        let accounts = dummy_account_strings(names.len());
+
+        let disc = ix.discriminator.clone().expect("discriminator computed");
+        let named = build_named_accounts(&idl, &disc, &accounts);
+
+        // The group's members take the group's prefix and the flattened
+        // positions (after the seven top-level accounts).
+        assert_eq!(
+            named
+                .named
+                .get("meteoraClaimPositionFeesAccounts.dammV2Program"),
+            Some(&accounts[7])
+        );
+        assert_eq!(
+            named
+                .named
+                .get("meteoraClaimPositionFeesAccounts.tokenBProgram"),
+            Some(&accounts[21])
+        );
+        // Accounts after the group keep their own names at the flattened
+        // positions (7 top-level + 15 group members come first).
+        assert_eq!(named.named.get("systemProgram"), Some(&accounts[22]));
+        assert_eq!(named.named.get("program"), Some(&accounts[26]));
+        assert!(named.remaining.is_empty());
     }
 }

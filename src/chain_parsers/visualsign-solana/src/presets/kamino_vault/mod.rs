@@ -3,14 +3,13 @@
 mod config;
 
 use crate::core::{
-    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionView, InstructionVisualizer, NamedIdlAccounts, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind, name_idl_accounts, remaining_account_label,
 };
 use config::KaminoVaultConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -43,7 +42,7 @@ impl InstructionVisualizer for KaminoVaultVisualizer {
             Ok(parsed) => {
                 let named_accounts = match load_kamino_vault_idl() {
                     Some(idl) => build_named_accounts(idl, data, &view.accounts),
-                    None => BTreeMap::new(),
+                    None => NamedIdlAccounts::default(),
                 };
                 (
                     build_condensed_fields(&parsed.instruction_name)?,
@@ -119,37 +118,30 @@ fn parse_kamino_vault_instruction(
         .map_err(|e| VisualSignError::DecodeError(e.to_string()))
 }
 
-/// Build a map of IDL account name to pubkey by zipping instruction accounts with IDL accounts.
+/// Name the instruction's accounts against the IDL, flattening account groups
+/// (composite `Accounts` structs) so members and the accounts after a group
+/// land on the right addresses.
 fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
     instruction_accounts: &[String],
-) -> BTreeMap<String, String> {
-    let mut named = BTreeMap::new();
-
+) -> NamedIdlAccounts {
     let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
         inst.discriminator
             .as_ref()
-            .map(|d| instruction_data.len() >= 8 && &instruction_data[0..8] == d.as_slice())
-            .unwrap_or(false)
+            .is_some_and(|disc| instruction_data.len() >= disc.len() && &instruction_data[..disc.len()] == disc.as_slice())
     }) else {
-        return named;
+        return NamedIdlAccounts::default();
     };
 
-    for (idx, account_str) in instruction_accounts.iter().enumerate() {
-        if let Some(idl_account) = idl_instruction.accounts.get(idx) {
-            named.insert(idl_account.name.clone(), account_str.clone());
-        }
-    }
-
-    named
+    name_idl_accounts(idl_instruction, instruction_accounts)
 }
 
 /// Build the expanded fields shown when the IDL parsed successfully.
 fn build_parsed_fields(
     program_id: &str,
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &BTreeMap<String, String>,
+    named_accounts: &NamedIdlAccounts,
     data: &[u8],
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let mut fields = vec![
@@ -158,10 +150,13 @@ fn build_parsed_fields(
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];
 
-    let mut account_entries: Vec<(&String, &String)> = named_accounts.iter().collect();
-    account_entries.sort_by(|a, b| a.0.cmp(b.0));
-    for (name, address) in account_entries {
+    // BTreeMap iteration is already key-sorted; render named accounts, then
+    // any the IDL does not name, in order.
+    for (name, address) in &named_accounts.named {
         fields.push(create_text_field(name, address)?);
+    }
+    for (index, pubkey) in named_accounts.remaining.iter().enumerate() {
+        fields.push(create_text_field(&remaining_account_label(index), pubkey)?);
     }
 
     let mut arg_entries: Vec<(&String, &serde_json::Value)> =
@@ -270,5 +265,47 @@ mod tests {
             result.is_err(),
             "data shorter than discriminator should return error"
         );
+    }
+
+    #[test]
+    fn test_group_members_and_following_accounts_land_on_right_addresses() {
+        // withdraw nests two composite groups (withdrawFromAvailable with 14
+        // members, withdrawFromReserveAccounts with 9) before eventAuthority
+        // and program. Pairing top-level IDL accounts by position (the old
+        // bug) shifted every name from withdrawFromReserveAccounts onward
+        // onto the wrong address.
+        let idl = load_kamino_vault_idl().unwrap();
+        let ix = idl
+            .instructions
+            .iter()
+            .find(|i| i.name == "withdraw")
+            .unwrap();
+        let disc = ix.discriminator.clone().unwrap();
+        let accounts: Vec<String> = (0..25).map(|i| format!("addr{i}")).collect();
+
+        let named = build_named_accounts(idl, &disc, &accounts);
+
+        // First group's members take the group's prefix and its positions.
+        assert_eq!(
+            named.named.get("withdrawFromAvailable.user"),
+            Some(&"addr0".to_string())
+        );
+        assert_eq!(
+            named.named.get("withdrawFromAvailable.program"),
+            Some(&"addr13".to_string())
+        );
+        // The second group starts right after the first (14 members).
+        assert_eq!(
+            named.named.get("withdrawFromReserveAccounts.vaultState"),
+            Some(&"addr14".to_string())
+        );
+        // Accounts after both groups keep their own names at the flattened
+        // positions (14 + 9 = 23 group members come first).
+        assert_eq!(
+            named.named.get("eventAuthority"),
+            Some(&"addr23".to_string())
+        );
+        assert_eq!(named.named.get("program"), Some(&"addr24".to_string()));
+        assert!(named.remaining.is_empty());
     }
 }
