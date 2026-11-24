@@ -134,6 +134,10 @@ fn parse_jupiter_instruction_with_idl(
     // Parse using solana_parser
     let parsed = parse_instruction_with_idl(data, JUPITER_PROGRAM_ID, &idl)?;
 
+    // The v1 route variants put their mints at different positions (and
+    // `route` carries no source mint at all), so look them up by IDL name.
+    let mint = |account_name: &str| idl_named_account(&idl, &parsed.instruction_name, accounts, account_name);
+
     // Extract instruction type and arguments
     match parsed.instruction_name.as_str() {
         "route" => {
@@ -147,11 +151,8 @@ fn parse_jupiter_instruction_with_idl(
                 "platform_fee_bps",
             )?)?;
 
-            // Get token info (preserve current logic)
-            let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
-            let out_token = accounts
-                .get(5)
-                .map(|addr| get_token_info(addr, quoted_out_amount));
+            let in_token = Some(token_or_unknown(mint("source_mint"), in_amount));
+            let out_token = mint("destination_mint").map(|addr| get_token_info(addr, quoted_out_amount));
 
             Ok(JupiterSwapInstruction::Route {
                 in_token,
@@ -171,10 +172,8 @@ fn parse_jupiter_instruction_with_idl(
                 "platform_fee_bps",
             )?)?;
 
-            let in_token = accounts
-                .first()
-                .map(|addr| get_token_info(addr, quoted_in_amount));
-            let out_token = accounts.get(5).map(|addr| get_token_info(addr, out_amount));
+            let in_token = Some(token_or_unknown(mint("source_mint"), quoted_in_amount));
+            let out_token = mint("destination_mint").map(|addr| get_token_info(addr, out_amount));
 
             Ok(JupiterSwapInstruction::ExactOutRoute {
                 in_token,
@@ -194,10 +193,8 @@ fn parse_jupiter_instruction_with_idl(
                 "platform_fee_bps",
             )?)?;
 
-            let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
-            let out_token = accounts
-                .get(5)
-                .map(|addr| get_token_info(addr, quoted_out_amount));
+            let in_token = Some(token_or_unknown(mint("source_mint"), in_amount));
+            let out_token = mint("destination_mint").map(|addr| get_token_info(addr, quoted_out_amount));
 
             Ok(JupiterSwapInstruction::SharedAccountsRoute {
                 in_token,
@@ -217,6 +214,38 @@ fn parse_jupiter_instruction_with_idl(
         _ => Ok(JupiterSwapInstruction::Unknown {
             instruction_name: Some(parsed.instruction_name.clone()),
         }),
+    }
+}
+
+/// The account the instruction passes in the IDL slot named `account_name`.
+fn idl_named_account<'a>(
+    idl: &Idl,
+    instruction_name: &str,
+    accounts: &'a [String],
+    account_name: &str,
+) -> Option<&'a String> {
+    let instruction = idl.instructions.iter().find(|inst| inst.name == instruction_name)?;
+    let position = instruction
+        .accounts
+        .iter()
+        .position(|account| account.name == account_name)?;
+    accounts.get(position)
+}
+
+/// Token info for `mint`, or, when the instruction doesn't name the mint
+/// (v1 `route` carries no source mint), the amount under an explicit
+/// "Unknown token" rather than some other account's address.
+fn token_or_unknown(mint: Option<&String>, amount: u64) -> SwapTokenInfo {
+    match mint {
+        Some(address) => get_token_info(address, amount),
+        None => SwapTokenInfo {
+            address: String::new(),
+            symbol: "Unknown token".to_string(),
+            name: "Mint not among the instruction's accounts".to_string(),
+            decimals: 0,
+            amount,
+            human_readable_amount: amount.to_string(),
+        },
     }
 }
 
@@ -718,6 +747,29 @@ mod tests {
     }
 
     /// Accounts from sample_route.json fixture (need at least indices 0 and 5)
+    const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
+
+    /// One unique key per account `instruction_name` declares in the IDL, with
+    /// the given mints in its `source_mint` / `destination_mint` slots.
+    fn accounts_with_mints(instruction_name: &str, source: &str, destination: &str) -> Vec<String> {
+        let idl = get_jupiter_idl().expect("IDL");
+        let instruction = idl
+            .instructions
+            .iter()
+            .find(|inst| inst.name == instruction_name)
+            .expect("instruction in IDL");
+        instruction
+            .accounts
+            .iter()
+            .map(|account| match account.name.as_str() {
+                "source_mint" => source.to_string(),
+                "destination_mint" => destination.to_string(),
+                _ => solana_pubkey::Pubkey::new_unique().to_string(),
+            })
+            .collect()
+    }
+
     fn fixture_accounts() -> Vec<String> {
         vec![
             "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
@@ -978,13 +1030,38 @@ mod tests {
     }
 
     #[test]
+    fn test_route_never_shows_the_token_program_as_input() {
+        // v1 `route` names no source mint; the first account is the token
+        // program, which used to be shown as the input token.
+        let data = fixture_instruction_data();
+        let accounts = accounts_with_mints("route", USDC_MINT, SOL_MINT);
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::Route {
+                in_token,
+                out_token,
+                ..
+            } => {
+                let in_token = in_token.as_ref().unwrap();
+                assert_eq!(in_token.symbol, "Unknown token");
+                assert_ne!(in_token.address, accounts[0]);
+                assert_eq!(out_token.as_ref().unwrap().address, SOL_MINT);
+            }
+            _ => panic!("Expected Route instruction, got {parsed:?}"),
+        }
+    }
+
+    #[test]
     fn test_jupiter_exact_out_route_parsing() {
         // ExactOutRoute: same body layout as Route, different discriminator
         // Amount fields are reversed: out_amount / quoted_in_amount instead of in_amount / quoted_out_amount
         let discriminator = hex::decode("d033ef977b2bed5c").expect("valid hex");
         let body = fixture_route_plan_body();
         let data: Vec<u8> = [discriminator, body].concat();
-        let accounts = fixture_accounts();
+        // USDC in, SOL out: the source mint must never show as the output.
+        let accounts = accounts_with_mints("exact_out_route", USDC_MINT, SOL_MINT);
 
         let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
 
@@ -1008,6 +1085,8 @@ mod tests {
                     2000000,
                     "out_token should use out_amount"
                 );
+                assert_eq!(in_token.as_ref().unwrap().address, USDC_MINT);
+                assert_eq!(out_token.as_ref().unwrap().address, SOL_MINT);
             }
             _ => panic!("Expected ExactOutRoute instruction, got {parsed:?}"),
         }
@@ -1048,7 +1127,7 @@ mod tests {
         let id_byte = vec![0x00u8]; // id = 0
         let body = fixture_route_plan_body();
         let data: Vec<u8> = [discriminator, id_byte, body].concat();
-        let accounts = fixture_accounts();
+        let accounts = accounts_with_mints("shared_accounts_route", USDC_MINT, SOL_MINT);
 
         let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
 
@@ -1072,6 +1151,8 @@ mod tests {
                     1550653,
                     "out_token should use quoted_out_amount"
                 );
+                assert_eq!(in_token.as_ref().unwrap().address, USDC_MINT);
+                assert_eq!(out_token.as_ref().unwrap().address, SOL_MINT);
             }
             _ => panic!("Expected SharedAccountsRoute instruction, got {parsed:?}"),
         }
