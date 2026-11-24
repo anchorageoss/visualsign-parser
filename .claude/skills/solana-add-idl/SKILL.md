@@ -225,6 +225,17 @@ use visualsign::{
 
 `BTreeMap` (not `HashMap`) — keeps named-account order deterministic.
 
+**Naming accounts** — build the name-to-address map with
+`crate::core::name_idl_accounts` (see `src/core/idl_accounts.rs`), never by
+zipping the instruction's accounts with the instruction's top-level IDL
+accounts. Anchor IDLs can nest a group of accounts inside one instruction
+entry (a composite `Accounts` struct used as a field) whose members the
+transaction lists inline, so a group shifts every positional pairing after it
+onto the wrong address. The helper flattens groups (members are named
+`group.member`), pairs by position, and returns the accounts the IDL does not
+name as `remaining` — render those with `crate::core::remaining_account_label`
+("Remaining Account N").
+
 ### Arg rendering: import from crate::core
 
 `format_arg_value` is already included via the import above. Do **not** copy the
