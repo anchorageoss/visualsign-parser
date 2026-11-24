@@ -42,6 +42,12 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: install protoc
         run: scripts/install-protoc.sh
+      # .github/anchor.env and the anchor-cli Containerfile ARG defaults must
+      # carry the same version and sha256, or a plain `docker build` would
+      # install a different release than the one recorded in the env file.
+      # Shell only; no network, no download.
+      - name: Check the anchor-cli pins agree
+        run: scripts/bump-anchor.sh --check
       - name: free disk space
         run: |
           sudo swapoff -a

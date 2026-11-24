@@ -26,8 +26,11 @@
 # - /tools/tvc-deploy has its own block without that ignore list: its qos crates
 #   (`qos_p256`, `qos_hex`) come from crates.io, and a `qos_*` ignore there would
 #   freeze them.
-# - Container base images: stagex images are pinned by `@sha256:` and must be
-#   re-hashed locally before a bump, which Dependabot can't do.
+# - Container base images: the stagex images used by parser_app and the
+#   like are pinned by `@sha256:` and must be re-hashed locally before a bump
+#   (their contents flow into the build), which Dependabot can't do. The one
+#   exception is /images/anchor-cli below: its base only supplies glibc and
+#   CA certificates, so a digest bump is safe and Dependabot handles it.
 version: 2
 updates:
   - package-ecosystem: "cargo"
@@ -99,3 +102,16 @@ updates:
           - "*"
     commit-message:
       prefix: "chore(ci)"
+
+  - package-ecosystem: "docker"
+    directory: "/images/anchor-cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Lisbon"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
