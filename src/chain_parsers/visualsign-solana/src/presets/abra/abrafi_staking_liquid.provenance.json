@@ -1,0 +1,8 @@
+{
+  "program_id": "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+  "idl_sha256": "ab0494a15ff894c38e7bcd44c975af4a5d59b606d7502f52a2fa598448f3f4d2",
+  "source": "issuer",
+  "recorded_at": "2026-11-24T12:28:09Z",
+  "supplied_by": "Abra (issuer-supplied generic build, metadata.version 0.1.0)",
+  "notes": "Neither Abra program publishes an on-chain Anchor IDL. The issuer's generic build had the placeholder address 11111111111111111111111111111112, replaced with the deployed program id; every user-facing discriminator and account order was checked against mainnet transactions (fixtures under tests/fixtures/abra). Replace with the exact deployed IDL once the issuer provides it (#655)."
+}

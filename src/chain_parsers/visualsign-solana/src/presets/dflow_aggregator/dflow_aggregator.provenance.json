@@ -1,0 +1,7 @@
+{
+  "program_id": "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
+  "idl_sha256": "5538df7359a21514313d34353bbeda14600a6c36612cba1d7cbe9086e60510d8",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:07:43Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271346 (instructions: committed 17, on chain 18 added: withdraw_fees removed: - changed: -)."
+}

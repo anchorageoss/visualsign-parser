@@ -1,0 +1,7 @@
+{
+  "program_id": "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
+  "idl_sha256": "3d821fa80f85eb94e8f1b754ad3f099d4907db7b8c8d3c47f4841b804a5e0b60",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:10Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271472 (instructions: committed 20, on chain 30 added: buyWithMinSharesOut, depositWithMinSharesOut, investInConditionalReserve, investV2WithMaxAmount, investWithMaxAmount, topupRewards, updateKlendQueueAccounting, updateReserveAllocationV2, updateReserveAllocationV3, withdrawRewards removed: - changed: -)."
+}

@@ -1,0 +1,7 @@
+{
+  "program_id": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+  "idl_sha256": "0a5dbe0607a571f90b18445174cffc23ed5be64b33727278f01df6f5b641b28a",
+  "source": "unknown",
+  "recorded_at": "2026-11-06T22:08:22Z",
+  "notes": "Origin not recorded; added in 817cb4b15bed (#309). Differs from the on-chain IDL read at slot 466271523 (instructions: committed 38, on chain 38 added: - removed: - changed: -)."
+}
