@@ -1,0 +1,77 @@
+name: Chain tracking sync
+
+# Keeps the M1 Wiring block of every open "Chain support: <Variant>" issue
+# (made from .github/ISSUE_TEMPLATE/chain-support.yml) in step with the default
+# branch. Only the block between the add-chain:wiring markers is rewritten, so
+# boxes ticked by hand elsewhere in the issue are kept.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'proto/**'
+      - 'images/**'
+      - '.oss-scanner/**'
+      - 'docs/**'
+      - '.github/labeler.yml'
+      - '.github/CODEOWNERS'
+      - 'README.md'
+      - 'CLAUDE.md'
+  workflow_dispatch:
+
+# Reads the repo, edits issue bodies. Runs only on main's code (push to main or
+# a manual dispatch), never on pull request code.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: chain-tracking-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Refresh M1 wiring in chain-support issues
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        with:
+          cache: false
+      - name: Build chain-wiring
+        working-directory: src
+        run: cargo build --locked -q -p chain-wiring
+      - name: Update issues whose wiring changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bin="$PWD/src/target/debug/chain-wiring"
+          tmp="$(mktemp -d)"
+          gh issue list --state open --limit 500 --search 'in:title "Chain support:"' \
+            --json number,title --jq '.[] | select(.title | startswith("Chain support: ")) | .number' \
+            > "$tmp/issues"
+          while read -r n; do
+            gh issue view "$n" --json body --jq .body > "$tmp/old.md"
+            if ! grep -qF '<!-- add-chain:wiring:start -->' "$tmp/old.md"; then
+              echo "#$n: no wiring markers, skipped"; continue
+            fi
+            # issue-chain validates the form's answers; it prints nothing on bad input.
+            if ! read -r chain variant < <("$bin" issue-chain < "$tmp/old.md"); then
+              echo "#$n: no valid \"Chain name\" answer, skipped"; continue
+            fi
+            "$bin" splice "$chain" --variant "$variant" < "$tmp/old.md" > "$tmp/new.md"
+            if cmp -s "$tmp/old.md" "$tmp/new.md"; then
+              echo "#$n ($chain): up to date"
+            else
+              gh issue edit "$n" --body-file "$tmp/new.md"
+              echo "#$n ($chain): updated"
+            fi
+          done < "$tmp/issues"

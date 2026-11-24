@@ -1,0 +1,4 @@
+# The fixture repo trees hold stub Cargo.toml files that are test data, not
+# crates. cargo-machete (make unused-deps) walks every Cargo.toml it finds and
+# honours .ignore files, so keep it out of these.
+Cargo.toml
