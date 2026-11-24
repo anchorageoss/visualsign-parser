@@ -14,7 +14,9 @@ use config::{
 use crate::core::{
     CommandVisualizer, SuiIntegrationConfig, TransactionSummary, VisualizerContext, VisualizerKind,
 };
-use crate::utils::{decode_number, get_object_value, pure_bcs_bytes};
+use crate::utils::{
+    command_arguments, decode_number, get_object_value, pure_bcs_bytes, result_slot,
+};
 
 use crate::types::{ObjectID, SuiAddress};
 use crate::types::{
@@ -969,37 +971,11 @@ fn is_read_only_call(call: &SuiProgrammableMoveCall, deployment: &HashiDeploymen
     framework_value || framework_by_value || hashi_constructor
 }
 
-fn command_arguments(command: &SuiCommand) -> Vec<SuiArgument> {
-    match command {
-        SuiCommand::MoveCall(call) => call.arguments.clone(),
-        SuiCommand::TransferObjects(objects, recipient) => {
-            objects.iter().copied().chain([*recipient]).collect()
-        }
-        SuiCommand::SplitCoins(coin, amounts) | SuiCommand::MergeCoins(coin, amounts) => {
-            std::iter::once(*coin)
-                .chain(amounts.iter().copied())
-                .collect()
-        }
-        SuiCommand::Upgrade(_, _, ticket) => vec![*ticket],
-        SuiCommand::MakeMoveVec(_, elements) => elements.clone(),
-        SuiCommand::Publish(_) => Vec::new(),
-    }
-}
-
 fn refers_to(argument: SuiArgument, value: SuiArgument) -> bool {
     match (argument, value) {
         (SuiArgument::Input(argument), SuiArgument::Input(value)) => argument == value,
         (SuiArgument::GasCoin, SuiArgument::GasCoin) => true,
         _ => result_slot(argument).is_some_and(|slot| Some(slot) == result_slot(value)),
-    }
-}
-
-/// `Result(n)` and `NestedResult(n, 0)` name the same single-output value.
-fn result_slot(argument: SuiArgument) -> Option<(u16, u16)> {
-    match argument {
-        SuiArgument::Result(command) => Some((command, 0)),
-        SuiArgument::NestedResult(command, index) => Some((command, index)),
-        _ => None,
     }
 }
 

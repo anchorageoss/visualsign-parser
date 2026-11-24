@@ -177,7 +177,8 @@ fn builtin_idl_program_name(p: &ProgramType) -> &'static str {
     }
 }
 
-/// Program IDs registered by in-crate preset visualizers.
+/// Program IDs registered in-crate: by a preset visualizer, or by an IDL compiled in
+/// ahead of its preset (a [`preset_idl_configs`] entry).
 ///
 /// Built once at first use from `available_visualizers()` so new presets
 /// stay covered as they land. Each preset declares the program IDs it
@@ -200,6 +201,7 @@ fn preset_program_ids() -> &'static BTreeSet<&'static str> {
                 }
             }
         }
+        set.extend(preset_idl_configs().keys().map(String::as_str));
         set
     })
 }
@@ -207,7 +209,7 @@ fn preset_program_ids() -> &'static BTreeSet<&'static str> {
 /// Is the program ID one we refuse to let callers override?
 ///
 /// Superset of `canonical_name(...).is_some()` plus every program ID
-/// registered by an in-crate preset visualizer (Kamino, Meteora, Drift
+/// registered in-crate by a preset visualizer or a compiled-in IDL (Kamino, Meteora, Drift
 /// preset paths, `swig_wallet`, `dflow_aggregator`, etc.). Even when a
 /// preset has no canonical string (and thus drives its own rendering),
 /// caller IDL bodies for that program ID must still be rejected so a
@@ -275,8 +277,8 @@ pub fn is_reserved_canonical_name(name: &str) -> bool {
     .any(|p| builtin_idl_program_name(p) == name)
 }
 
-/// The IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID
-/// included here so that decode path can use these idls.
+/// The in-crate Anchor IDL JSON, keyed by program ID, for the decode path: every
+/// IDL-backed preset's IDL, plus any IDL compiled in ahead of its preset.
 fn preset_idl_configs()
 -> &'static std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
     use solana_parser::{CustomIdl, CustomIdlConfig};
@@ -285,6 +287,15 @@ fn preset_idl_configs()
         OnceLock::new();
     PRESET_IDL_CONFIGS.get_or_init(|| {
         const ENTRIES: &[(&str, &str)] = &[
+            // Abra: compiled in ahead of its preset; see `preset_program_ids`.
+            (
+                "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+                include_str!("../presets/abra/abrafi_backed_token.json"),
+            ),
+            (
+                "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+                include_str!("../presets/abra/abrafi_staking_liquid.json"),
+            ),
             (
                 "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
                 include_str!("../presets/dflow_aggregator/dflow_aggregator.json"),
@@ -328,6 +339,10 @@ fn preset_idl_configs()
             (
                 "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
                 include_str!("../presets/kamino_vault/kamino_vault.json"),
+            ),
+            (
+                "MFv2hWf31Z9kbCa1snEPdcgp7X3GK4Y9EtyMkRxBUGA",
+                include_str!("../presets/marginfi/marginfi.json"),
             ),
             (
                 "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
@@ -506,11 +521,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// Program id each preset IDL JSON is registered under, keyed by the IDL
-    /// JSON itself. Sources: the `ENTRIES` list in `preset_idl_configs`, plus
-    /// presets that embed their IDL outside it (marginfi registers its IDL
-    /// in its own module).
+    /// JSON itself, from the `ENTRIES` list in `preset_idl_configs`.
     fn idl_json_program_ids() -> BTreeMap<&'static str, &'static str> {
-        let mut by_json: BTreeMap<&'static str, &'static str> = preset_idl_configs()
+        preset_idl_configs()
             .iter()
             .filter_map(|(program_id, config)| {
                 let solana_parser::CustomIdl::Json(json) = &config.idl else {
@@ -518,12 +531,7 @@ mod tests {
                 };
                 Some((json.as_str(), program_id.as_str()))
             })
-            .collect();
-        by_json.insert(
-            include_str!("../presets/marginfi/marginfi.json"),
-            crate::presets::marginfi::MARGINFI_PROGRAM_ID,
-        );
-        by_json
+            .collect()
     }
 
     /// String field of a provenance record, if present and a string.
@@ -763,10 +771,16 @@ mod tests {
                 by_json.contains_key(idl_json),
                 "preset IDL src/presets/{preset}/... is embedded via PRESET_IDLS but \
                  not registered under any program id; add it to ENTRIES in \
-                 preset_idl_configs, or register it in the preset module the way \
-                 marginfi does"
+                 preset_idl_configs"
             );
         }
+        // And the other way: every ENTRIES line has an IDL file under presets/,
+        // or the intermediate output decodes a program whose preset IDL is gone.
+        assert_eq!(
+            by_json.len(),
+            crate::PRESET_IDLS.len(),
+            "an ENTRIES line has no IDL file under presets/"
+        );
     }
 
     #[test]
@@ -948,6 +962,37 @@ mod tests {
                 "provenance record for src/presets/{preset}/{idl_file} describes no \
                  known preset IDL; remove the record or fix its name"
             );
+        }
+    }
+
+    /// An IDL compiled in ahead of its preset registers and trusts its program like a preset.
+    #[test]
+    fn compiled_in_abra_idls_register_their_programs() {
+        for program_id in [
+            "H9Cyw2RRHStwtKTAgGPm3nU48xwQ2Scy8u2gjg82dyQQ",
+            "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+        ] {
+            assert!(preset_program_ids().contains(program_id), "{program_id}");
+            assert!(is_trusted_program(program_id), "{program_id}");
+            assert_eq!(
+                registered_source(program_id, &std::collections::BTreeMap::new()),
+                crate::intermediate::RegisteredSource::Preset,
+                "{program_id}"
+            );
+            let idl = preset_idl_records()
+                .get(program_id)
+                .and_then(|record| record.custom_idl.as_ref());
+            assert!(
+                idl.is_some_and(|idl| !idl.instructions.is_empty()),
+                "{program_id} has a decoded IDL with instructions"
+            );
+            for instruction in idl
+                .map(|idl| idl.instructions.as_slice())
+                .unwrap_or_default()
+            {
+                let len = instruction.discriminator.as_ref().map_or(0, Vec::len);
+                assert_eq!(len, 8, "{program_id} {}", instruction.name);
+            }
         }
     }
 }

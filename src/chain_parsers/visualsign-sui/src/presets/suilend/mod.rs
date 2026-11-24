@@ -12,8 +12,8 @@ use config::{
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{
-    SuiCoin, SuiPackage, decode_number, get_index, get_nested_result_value, get_object_value,
-    get_tx_type_arg, truncate_address,
+    SuiCoin, SuiPackage, get_nested_result_value, get_object_value,
+    get_tx_type_arg, split_coin_amount, truncate_address,
 };
 
 use crate::types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
@@ -81,27 +81,20 @@ impl CommandVisualizer for SuilendVisualizer {
     }
 }
 
+/// The repaid coin is argument 4, a `NestedResult` of a prior `SplitCoins`;
+/// the amount is that coin's own split amount.
 fn get_repay_amount(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
     transfer_args: &[SuiArgument],
+    consumer: usize,
 ) -> Result<Option<u64>, VisualSignError> {
-    let command_index_with_input_amount = get_nested_result_value(transfer_args, 4, 0);
-    let command_with_input_amount = commands
-        .get(command_index_with_input_amount? as usize)
-        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
-
-    match command_with_input_amount {
-        SuiCommand::SplitCoins(_, args_with_input_index) => {
-            let amount_arg = inputs
-                .get(get_index(args_with_input_index, Some(0))? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Amount argument not found".into(),
-                ))?;
-            Ok(Some(decode_number::<u64>(amount_arg)?))
-        }
-        _ => Ok(None),
-    }
+    get_nested_result_value(transfer_args, 4, 0)?;
+    let coin = transfer_args
+        .get(4)
+        .copied()
+        .ok_or(VisualSignError::MissingData("Repay coin missing".into()))?;
+    split_coin_amount(commands, inputs, coin, consumer)
 }
 
 impl SuilendVisualizer {
@@ -877,8 +870,13 @@ impl SuilendVisualizer {
         let package: SuiPackage = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
         let reserve_index =
             RefreshReservePriceIndexes::get_reserve_array_index(context.inputs(), &pwc.arguments)?;
-        let amount = get_repay_amount(context.commands(), context.inputs(), &pwc.arguments)
-            .unwrap_or_default();
+        let amount = get_repay_amount(
+            context.commands(),
+            context.inputs(),
+            &pwc.arguments,
+            context.command_index(),
+        )
+        .unwrap_or_default();
 
         let (title_text, amount_str, amount_field) = match amount {
             Some(amount) => (

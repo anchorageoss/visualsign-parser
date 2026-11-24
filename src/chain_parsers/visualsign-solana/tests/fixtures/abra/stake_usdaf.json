@@ -1,0 +1,85 @@
+{
+  "description": "Abra stake of 25 USDaf for sUSDaf (mainnet)",
+  "source": "https://solscan.io/tx/qFumaUBDXoR4Vy8RQDtFePAVz2XXoXyz7RXX33RFbs98wNVkEFX2nKrk2nkshcpztJQXWbX6fEbsdWkSuBBiSyG",
+  "signature": "qFumaUBDXoR4Vy8RQDtFePAVz2XXoXyz7RXX33RFbs98wNVkEFX2nKrk2nkshcpztJQXWbX6fEbsdWkSuBBiSyG",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "4 instructions: [0] System advanceNonce, [1-2] ComputeBudget, [3] Abra stake. Testing instruction [3].",
+  "instruction_index": 3,
+  "instruction_data": "SXLVHmrGRvofLeRfmmKo9h",
+  "program_id": "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+  "accounts": [
+    {
+      "pubkey": "DgxFn9RHndaPdRx9y7LC6XBTbVWQzhqWYGc1oxi5T3Ed",
+      "signer": false,
+      "writable": true,
+      "description": "state"
+    },
+    {
+      "pubkey": "BmLfxNK2VkXxZgLAp9v64ENJqcVPZESDQ9U3SqxqsSSv",
+      "signer": true,
+      "writable": true,
+      "description": "user"
+    },
+    {
+      "pubkey": "susdLJ23peDWNrXk44p5gb8Z8J8FvPMRjYrRHeWnh7b",
+      "signer": false,
+      "writable": true,
+      "description": "liquid_staking_token_mint"
+    },
+    {
+      "pubkey": "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+      "signer": false,
+      "writable": false,
+      "description": "underlying_token_mint"
+    },
+    {
+      "pubkey": "E9T8ta4xJgCSpKovaTuSpLuLTQGfoq5QVpmuxBgdgsGU",
+      "signer": false,
+      "writable": true,
+      "description": "user_liquid_staking_token_account"
+    },
+    {
+      "pubkey": "74sSAVU4ELgAevgPKDzBi6qv2TTYQF7NqGvS6ZVaYiV4",
+      "signer": false,
+      "writable": true,
+      "description": "user_underlying_token_account"
+    },
+    {
+      "pubkey": "FJJPuLnJZRi7kBXzX6PttpFm9z7CSU2zQZWt9esbmvFe",
+      "signer": false,
+      "writable": true,
+      "description": "vault_token_account"
+    },
+    {
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "signer": false,
+      "writable": false,
+      "description": "associated_token_program"
+    },
+    {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "writable": false,
+      "description": "token_program"
+    },
+    {
+      "pubkey": "11111111111111111111111111111111",
+      "signer": false,
+      "writable": false,
+      "description": "system_program"
+    }
+  ],
+  "expected_title": "Stake USDaf to Mint sUSDaf",
+  "expected_fields": {
+    "instruction": "stake",
+    "discriminator": "ceb0ca12c8d1b36c",
+    "action": "Stake",
+    "amount": "25",
+    "underlying_amount": "25000000",
+    "recipient": "E9T8ta4xJgCSpKovaTuSpLuLTQGfoq5QVpmuxBgdgsGU",
+    "staked_into": "FJJPuLnJZRi7kBXzX6PttpFm9z7CSU2zQZWt9esbmvFe",
+    "underlying_token_mint": "usdajSQuzPmUpxHwRRk6ybYTYSgdhqUNhqDLLaaBULP",
+    "liquid_staking_token_mint": "susdLJ23peDWNrXk44p5gb8Z8J8FvPMRjYrRHeWnh7b",
+    "raw_data": "ceb0ca12c8d1b36c40787d0100000000"
+  }
+}
