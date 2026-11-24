@@ -111,7 +111,10 @@ bump() {
   # Download the exact URL the Containerfile will fetch and check it against
   # the digest the API recorded, so a rewritten pin is always verified.
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  # Expand the path now: `tmp` is local to bump() and out of scope when the
+  # EXIT trap runs, which `set -u` would turn into an error after a bump.
+  # shellcheck disable=SC2064
+  trap "rm -rf -- $(printf '%q' "$tmp")" EXIT
   url="https://github.com/$repo/releases/download/v$version/anchor-$version-$asset_suffix"
   curl --fail --silent --show-error --location --retry 3 --output "$tmp/anchor" "$url"
   sha="$(sha256_of "$tmp/anchor")"
