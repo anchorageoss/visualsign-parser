@@ -2,58 +2,28 @@
 // user action names the whole payload (title, subtitle, hoisted rows), and
 // every case in which it must not.
 
-use super::fixture_test::{
-    JL_USDC_MINT, USDC_MINT, instruction_from_fixture, load_fixture, rendered_value,
-    synthetic_instruction,
-};
+use super::fixture_test::{JL_USDC_MINT, USDC_MINT, fixture, synthetic_instruction};
 use super::*;
 use crate::core::{
     BASE_FEE_LAMPORTS_PER_SIGNATURE, SolanaTransactionWrapper, SolanaVisualSignConverter,
 };
 use crate::intermediate::{RegisteredSource, SolanaIntermediateOutput};
-use crate::test_utils::payload_from_b64;
-use base64::Engine;
+use crate::presets::associated_token_account::interface::{
+    create_associated_token_account_idempotent, get_associated_token_address_with_program_id,
+};
+use crate::test_utils::{
+    assert_no_summary, legacy_transaction_b64, payload_for, payload_from_b64, preview_titles,
+    top_level_labels, top_level_value, v0_transaction_b64,
+};
 use generated::parser::{ChainMetadata, SolanaMetadata, chain_metadata::Metadata};
-use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_message::AddressLookupTableAccount;
 use solana_message::Message;
-use solana_message::VersionedMessage;
-use solana_message::v0;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
-use solana_transaction::Transaction;
-use solana_transaction::versioned::VersionedTransaction;
 use std::str::FromStr;
 use visualsign::errors::VisualSignError;
 use visualsign::vsptrait::{Transaction as _, VisualSignConverter, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
-
-fn legacy_transaction_b64(instructions: &[Instruction], payer: &Pubkey) -> String {
-    let message = Message::new(instructions, Some(payer));
-    let tx = Transaction::new_unsigned(message);
-    let bytes = bincode::serialize(&tx).expect("serialize transaction");
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-fn v0_transaction_b64(
-    instructions: &[Instruction],
-    payer: &Pubkey,
-    lookup_tables: &[AddressLookupTableAccount],
-) -> String {
-    let message = v0::Message::try_compile(payer, instructions, lookup_tables, Hash::default())
-        .expect("compile v0 message");
-    let tx = VersionedTransaction {
-        signatures: vec![Signature::default()],
-        message: VersionedMessage::V0(message),
-    };
-    let bytes = bincode::serialize(&tx).expect("serialize versioned transaction");
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-fn payload_for(instructions: &[Instruction], payer: &Pubkey) -> SignablePayload {
-    payload_from_b64(&legacy_transaction_b64(instructions, payer))
-}
 
 fn payload_with_max_fee(
     instructions: &[Instruction],
@@ -87,57 +57,12 @@ fn try_payload_with_max_fee(
     )
 }
 
-fn top_level_value(payload: &SignablePayload, label: &str) -> Option<String> {
-    payload
-        .fields
-        .iter()
-        .filter_map(rendered_value)
-        .find(|(l, _)| l == label)
-        .map(|(_, v)| v)
-}
-
-fn top_level_labels(payload: &SignablePayload) -> Vec<&str> {
-    payload.fields.iter().map(|f| f.label().as_str()).collect()
-}
-
-fn preview_titles(payload: &SignablePayload) -> Vec<String> {
-    payload
-        .fields
-        .iter()
-        .filter_map(|f| match f {
-            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
-                preview_layout.title.as_ref().map(|t| t.text.clone())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn assert_no_summary(payload: &SignablePayload, default_title: &str) {
-    assert_eq!(payload.title, default_title);
-    assert_eq!(payload.subtitle, None);
-    for label in [
-        "From",
-        "Program",
-        "Amount",
-        "Instruction",
-        "Receive",
-        "Burn",
-    ] {
-        assert!(
-            top_level_value(payload, label).is_none(),
-            "no hoisted {label} row expected, got layout {:?}",
-            top_level_labels(payload)
-        );
-    }
-}
-
 /// A single-instruction deposit: the flat top-level layout, one row per
 /// counterpart of a contract-call payload, then the per-instruction detail
 /// block and the accounts block.
 #[test]
 fn test_single_deposit_gets_title_subtitle_and_rows() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
 
     let payload = payload_for(&[deposit], &payer);
@@ -195,7 +120,7 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
 
 #[test]
 fn test_single_withdraw_gets_title_subtitle_and_rows() {
-    let withdraw = instruction_from_fixture(&load_fixture("withdraw_jupusd"));
+    let withdraw = fixture("withdraw_jupusd");
     let payer = withdraw.accounts[0].pubkey;
 
     let payload = payload_for(&[withdraw], &payer);
@@ -223,16 +148,15 @@ fn test_single_withdraw_gets_title_subtitle_and_rows() {
 /// party, so the deposit still names it; the priority fee is hoisted in SOL.
 #[test]
 fn test_infrastructure_legs_keep_the_summary() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let f_token_mint = deposit.accounts[6].pubkey;
-    let create_ata =
-        crate::presets::associated_token_account::interface::create_associated_token_account_idempotent(
-            &payer,
-            &payer,
-            &f_token_mint,
-            &spl_token_interface::id(),
-        );
+    let create_ata = create_associated_token_account_idempotent(
+        &payer,
+        &payer,
+        &f_token_mint,
+        &spl_token_interface::id(),
+    );
     let compute_limit =
         solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
     let compute_price =
@@ -272,7 +196,7 @@ fn test_infrastructure_legs_keep_the_summary() {
 /// The caller's fee cap sits right after the hoisted rows, beside the priority fee.
 #[test]
 fn test_max_fee_follows_the_hoisted_priority_fee() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let compute_limit =
         solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
@@ -305,7 +229,7 @@ fn test_max_fee_follows_the_hoisted_priority_fee() {
 /// A cap below the base fee plus the committed priority fee is rejected, not rendered.
 #[test]
 fn test_max_fee_below_the_committed_fee_is_rejected() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let compute_limit =
         solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
@@ -329,7 +253,7 @@ fn test_max_fee_below_the_committed_fee_is_rejected() {
 /// budget request, 200_000 for the deposit) and says it is a bound. The caller raises the cap.
 #[test]
 fn test_uncapped_priority_fee_is_hoisted_as_a_maximum() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let compute_price =
         solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_price(
@@ -352,7 +276,7 @@ fn test_uncapped_priority_fee_is_hoisted_as_a_maximum() {
 /// A deposit with no compute-unit price pays only the base fee: no fee row.
 #[test]
 fn test_summary_without_a_unit_price_has_no_fee_row() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let compute_limit =
         solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
@@ -371,17 +295,13 @@ fn test_summary_without_a_unit_price_has_no_fee_row() {
 /// must not pass as the signer's account: unverified recipient, no summary.
 #[test]
 fn test_forged_token_program_keeps_default_title() {
-    let mut deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let mut deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let f_token_mint = deposit.accounts[6].pubkey;
     let bogus_token_program = Pubkey::new_unique();
     deposit.accounts[14].pubkey = bogus_token_program; // `token_program`
     deposit.accounts[2].pubkey =
-        crate::presets::associated_token_account::interface::get_associated_token_address_with_program_id(
-            &payer,
-            &f_token_mint,
-            &bogus_token_program,
-        ); // `recipient_token_account`
+        get_associated_token_address_with_program_id(&payer, &f_token_mint, &bogus_token_program); // `recipient_token_account`
 
     let payload = payload_for(&[deposit], &payer);
 
@@ -398,17 +318,16 @@ fn test_forged_token_program_keeps_default_title() {
 /// the summary, unlike the payer's own account creation above.
 #[test]
 fn test_ata_creation_for_another_wallet_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let f_token_mint = deposit.accounts[6].pubkey;
     let someone_else = Pubkey::new_unique();
-    let create_ata =
-        crate::presets::associated_token_account::interface::create_associated_token_account_idempotent(
-            &payer,
-            &someone_else,
-            &f_token_mint,
-            &spl_token_interface::id(),
-        );
+    let create_ata = create_associated_token_account_idempotent(
+        &payer,
+        &someone_else,
+        &f_token_mint,
+        &spl_token_interface::id(),
+    );
 
     let payload = payload_for(&[create_ata, deposit], &payer);
 
@@ -420,7 +339,7 @@ fn test_ata_creation_for_another_wallet_keeps_default_title() {
 /// with the signer. The instruction keeps its semantic view with the badged row.
 #[test]
 fn test_third_party_recipient_keeps_default_title() {
-    let mut withdraw = instruction_from_fixture(&load_fixture("withdraw_jupusd"));
+    let mut withdraw = fixture("withdraw_jupusd");
     let payer = withdraw.accounts[0].pubkey;
     withdraw.accounts[2].pubkey = Pubkey::new_unique(); // `recipient_token_account`
 
@@ -440,17 +359,16 @@ fn test_third_party_recipient_keeps_default_title() {
 /// that signer's lamports, not the fee payer's. That is not infrastructure.
 #[test]
 fn test_ata_creation_funded_by_another_signer_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let f_token_mint = deposit.accounts[6].pubkey;
     let other_funder = Pubkey::new_unique();
-    let create_ata =
-        crate::presets::associated_token_account::interface::create_associated_token_account_idempotent(
-            &other_funder,
-            &payer,
-            &f_token_mint,
-            &spl_token_interface::id(),
-        );
+    let create_ata = create_associated_token_account_idempotent(
+        &other_funder,
+        &payer,
+        &f_token_mint,
+        &spl_token_interface::id(),
+    );
 
     let payload = payload_for(&[create_ata, deposit], &payer);
 
@@ -462,7 +380,7 @@ fn test_ata_creation_funded_by_another_signer_keeps_default_title() {
 /// so the default title and layout are kept.
 #[test]
 fn test_deposit_plus_token_transfer_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let source_ata = deposit.accounts[1].pubkey;
     let transfer = spl_token_interface::instruction::transfer(
@@ -483,7 +401,7 @@ fn test_deposit_plus_token_transfer_keeps_default_title() {
 /// A native transfer is likewise a second action, not infrastructure.
 #[test]
 fn test_deposit_plus_sol_transfer_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let transfer =
         solana_system_interface::instruction::transfer(&payer, &Pubkey::new_unique(), 1_000);
@@ -497,7 +415,7 @@ fn test_deposit_plus_sol_transfer_keeps_default_title() {
 /// under-describe what is signed.
 #[test]
 fn test_two_user_actions_keep_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
 
     let payload = payload_for(&[deposit.clone(), deposit], &payer);
@@ -509,7 +427,7 @@ fn test_two_user_actions_keep_default_title() {
 /// hoisted From row would name the relayer, so no summary is proposed.
 #[test]
 fn test_relayed_deposit_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let relayer = Pubkey::new_unique();
 
     let payload = payload_for(&[deposit], &relayer);
@@ -522,7 +440,7 @@ fn test_relayed_deposit_keeps_default_title() {
 /// A caller-supplied `transaction_name` always wins over the summary.
 #[test]
 fn test_caller_title_disables_the_summary() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let wrapper =
         SolanaTransactionWrapper::from_string(&legacy_transaction_b64(&[deposit], &payer)).unwrap();
@@ -545,7 +463,7 @@ fn test_caller_title_disables_the_summary() {
 /// The v0 path applies the same rule with the same layout.
 #[test]
 fn test_v0_single_deposit_gets_summary() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
 
     let payload = payload_from_b64(&v0_transaction_b64(&[deposit], &payer, &[]));
@@ -576,7 +494,7 @@ fn test_v0_single_deposit_gets_summary() {
 /// hoisted rows, and the instruction keeps the generic view.
 #[test]
 fn test_v0_deposit_with_mints_in_lookup_table_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let mint = deposit.accounts[3].pubkey;
     let f_token_mint = deposit.accounts[6].pubkey;
@@ -600,7 +518,7 @@ fn test_v0_deposit_with_mints_in_lookup_table_keeps_default_title() {
 /// no hoisted rows, generic instruction view.
 #[test]
 fn test_v0_deposit_with_recipient_in_lookup_table_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let recipient = deposit.accounts[2].pubkey;
     let table = AddressLookupTableAccount {
@@ -623,7 +541,7 @@ fn test_v0_deposit_with_recipient_in_lookup_table_keeps_default_title() {
 /// it proposes no summary: the unverified recipient is not hoisted.
 #[test]
 fn test_v0_deposit_with_unverifiable_recipient_keeps_default_title() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let token_program = deposit.accounts[14].pubkey;
     let table = AddressLookupTableAccount {
@@ -650,7 +568,7 @@ fn test_each_user_action_family_proposes_a_summary() {
     let payer = Pubkey::new_unique();
     let token_program = spl_token_interface::id();
     let own_ata = |mint: &str| {
-        crate::presets::associated_token_account::interface::get_associated_token_address_with_program_id(
+        get_associated_token_address_with_program_id(
             &payer,
             &Pubkey::from_str(mint).unwrap(),
             &token_program,
@@ -714,7 +632,7 @@ fn test_each_user_action_family_proposes_a_summary() {
 /// in-crate preset.
 #[test]
 fn test_intermediate_output_matches_human_view() {
-    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let deposit = fixture("deposit_usdc");
     let payer = deposit.accounts[0].pubkey;
     let wrapper =
         SolanaTransactionWrapper::from_string(&legacy_transaction_b64(&[deposit], &payer)).unwrap();

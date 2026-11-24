@@ -1,0 +1,3311 @@
+{
+  "address": "9cYNMhVvGC2LhgJYZavKVWYZ8T1oqSHYt5ehTddP51yC",
+  "metadata": {
+    "name": "abrafi_staking_liquid",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Generic liquid staking program (sUSDAF, sSOLAF, sBTCAF)"
+  },
+  "docs": [
+    "Generic liquid staking program (sUSDAF, sSOLAF, sBTCAF)"
+  ],
+  "instructions": [
+    {
+      "name": "calculate_stake_amount",
+      "discriminator": [
+        196,
+        47,
+        197,
+        67,
+        127,
+        68,
+        25,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "docs": [
+            "Liquid staking state account (read-only)"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  98,
+                  114,
+                  97,
+                  102,
+                  105,
+                  95,
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquid_staking_token_mint",
+          "docs": [
+            "Liquid staking token mint (required for conversion calculations)"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "underlying_token_mint",
+          "docs": [
+            "Underlying token mint (required to read decimal count for share conversion)"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault account for storing underlying tokens"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "state"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "underlying_amount",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64"
+    },
+    {
+      "name": "calculate_unstake_amount",
+      "discriminator": [
+        225,
+        187,
+        224,
+        207,
+        85,
+        3,
+        35,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "docs": [
+            "Liquid staking state account (read-only)"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  98,
+                  114,
+                  97,
+                  102,
+                  105,
+                  95,
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquid_staking_token_mint",
+          "docs": [
+            "Liquid staking token mint (required for conversion calculations)"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "underlying_token_mint",
+          "docs": [
+            "Underlying token mint (required to read decimal count for share conversion)"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault account for storing underlying tokens"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "state"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "liquid_staking_amount",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64"
+    },
+    {
+      "name": "claim_unstake",
+      "discriminator": [
+        172,
+        113,
+        117,
+        178,
+        223,
+        245,
+        247,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "docs": [
+            "Liquid staking state account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  98,
+                  114,
+                  97,
+                  102,
+                  105,
+                  95,
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "docs": [
+            "User who wants to claim unstaked underlying tokens"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "underlying_token_mint",
+          "docs": [
+            "Underlying token mint"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "liquid_staking_token_mint",
+          "docs": [
+            "Liquid staking token mint"
+          ],
+          "writable": true,
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "user_liquid_staking_token_account",
+          "docs": [
+            "User's liquid staking token account (checked for frozen status)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "liquid_staking_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_underlying_token_account",
+          "docs": [
+            "User's underlying token account (destination for claimed tokens)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "Escrow token account for holding underlying tokens during unstake process"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user_unstake_request"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_unstake_request",
+          "docs": [
+            "User's unstake request account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  117,
+                  110,
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "associated_token_program",
+          "docs": [
+            "Associated token program for account closure"
+          ],
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program for transfers"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "claim_underlying_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "request_unstake",
+      "discriminator": [
+        44,
+        154,
+        110,
+        253,
+        160,
+        202,
+        54,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "docs": [
+            "Liquid staking state account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  98,
+                  114,
+                  97,
+                  102,
+                  105,
+                  95,
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "docs": [
+            "User who wants to unstake liquid staking tokens"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "liquid_staking_token_mint",
+          "docs": [
+            "The liquid staking token mint"
+          ],
+          "writable": true,
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "underlying_token_mint",
+          "docs": [
+            "The underlying token mint"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "user_liquid_staking_token_account",
+          "docs": [
+            "User's liquid staking token account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "liquid_staking_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault account for storing underlying tokens"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "state"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "state.underlying_token_mint",
+                "account": "ProgramState"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "Escrow token account for holding underlying tokens during unstake process (will be created if it doesn't exist)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user_unstake_request"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_unstake_request",
+          "docs": [
+            "User's unstake request account (will be created if it doesn't exist)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  117,
+                  110,
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "associated_token_program",
+          "docs": [
+            "Associated token program for account creation"
+          ],
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program for transfers and minting"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "docs": [
+            "System program for account creation"
+          ],
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "liquid_staking_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "restake",
+      "discriminator": [
+        97,
+        161,
+        241,
+        167,
+        6,
+        32,
+        213,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "docs": [
+            "Liquid staking state account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  98,
+                  114,
+                  97,
+                  102,
+                  105,
+                  95,
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "docs": [
+            "User who wants to restake their unstake request"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "liquid_staking_token_mint",
+          "docs": [
+            "Liquid staking token mint"
+          ],
+          "writable": true,
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "user_liquid_staking_token_account",
+          "docs": [
+            "User's liquid staking token account (destination for restaked tokens)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "state.liquid_staking_token_mint",
+                "account": "ProgramState"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "underlying_token_mint",
+          "docs": [
+            "Underlying token mint"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault account for storing underlying tokens"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "state"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "state.underlying_token_mint",
+                "account": "ProgramState"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "Escrow token account for holding underlying tokens during unstake process"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user_unstake_request"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "state.underlying_token_mint",
+                "account": "ProgramState"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_unstake_request",
+          "docs": [
+            "User's unstake request account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  117,
+                  110,
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "associated_token_program",
+          "docs": [
+            "Associated token program for account closure"
+          ],
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program for minting and transfers"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "restake_underlying_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "stake",
+      "discriminator": [
+        206,
+        176,
+        202,
+        18,
+        200,
+        209,
+        179,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "docs": [
+            "Liquid staking state account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  98,
+                  114,
+                  97,
+                  102,
+                  105,
+                  95,
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  105,
+                  110,
+                  103,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "docs": [
+            "User who wants to stake underlying tokens"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "liquid_staking_token_mint",
+          "docs": [
+            "The liquid staking token mint"
+          ],
+          "writable": true,
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "underlying_token_mint",
+          "docs": [
+            "The underlying token mint"
+          ],
+          "relations": [
+            "state"
+          ]
+        },
+        {
+          "name": "user_liquid_staking_token_account",
+          "docs": [
+            "User's liquid staking token account (will be created if it doesn't exist)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "liquid_staking_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_underlying_token_account",
+          "docs": [
+            "User's underlying token account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault account for storing underlying tokens"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "state"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "underlying_token_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "associated_token_program",
+          "docs": [
+            "Associated token program for account creation"
+          ],
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program for transfers and minting"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "docs": [
+            "System program for account creation"
+          ],
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "underlying_amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "ProgramState",
+      "discriminator": [
+        77,
+        209,
+        137,
+        229,
+        149,
+        67,
+        167,
+        230
+      ]
+    },
+    {
+      "name": "UserUnstakeRequest",
+      "discriminator": [
+        200,
+        96,
+        43,
+        85,
+        178,
+        195,
+        107,
+        187
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AccountFrozenEvent",
+      "discriminator": [
+        83,
+        200,
+        223,
+        28,
+        165,
+        34,
+        41,
+        80
+      ]
+    },
+    {
+      "name": "AccountThawedEvent",
+      "discriminator": [
+        172,
+        202,
+        68,
+        155,
+        173,
+        98,
+        79,
+        74
+      ]
+    },
+    {
+      "name": "AuthorityUpdateCancelled",
+      "discriminator": [
+        24,
+        65,
+        217,
+        67,
+        231,
+        224,
+        249,
+        9
+      ]
+    },
+    {
+      "name": "AuthorityUpdatePending",
+      "discriminator": [
+        253,
+        82,
+        169,
+        186,
+        22,
+        48,
+        73,
+        57
+      ]
+    },
+    {
+      "name": "AuthorityUpdated",
+      "discriminator": [
+        133,
+        207,
+        24,
+        122,
+        14,
+        234,
+        91,
+        34
+      ]
+    },
+    {
+      "name": "ExternalTreasuryUpdated",
+      "discriminator": [
+        109,
+        10,
+        90,
+        180,
+        159,
+        119,
+        203,
+        205
+      ]
+    },
+    {
+      "name": "MaxRemovalPercentageUpdated",
+      "discriminator": [
+        245,
+        166,
+        82,
+        87,
+        186,
+        224,
+        43,
+        215
+      ]
+    },
+    {
+      "name": "MinimumStakeAmountUpdated",
+      "discriminator": [
+        15,
+        123,
+        128,
+        17,
+        157,
+        76,
+        127,
+        108
+      ]
+    },
+    {
+      "name": "MinimumUnstakeAmountUpdated",
+      "discriminator": [
+        66,
+        163,
+        166,
+        132,
+        60,
+        147,
+        183,
+        172
+      ]
+    },
+    {
+      "name": "MintAuthorityTransferCancelled",
+      "discriminator": [
+        180,
+        91,
+        179,
+        146,
+        7,
+        146,
+        193,
+        188
+      ]
+    },
+    {
+      "name": "MintAuthorityTransferPending",
+      "discriminator": [
+        8,
+        139,
+        164,
+        179,
+        190,
+        23,
+        112,
+        69
+      ]
+    },
+    {
+      "name": "MintAuthorityTransferred",
+      "discriminator": [
+        23,
+        136,
+        155,
+        223,
+        27,
+        166,
+        51,
+        85
+      ]
+    },
+    {
+      "name": "ProgramInitialized",
+      "discriminator": [
+        43,
+        70,
+        110,
+        241,
+        199,
+        218,
+        221,
+        245
+      ]
+    },
+    {
+      "name": "StakingEnabled",
+      "discriminator": [
+        168,
+        137,
+        173,
+        55,
+        176,
+        251,
+        241,
+        150
+      ]
+    },
+    {
+      "name": "TokenMetadataUpdated",
+      "discriminator": [
+        61,
+        64,
+        22,
+        85,
+        194,
+        80,
+        154,
+        40
+      ]
+    },
+    {
+      "name": "UnderlyingRestaked",
+      "discriminator": [
+        156,
+        250,
+        221,
+        211,
+        51,
+        117,
+        119,
+        193
+      ]
+    },
+    {
+      "name": "UnderlyingStaked",
+      "discriminator": [
+        113,
+        1,
+        228,
+        224,
+        208,
+        218,
+        52,
+        19
+      ]
+    },
+    {
+      "name": "UnstakeClaimed",
+      "discriminator": [
+        113,
+        170,
+        166,
+        115,
+        37,
+        146,
+        159,
+        60
+      ]
+    },
+    {
+      "name": "UnstakeRequested",
+      "discriminator": [
+        21,
+        253,
+        177,
+        85,
+        129,
+        206,
+        42,
+        152
+      ]
+    },
+    {
+      "name": "UnstakingClaimEnabled",
+      "discriminator": [
+        164,
+        24,
+        29,
+        6,
+        136,
+        121,
+        58,
+        46
+      ]
+    },
+    {
+      "name": "UnstakingRequestEnabled",
+      "discriminator": [
+        29,
+        149,
+        82,
+        242,
+        221,
+        241,
+        245,
+        237
+      ]
+    },
+    {
+      "name": "WithdrawalDelayUpdated",
+      "discriminator": [
+        255,
+        161,
+        164,
+        83,
+        36,
+        246,
+        65,
+        108
+      ]
+    },
+    {
+      "name": "YieldRemoved",
+      "discriminator": [
+        32,
+        218,
+        153,
+        151,
+        241,
+        65,
+        68,
+        197
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidAmount",
+      "msg": "Invalid amount provided"
+    },
+    {
+      "code": 6001,
+      "name": "CalculationOverflow",
+      "msg": "Calculation overflow occurred"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidAuthority",
+      "msg": "Invalid authority provided"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidMint",
+      "msg": "Invalid mint"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidMintAccount",
+      "msg": "Invalid mint account provided"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidMetadata",
+      "msg": "Invalid metadata provided"
+    },
+    {
+      "code": 6006,
+      "name": "InsufficientVaultBalance",
+      "msg": "Insufficient vault balance"
+    },
+    {
+      "code": 6007,
+      "name": "InsufficientLiquidity",
+      "msg": "Insufficient liquidity"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidVaultBalance",
+      "msg": "Vault balance must be zero when first staking. Remove yield before staking"
+    },
+    {
+      "code": 6009,
+      "name": "StakingDisabled",
+      "msg": "Staking is currently disabled"
+    },
+    {
+      "code": 6010,
+      "name": "UnstakingDisabled",
+      "msg": "Unstaking is currently disabled"
+    },
+    {
+      "code": 6011,
+      "name": "AmountBelowMinimum",
+      "msg": "Amount below minimum stake amount"
+    },
+    {
+      "code": 6012,
+      "name": "AccountFrozen",
+      "msg": "Account is frozen"
+    },
+    {
+      "code": 6013,
+      "name": "AccountNotFrozen",
+      "msg": "Account is not frozen"
+    },
+    {
+      "code": 6014,
+      "name": "AmountBelowMinimumUnstake",
+      "msg": "Amount below minimum unstake amount"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidMinimumAmount",
+      "msg": "Invalid minimum amount provided"
+    },
+    {
+      "code": 6016,
+      "name": "NoUnstakeRequest",
+      "msg": "No unstake request found for user"
+    },
+    {
+      "code": 6017,
+      "name": "WithdrawalDelayNotExpired",
+      "msg": "Withdrawal delay not expired"
+    },
+    {
+      "code": 6018,
+      "name": "ExternalTreasuryNotSet",
+      "msg": "External treasury address not set"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidTreasuryAccount",
+      "msg": "Invalid treasury account provided"
+    },
+    {
+      "code": 6020,
+      "name": "TreasuryUpdateCooldownNotExpired",
+      "msg": "Treasury update cooldown not expired"
+    },
+    {
+      "code": 6021,
+      "name": "RemoveYieldCooldownNotExpired",
+      "msg": "Remove yield cooldown not expired"
+    },
+    {
+      "code": 6022,
+      "name": "RemovalAmountExceedsMaxPercentage",
+      "msg": "Removal amount exceeds maximum removal percentage"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidConfiguration",
+      "msg": "Invalid configuration value provided"
+    },
+    {
+      "code": 6024,
+      "name": "PendingAuthorityExpired",
+      "msg": "Pending authority transfer has expired"
+    }
+  ],
+  "types": [
+    {
+      "name": "AccountFrozenEvent",
+      "docs": [
+        "Event emitted when a token account is frozen"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "reason_code",
+            "type": "u32"
+          },
+          {
+            "name": "token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AccountThawedEvent",
+      "docs": [
+        "Event emitted when a token account is thawed"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityType",
+      "docs": [
+        "Authority type enum for authority update events"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Program"
+          },
+          {
+            "name": "Compliance"
+          },
+          {
+            "name": "Operations"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityUpdateCancelled",
+      "docs": [
+        "Event emitted when a pending authority update is cancelled"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority_type",
+            "type": {
+              "defined": {
+                "name": "AuthorityType"
+              }
+            }
+          },
+          {
+            "name": "current_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "cancelled_pending_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityUpdatePending",
+      "docs": [
+        "Event emitted when a pending authority is set (step 1 of authority transfer)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority_type",
+            "type": {
+              "defined": {
+                "name": "AuthorityType"
+              }
+            }
+          },
+          {
+            "name": "current_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "expiration_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityUpdated",
+      "docs": [
+        "Event emitted when an authority transfer is finalized (step 2 of authority transfer)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority_type",
+            "type": {
+              "defined": {
+                "name": "AuthorityType"
+              }
+            }
+          },
+          {
+            "name": "new_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExternalTreasuryUpdated",
+      "docs": [
+        "Event emitted when external treasury is updated"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_treasury",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MaxRemovalPercentageUpdated",
+      "docs": [
+        "Event emitted when the maximum removal percentage is updated"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "new_max_removal_percentage",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinimumStakeAmountUpdated",
+      "docs": [
+        "Event emitted when the minimum stake amount is updated"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "new_minimum_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinimumUnstakeAmountUpdated",
+      "docs": [
+        "Event emitted when the minimum unstake amount is updated"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "new_minimum_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintAuthorityTransferCancelled",
+      "docs": [
+        "Event emitted when mint authority transfer is cancelled"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "current_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "cancelled_pending_mint_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquid_staking_token_mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintAuthorityTransferPending",
+      "docs": [
+        "Event emitted when a pending mint authority is set (step 1 of mint authority transfer)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "current_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_mint_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "expiration_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "liquid_staking_token_mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintAuthorityTransferred",
+      "docs": [
+        "Event emitted when mint authority is transferred (step 2: finalized)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "new_mint_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquid_staking_token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_balance",
+            "docs": [
+              "Vault balance at the time of ownership transfer"
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramInitialized",
+      "docs": [
+        "Event emitted when the program is initialized"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "operations_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquid_staking_token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "underlying_token_mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramState",
+      "docs": [
+        "State account for the liquid staking program"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Version for future compatibility"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Authority that can add yield and update configuration"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority",
+            "docs": [
+              "Pending authority waiting for acceptance (set by current authority)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority_expiration_timestamp",
+            "docs": [
+              "Timestamp when pending_authority expires (must be finalized before this time)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "operations_authority",
+            "docs": [
+              "Operations authority for managing specific operations"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance_authority",
+            "docs": [
+              "Compliance authority for compliance-related operations"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "underlying_token_mint",
+            "docs": [
+              "Mint address of the underlying token"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "liquid_staking_token_mint",
+            "docs": [
+              "Mint address of the liquid staking token"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "state_bump",
+            "docs": [
+              "Bump seed for the state account PDA"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "is_staking_enabled",
+            "docs": [
+              "Boolean indicating if staking is enabled"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "is_unstaking_request_enabled",
+            "docs": [
+              "Boolean indicating if requesting unstaking is enabled"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "is_unstaking_claim_enabled",
+            "docs": [
+              "Boolean indicating if claiming unstaking is enabled"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "minimum_stake_amount",
+            "docs": [
+              "Minimum amount that can be staked"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "minimum_unstake_amount",
+            "docs": [
+              "Minimum amount that can be unstaked"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_removal_percentage",
+            "docs": [
+              "Maximum percentage of vault balance that can be removed per remove_yield call (in basis points, default: 500 = 5%)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "external_treasury_token_account",
+            "docs": [
+              "External treasury address for underlying tokens (can be set by authority)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury_cooldown_end_timestamp",
+            "docs": [
+              "Timestamp when the treasury update cooldown ends (allows yield removal after this time)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "remove_yield_cooldown_end_timestamp",
+            "docs": [
+              "Timestamp when the remove yield cooldown ends (allows next yield removal after this time)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "withdrawal_delay_seconds",
+            "docs": [
+              "Unstake delay for unstaking (default: 604800 = 7 days)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "pending_mint_authority",
+            "docs": [
+              "Pending mint authority waiting for acceptance (set by current authority)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_mint_authority_expiration_timestamp",
+            "docs": [
+              "Timestamp when pending_mint_authority expires (must be finalized before this time)"
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakingEnabled",
+      "docs": [
+        "Event emitted when staking is toggled"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "is_enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenMetadataUpdated",
+      "docs": [
+        "Event emitted when token metadata is created or updated"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "liquid_staking_token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "metadata_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "was_created",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnderlyingRestaked",
+      "docs": [
+        "Event emitted when an unstake request is restaked"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "underlying_amount",
+            "type": "u64"
+          },
+          {
+            "name": "liquid_staking_minted",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnderlyingStaked",
+      "docs": [
+        "Event emitted whenever underlying tokens are staked for liquid staking tokens"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "underlying_amount",
+            "type": "u64"
+          },
+          {
+            "name": "liquid_staking_minted",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnstakeClaimed",
+      "docs": [
+        "Event emitted when an unstake is claimed"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "underlying_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "remaining_unstake_request",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnstakeRequested",
+      "docs": [
+        "Event emitted when an unstake is requested"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquid_staking_burned",
+            "type": "u64"
+          },
+          {
+            "name": "underlying_amount",
+            "type": "u64"
+          },
+          {
+            "name": "request_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "withdrawal_delay_end_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnstakingClaimEnabled",
+      "docs": [
+        "Event emitted when unstaking claim is toggled"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "is_enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnstakingRequestEnabled",
+      "docs": [
+        "Event emitted when unstaking request is toggled"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "is_enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserUnstakeRequest",
+      "docs": [
+        "Per-user account to track unstake requests"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Version for future compatibility"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "request_timestamp",
+            "docs": [
+              "Timestamp when the request was created"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "withdrawal_delay_end_timestamp",
+            "docs": [
+              "Timestamp when the withdrawal delay ends (request_timestamp + unstake_cooldown_seconds)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for the user unstake request account PDA"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawalDelayUpdated",
+      "docs": [
+        "Event emitted when the withdrawal delay is updated"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "new_withdrawal_delay_seconds",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldRemoved",
+      "docs": [
+        "Event emitted when yield is removed to external treasury"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "external_treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

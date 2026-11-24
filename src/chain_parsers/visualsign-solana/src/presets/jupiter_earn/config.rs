@@ -1,6 +1,6 @@
-use super::JUPITER_EARN_PROGRAM_ID;
+use super::JUPITER_EARN;
+use crate::core::receipt_token;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::BTreeMap;
 
 pub struct JupiterEarnConfig;
 
@@ -11,12 +11,6 @@ impl SolanaIntegrationConfig for JupiterEarnConfig {
 
     fn data(&self) -> &SolanaIntegrationConfigData {
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
-        DATA.get_or_init(|| {
-            let mut programs = BTreeMap::new();
-            let mut instructions = BTreeMap::new();
-            instructions.insert("*", vec!["*"]);
-            programs.insert(JUPITER_EARN_PROGRAM_ID, instructions);
-            SolanaIntegrationConfigData { programs }
-        })
+        DATA.get_or_init(|| receipt_token::config_data(std::slice::from_ref(&JUPITER_EARN)))
     }
 }

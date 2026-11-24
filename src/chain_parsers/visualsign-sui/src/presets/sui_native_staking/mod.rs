@@ -4,7 +4,8 @@ use config::{Config, NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{
-    decode_number, get_index, parse_numeric_argument, parse_result_command_index, truncate_address,
+    get_index, parse_result_command_index, split_coin_amount,
+    truncate_address,
 };
 
 use crate::types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
@@ -51,8 +52,13 @@ impl SuiNativeStakingVisualizer {
         context: &VisualizerContext,
         pwc: &SuiProgrammableMoveCall,
     ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-        let amount = get_stake_amount(context.commands(), context.inputs(), &pwc.arguments)
-            .unwrap_or_default();
+        let amount = get_stake_amount(
+            context.commands(),
+            context.inputs(),
+            &pwc.arguments,
+            context.command_index(),
+        )
+        .unwrap_or_default();
         let receiver = get_stake_receiver(context.inputs(), &pwc.arguments).unwrap_or_default();
 
         {
@@ -190,36 +196,21 @@ fn get_stake_receiver(
     }
 }
 
+/// The stake coin is the result of a prior `SplitCoins` command, so the
+/// argument must be a `SuiArgument::Result(N)`. `parse_result_command_index`
+/// keeps `Input(N)` from being dereferenced against the commands vector.
 fn get_stake_amount(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
     args: &[SuiArgument],
+    consumer: usize,
 ) -> Result<Option<u64>, VisualSignError> {
-    // The stake coin is the result of a prior `SplitCoins` command, so the
-    // argument must be a `SuiArgument::Result(N)` whose `N` indexes the
-    // commands vector. Using `parse_result_command_index` keeps the semantic
-    // distinction explicit and prevents `Input(N)` from being silently
-    // dereferenced against the commands vector.
     let stake_arg = args
         .get(1)
         .copied()
         .ok_or(VisualSignError::MissingData("Stake argument missing".into()))?;
-    let command = commands
-        .get(parse_result_command_index(stake_arg)? as usize)
-        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
-
-    match command {
-        SuiCommand::SplitCoins(_, input_coin_args) if input_coin_args.len() == 1 => {
-            let amount_arg = inputs
-                .get(parse_numeric_argument(input_coin_args[0])? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Amount argument not found".into(),
-                ))?;
-
-            Ok(Some(decode_number::<u64>(amount_arg)?))
-        }
-        _ => Ok(None),
-    }
+    parse_result_command_index(stake_arg)?;
+    split_coin_amount(commands, inputs, stake_arg, consumer)
 }
 
 #[cfg(test)]

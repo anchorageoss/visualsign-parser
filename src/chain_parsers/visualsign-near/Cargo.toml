@@ -22,6 +22,7 @@ visualsign-intents = { path = "../../visualsign-intents" }
 near-sdk = { workspace = true }
 
 defuse-core = { workspace = true }
+defuse-nep413 = { workspace = true }
 
 [dev-dependencies]
 visualsign-intents = { path = "../../visualsign-intents", features = ["test-support"] }
