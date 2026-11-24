@@ -145,6 +145,32 @@ cargo run --manifest-path src/Cargo.toml --locked --release -q -p solana-idl-fet
 The record modes derive the record's path from `--idl` (`<file>.json` ->
 `<file>.provenance.json` next to it) and never touch the IDL itself.
 
+### Nightly sync from chain
+
+The nightly `solana-idl-nightly` workflow
+([`.github/workflows/solana-idl-nightly.yml`](https://github.com/anchorageoss/visualsign-parser/tree/main/.github/workflows/solana-idl-nightly.yml))
+keeps the committed IDLs in sync with the Anchor IDLs the programs publish
+on chain. It re-fetches every preset's on-chain IDL by calling the fetch
+workflow above (`workflow_call`, matrix over presets -- the matrix comes
+from `solana-idl-sync list-presets`, which walks
+`visualsign_solana::preset_idl_sources()`), and for each program whose
+fetched IDL differs from the committed file (compared as parsed JSON, not
+bytes) it replays recent successful mainnet transactions through
+`parser_cli` built before and after the IDL update, so the PR shows what
+the change does to real transactions. One bot PR (`bot/solana-idl-sync`)
+carries the IDLs, their new provenance records, and that report; the
+write-token job only applies and pushes files it re-validates against the
+preset paths. The driving tool lives in
+[`src/tools/solana-idl-sync`](https://github.com/anchorageoss/visualsign-parser/tree/main/src/tools/solana-idl-sync)
+(`list-presets` / `apply` / `replay` / `report`; its tests run without
+network or binaries -- the RPC and parser_cli sit behind traits).
+
+A preset added to `src/presets/` with a provenance record joins the sync
+automatically. IDLs whose `source` is not `onchain` are re-fetched and
+replaced the same way when the program publishes a newer on-chain IDL; if
+you want a preset pinned to a repo snapshot instead, say so in the PR that
+changes it.
+
 ### Parsing an instruction
 
 ```rust

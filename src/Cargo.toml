@@ -27,6 +27,7 @@ members = [
   "solana_test_utils",
   "tools/idl-meta",
   "tools/solana-idl-fetch",
+  "tools/solana-idl-sync",
 ]
 
 resolver = "3"
