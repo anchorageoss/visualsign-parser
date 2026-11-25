@@ -716,7 +716,8 @@ proptest! {
     }
 
     /// PERMIT2_PERMIT with FLAG_ALLOW_REVERT (0x8a) still executes on chain
-    /// (the dispatcher masks the command with 0x3f), so it must be shown.
+    /// (the dispatcher masks the command with its `COMMAND_TYPE_MASK`, 0x3f or
+    /// 0x7f by router version), so it must be shown.
     #[test]
     fn universal_router_allow_revert_permit_is_shown(
         permit in arb_permit_single(),

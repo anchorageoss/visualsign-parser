@@ -18,9 +18,9 @@
 //!
 //! All versions share the same `execute(bytes,bytes[],uint256)` ABI and dispatch under
 //! the single `UniswapUniversalRouter` contract type. Note: V2.x routers added Uniswap V4
-//! swap commands (the 0x10+ command range), which the command decoder does not yet handle;
-//! V4 swaps through a V2 router fall through to the unknown-command path until those decoders
-//! are added (tracked separately).
+//! swap commands (the 0x10+ command range). The command decoder names them but has no
+//! decoder for their inputs, which are shown as hex. On V1.2 routers the same bytes
+//! (`0x10` to `0x14`) are other commands and are shown as unknown.
 
 use crate::registry::{ContractRegistry, ContractType};
 use crate::token_metadata::{ErcStandard, TokenMetadata};
@@ -105,78 +105,107 @@ impl ContractType for Permit2Contract {}
 // pub struct UniswapV4PoolManager;
 // impl ContractType for UniswapV4PoolManager {}
 
+/// `COMMAND_TYPE_MASK` of the V1.2 and V2.0 routers (`Commands.sol` of tags v1.4.1 to v1.6.0 and 2.0.0).
+const COMMAND_TYPE_MASK_6_BIT: u8 = 0x3f;
+
+/// `COMMAND_TYPE_MASK` of the V2.1.1 and V2.2.0 routers (`Commands.sol` of tags 2.1.1 to 2.2.0).
+/// Bit 6 is part of the type: `0x40` is `ACROSS_V4_DEPOSIT_V3`.
+pub(crate) const COMMAND_TYPE_MASK_7_BIT: u8 = 0x7f;
+
+/// Version label of a registered Universal Router deployment.
+///
+/// The label is data, so the command mask follows from it and not from list order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RouterVersion {
+    V1_2,
+    V2_0,
+    V2_1_1,
+    V2_2_0,
+}
+
+impl RouterVersion {
+    /// `COMMAND_TYPE_MASK` of the `Commands.sol` deployed for this version.
+    pub(crate) const fn command_type_mask(self) -> u8 {
+        match self {
+            Self::V1_2 | Self::V2_0 => COMMAND_TYPE_MASK_6_BIT,
+            Self::V2_1_1 | Self::V2_2_0 => COMMAND_TYPE_MASK_7_BIT,
+        }
+    }
+}
+
 /// Uniswap protocol configuration
 pub struct UniswapConfig;
 
 impl UniswapConfig {
-    /// Returns every known Universal Router deployment address (as strings) for a chain,
-    /// across all shipped versions, with the canonical V1.2 address first.
+    /// Returns every known Universal Router deployment (version and address string) for a
+    /// chain, across all shipped versions, with the canonical V1.2 address first.
     ///
     /// Source: universal-router-sdk constants
     /// <https://github.com/Uniswap/sdks/blob/main/sdks/universal-router-sdk/src/utils/constants.ts>
-    fn universal_router_address_strs(
+    fn universal_router_deployments(
         chain_id: u64,
-    ) -> Result<&'static [&'static str], UniswapConfigError> {
-        // Ordering: V1.2, V2.0, V2.1.1, V2.2.0 (only versions actually deployed on the chain).
-        let addrs: &[&str] = match chain_id {
+    ) -> Result<&'static [(RouterVersion, &'static str)], UniswapConfigError> {
+        use RouterVersion::{V1_2, V2_0, V2_1_1, V2_2_0};
+        // The canonical V1.2 address stays first (see `universal_router_address`).
+        let addrs: &[(RouterVersion, &str)] = match chain_id {
             // Mainnets
             networks::ethereum::MAINNET => &[
-                "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // V1.2
-                "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", // V2.0
-                "0x4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA", // V2.1.1
-                "0xCb640A86855f1A828c27241bA364348de28abe66", // V2.2.0
+                (V1_2, "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"),
+                (V2_0, "0x66a9893cc07d91d95644aedd05d03f95e1dba8af"),
+                (V2_1_1, "0x4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA"),
+                (V2_2_0, "0xCb640A86855f1A828c27241bA364348de28abe66"),
             ],
             networks::optimism::MAINNET => &[
-                "0xCb1355ff08Ab38bBCE60111F1bb2B784bE25D7e8", // V1.2
-                "0x851116d9223fabed8e56c0e6b8ad0c31d98b3507", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0xCb1355ff08Ab38bBCE60111F1bb2B784bE25D7e8"),
+                (V2_0, "0x851116d9223fabed8e56c0e6b8ad0c31d98b3507"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::bsc::MAINNET => &[
-                "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265", // V1.2
-                "0x1906c1d672b88cd1b9ac7593301ca990f94eae07", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265"),
+                (V2_0, "0x1906c1d672b88cd1b9ac7593301ca990f94eae07"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::polygon::MAINNET => &[
-                "0xec7BE89e9d109e7e3Fec59c222CF297125FEFda2", // V1.2
-                "0x1095692a6237d83c6a72f3f5efedb9a670c49223", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0xec7BE89e9d109e7e3Fec59c222CF297125FEFda2"),
+                (V2_0, "0x1095692a6237d83c6a72f3f5efedb9a670c49223"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::worldchain::MAINNET => &[
-                "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // V1.2
-                "0x8ac7bee993bb44dab564ea4bc9ea67bf9eb5e743", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"),
+                (V2_0, "0x8ac7bee993bb44dab564ea4bc9ea67bf9eb5e743"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::base::MAINNET => &[
-                "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // V1.2
-                "0x6ff5693b99212da76ad316178a184ab56d299b43", // V2.0
-                "0xfdf682f51fe81aa4898f0ae2163d8a55c127fbc7", // V2.1.1
+                (V1_2, "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"),
+                (V2_0, "0x6ff5693b99212da76ad316178a184ab56d299b43"),
+                (V2_1_1, "0xfdf682f51fe81aa4898f0ae2163d8a55c127fbc7"),
             ],
             networks::arbitrum::MAINNET => &[
-                "0x5E325eDA8064b456f4781070C0738d849c824258", // V1.2
-                "0xa51afafe0263b40edaef0df8781ea9aa03e381a3", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0x5E325eDA8064b456f4781070C0738d849c824258"),
+                (V2_0, "0xa51afafe0263b40edaef0df8781ea9aa03e381a3"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::celo::MAINNET => &[
-                "0x643770e279d5d0733f21d6dc03a8efbabf3255b4", // V1.2
-                "0xcb695bc5D3Aa22cAD1E6DF07801b061a05A0233A", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0x643770e279d5d0733f21d6dc03a8efbabf3255b4"),
+                (V2_0, "0xcb695bc5D3Aa22cAD1E6DF07801b061a05A0233A"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::avalanche::MAINNET => &[
-                "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265", // V1.2
-                "0x94b75331ae8d42c1b61065089b7d48fe14aa73b7", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265"),
+                (V2_0, "0x94b75331ae8d42c1b61065089b7d48fe14aa73b7"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             networks::blast::MAINNET => &[
-                "0x643770E279d5D0733F21d6DC03A8efbABf3255B4", // V1.2
-                "0xeabbcb3e8e415306207ef514f660a3f820025be3", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
+                (V1_2, "0x643770E279d5D0733F21d6DC03A8efbABf3255B4"),
+                (V2_0, "0xeabbcb3e8e415306207ef514f660a3f820025be3"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
             ],
             // Testnets
             networks::ethereum::SEPOLIA => &[
-                "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // V1.2
-                "0x3a9d48ab9751398bbfa63ad67599bb04e4bdf98b", // V2.0
-                "0x8B844f885672f333Bc0042cB669255f93a4C1E6b", // V2.1.1
-                "0xB0C89059d7190EDb17eFF19829cc009cEe923916", // V2.2.0
+                (V1_2, "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"),
+                (V2_0, "0x3a9d48ab9751398bbfa63ad67599bb04e4bdf98b"),
+                (V2_1_1, "0x8B844f885672f333Bc0042cB669255f93a4C1E6b"),
+                (V2_2_0, "0xB0C89059d7190EDb17eFF19829cc009cEe923916"),
             ],
             _ => return Err(UniswapConfigError::UnsupportedChain(chain_id)),
         };
@@ -188,7 +217,7 @@ impl UniswapConfig {
     /// This is the first entry of [`Self::universal_router_addresses`]; for the full set
     /// of deployed versions use that method instead.
     pub fn universal_router_address(chain_id: u64) -> Result<Address, UniswapConfigError> {
-        let addr_str = Self::universal_router_address_strs(chain_id)?
+        let (_, addr_str) = Self::universal_router_deployments(chain_id)?
             .first()
             .ok_or(UniswapConfigError::UnsupportedChain(chain_id))?;
         addr_str
@@ -200,13 +229,26 @@ impl UniswapConfig {
     /// shipped versions (V1.2, V2.0, V2.1.1, V2.2.0). All versions share the same
     /// `execute` ABI and are dispatched under the `UniswapUniversalRouter` contract type.
     pub fn universal_router_addresses(chain_id: u64) -> Result<Vec<Address>, UniswapConfigError> {
-        Self::universal_router_address_strs(chain_id)?
+        Self::universal_router_deployments(chain_id)?
             .iter()
-            .map(|s| {
+            .map(|(_, s)| {
                 s.parse()
                     .map_err(|_| UniswapConfigError::InvalidAddress((*s).to_string()))
             })
             .collect()
+    }
+
+    /// Returns the version registered for the router at `router` on `chain_id`,
+    /// or `None` when it is not registered there.
+    pub(crate) fn universal_router_version(
+        chain_id: u64,
+        router: Address,
+    ) -> Option<RouterVersion> {
+        Self::universal_router_deployments(chain_id)
+            .ok()?
+            .iter()
+            .find(|(_, s)| s.parse::<Address>().is_ok_and(|a| a == router))
+            .map(|(version, _)| *version)
     }
 
     /// Returns the chain IDs where Universal Router V1.2 is deployed

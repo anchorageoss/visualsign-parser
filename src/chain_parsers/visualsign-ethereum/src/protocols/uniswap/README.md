@@ -43,5 +43,10 @@ Reference: [Dispatcher.sol](https://github.com/Uniswap/universal-router/blob/mai
 | 0x13 | V4_INITIALIZE_POOL          | `(PoolKey, uint160)`                                    | -       |
 | 0x14 | V4_POSITION_MANAGER_CALL    | `(bytes)`                                               | Default |
 | 0x21 | EXECUTE_SUB_PLAN            | `(bytes commands, bytes[] inputs)`                      | -       |
+| 0x40 | ACROSS_V4_DEPOSIT_V3        | `(AcrossV4DepositV3Params)`                             | Default |
+
+The command mask and the commands depend on the router version. V1.2 and V2.0 routers mask
+with `0x3f`, V2.1.1 and V2.2.0 routers with `0x7f`. `0x40` exists on V2.1.1 and V2.2.0 only.
+On V1.2 routers `0x10` to `0x14` are other commands and are shown as unknown.
 
 **Status:** `Custom` = human-readable, `Default` = raw hex, `-` = not implemented

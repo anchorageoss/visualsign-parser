@@ -4,6 +4,7 @@ use chrono::{TimeZone, Utc};
 use num_enum::TryFromPrimitive;
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
+use crate::protocols::uniswap::config::{COMMAND_TYPE_MASK_7_BIT, RouterVersion, UniswapConfig};
 use crate::protocols::uniswap::contracts::permit2::Permit2Visualizer;
 use crate::registry::{ContractRegistry, ContractType};
 use crate::visualizer::CalldataVisualizer;
@@ -175,21 +176,45 @@ pub enum Command {
     V4PositionManagerCall = 0x14,
 
     ExecuteSubPlan = 0x21,
+
+    /// Exists on V2.1.1 and V2.2.0 routers only, whose mask keeps bit 6.
+    AcrossV4DepositV3 = 0x40,
 }
 
 /// `FLAG_ALLOW_REVERT` in a command byte: the command may fail without
 /// reverting the whole `execute` call.
 const FLAG_ALLOW_REVERT: u8 = 0x80;
 
-/// Mask that leaves the command type of a command byte (`COMMAND_TYPE_MASK`).
-const COMMAND_TYPE_MASK: u8 = 0x3f;
+/// Mask used when the router is not known. It keeps bit 6, so a byte of
+/// `0x40` and up is never shown as a different, lower command. A router that
+/// is not known may run a 6-bit mask, so [`is_not_a_command_of`] still shows
+/// `0x40` as unknown there.
+const DEFAULT_COMMAND_TYPE_MASK: u8 = COMMAND_TYPE_MASK_7_BIT;
+
+/// True when `cmd` is not what the router of `version` runs for that type.
+///
+/// - On V1.2 routers the types `0x10` to `0x14` are other commands (SEAPORT_V1_5,
+///   LOOKS_RARE_V2, NFTX, CRYPTOPUNKS) or none, not the V4 and position-manager
+///   commands the [`Command`] enum names.
+/// - `ACROSS_V4_DEPOSIT_V3` exists on V2.1.1 and V2.2.0 routers only. For any other
+///   router, including an unknown one, `0x40` is not named.
+///
+/// Such types are shown as unknown, with their input.
+fn is_not_a_command_of(version: Option<RouterVersion>, cmd: Command) -> bool {
+    match cmd {
+        Command::AcrossV4DepositV3 => {
+            !matches!(version, Some(RouterVersion::V2_1_1 | RouterVersion::V2_2_0))
+        }
+        _ => version == Some(RouterVersion::V1_2) && (0x10..=0x14).contains(&(cmd as u8)),
+    }
+}
 
 /// One command byte of an `execute` call, as the on-chain dispatcher reads it.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct MappedCommand {
     /// Position of the byte in `commands`, which is also its index in `inputs`.
     raw_index: usize,
-    /// The command type (`byte & 0x3f`), or `None` when it is not a known [`Command`].
+    /// The command type (`byte & COMMAND_TYPE_MASK`), or `None` when it is not a known [`Command`].
     command: Option<Command>,
     /// The command type bits, kept for display when `command` is `None`.
     type_bits: u8,
@@ -213,18 +238,22 @@ impl MappedCommand {
 
 /// Maps every raw command byte to a [`MappedCommand`].
 ///
-/// The dispatcher masks each byte with `0x3f` and reads `FLAG_ALLOW_REVERT`
-/// from bit 7, so both are decoded here. No byte is dropped, and
-/// `raw_index` is the position the Universal Router uses to index into the
-/// `inputs` array (`dispatch(commands[i], inputs[i])`).
-fn map_commands(raw: &[u8]) -> Vec<MappedCommand> {
+/// The dispatcher masks each byte with the router's `COMMAND_TYPE_MASK`
+/// (`0x3f` or `0x7f`, depending on the deployed version) and reads
+/// `FLAG_ALLOW_REVERT` from bit 7, so both are decoded here. No byte is
+/// dropped, and `raw_index` is the position the Universal Router uses to
+/// index into the `inputs` array (`dispatch(commands[i], inputs[i])`).
+fn map_commands(raw: &[u8], version: Option<RouterVersion>) -> Vec<MappedCommand> {
+    let type_mask = version.map_or(DEFAULT_COMMAND_TYPE_MASK, RouterVersion::command_type_mask);
     raw.iter()
         .enumerate()
         .map(|(raw_index, &b)| {
-            let type_bits = b & COMMAND_TYPE_MASK;
+            let type_bits = b & type_mask;
             MappedCommand {
                 raw_index,
-                command: Command::try_from(type_bits).ok(),
+                command: Command::try_from(type_bits)
+                    .ok()
+                    .filter(|cmd| !is_not_a_command_of(version, *cmd)),
                 type_bits,
                 allow_revert: b & FLAG_ALLOW_REVERT != 0,
             }
@@ -251,9 +280,23 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> Option<SignablePayloadField> {
+        self.visualize_tx_commands_for_router(input, chain_id, None, registry)
+    }
+
+    /// Like [`Self::visualize_tx_commands`], but reads command bytes with the
+    /// `COMMAND_TYPE_MASK` of the router at `router`. An unregistered or
+    /// absent router gets the 7-bit mask, and `0x40` is shown as unknown.
+    pub(crate) fn visualize_tx_commands_for_router(
+        &self,
+        input: &[u8],
+        chain_id: u64,
+        router: Option<Address>,
+        registry: Option<&ContractRegistry>,
+    ) -> Option<SignablePayloadField> {
         if input.len() < 4 {
             return None;
         }
+        let version = router.and_then(|r| UniswapConfig::universal_router_version(chain_id, r));
 
         // Try decoding with deadline first (3-parameter version)
         if let Ok(call) = IUniversalRouter::execute_0Call::abi_decode(input) {
@@ -273,6 +316,7 @@ impl UniversalRouterVisualizer {
                 &call.inputs,
                 deadline,
                 chain_id,
+                version,
                 registry,
             );
         }
@@ -284,6 +328,7 @@ impl UniversalRouterVisualizer {
                 &call.inputs,
                 None,
                 chain_id,
+                version,
                 registry,
             );
         }
@@ -297,9 +342,10 @@ impl UniversalRouterVisualizer {
         inputs: &[alloy_primitives::Bytes],
         deadline: Option<String>,
         chain_id: u64,
+        version: Option<RouterVersion>,
         registry: Option<&ContractRegistry>,
     ) -> Option<SignablePayloadField> {
-        let mapped = map_commands(commands);
+        let mapped = map_commands(commands, version);
         // Display-only view of the command names for the fallback text.
         let command_labels: Vec<String> = mapped.iter().map(MappedCommand::label).collect();
         let mut detail_fields = Vec::new();
@@ -1600,9 +1646,10 @@ impl crate::visualizer::ContractVisualizer for UniversalRouterContractVisualizer
         let (contract_registry, _visualizer_builder) =
             crate::registry::ContractRegistry::with_default_protocols();
 
-        if let Some(field) = self.inner.visualize_tx_commands(
+        if let Some(field) = self.inner.visualize_tx_commands_for_router(
             &context.calldata,
             context.chain_id,
+            Some(context.current_contract),
             Some(&contract_registry),
         ) {
             let annotated = visualsign::AnnotatedPayloadField {
@@ -1621,7 +1668,10 @@ impl crate::visualizer::ContractVisualizer for UniversalRouterContractVisualizer
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::{VisualizerContext, VisualizerContextParams};
+    use crate::visualizer::ContractVisualizer;
     use alloy_primitives::{Bytes, U256};
+    use std::sync::Arc;
     use visualsign::{
         AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
         SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout,
@@ -1993,7 +2043,7 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_unrecognized_command() {
-        // 0xff is not a valid Command (type 0x3f, allow-revert set), so it is
+        // 0xff is not a valid Command (type 0x7f, allow-revert set), so it is
         // shown as unknown with its own input. The `Transfer` byte is at raw
         // index 1, so it must pair with `inputs[1] = 0x02` (NOT
         // `inputs[0] = 0x01`).
@@ -2008,7 +2058,7 @@ mod tests {
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "Uniswap Universal Router Execute: 2 commands ([Unknown command 0x3f (allow revert), Transfer])"
+                    fallback_text: "Uniswap Universal Router Execute: 2 commands ([Unknown command 0x7f (allow revert), Transfer])"
                         .to_string(),
                     label: "Universal Router".to_string(),
                 },
@@ -2026,13 +2076,13 @@ mod tests {
                                 signable_payload_field: SignablePayloadField::PreviewLayout {
                                     common: SignablePayloadFieldCommon {
                                         fallback_text:
-                                            "Unknown command 0x3f (allow revert) Input: 0x01"
+                                            "Unknown command 0x7f (allow revert) Input: 0x01"
                                                 .to_string(),
                                         label: "Command 1".to_string(),
                                     },
                                     preview_layout: SignablePayloadFieldPreviewLayout {
                                         title: Some(SignablePayloadFieldTextV2 {
-                                            text: "Unknown command 0x3f (allow revert)"
+                                            text: "Unknown command 0x7f (allow revert)"
                                                 .to_string(),
                                         }),
                                         subtitle: Some(SignablePayloadFieldTextV2 {
@@ -2168,11 +2218,10 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_unknown_between_known_preserves_alignment() {
-        // Three commands where the middle byte is unknown. After filtering,
-        // the surviving commands sit at raw indices 0 and 2, so they must
-        // pair with `inputs[0]` and `inputs[2]` respectively. Pairing with
-        // post-filter indices 0 and 1 would silently shift the second
-        // command's input.
+        // Three commands where the middle byte is unknown. All three are shown.
+        // The known commands sit at raw indices 0 and 2, so they must pair with
+        // `inputs[0]` and `inputs[2]` respectively. Pairing the second one with
+        // `inputs[1]`, the unknown command's slot, would shift its input.
         let commands = vec![
             Command::V3SwapExactIn as u8,
             0xff, // unknown
@@ -2207,7 +2256,7 @@ mod tests {
         };
         assert_eq!(
             c1.fallback_text,
-            "Unknown command 0x3f (allow revert) Input: 0xbb"
+            "Unknown command 0x7f (allow revert) Input: 0xbb"
         );
 
         let SignablePayloadField::PreviewLayout { common: c2, .. } =
@@ -2222,7 +2271,7 @@ mod tests {
 
     #[test]
     fn test_map_commands_masks_flag_and_keeps_every_byte() {
-        let mapped = map_commands(&[0x8a, 0x10, 0x3f, 0xbf]);
+        let mapped = map_commands(&[0x8a, 0x10, 0x3f, 0xbf], Some(RouterVersion::V2_0));
         let summary: Vec<(usize, Option<Command>, bool)> = mapped
             .iter()
             .map(|m| (m.raw_index, m.command, m.allow_revert))
@@ -2238,6 +2287,155 @@ mod tests {
         );
         assert_eq!(mapped[0].label(), "Permit2Permit (allow revert)");
         assert_eq!(mapped[3].label(), "Unknown command 0x3f (allow revert)");
+    }
+
+    const ROUTER_V1_2: &str = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD";
+    const ROUTER_V2_0: &str = "0x66a9893cc07d91d95644aedd05d03f95e1dba8af";
+    const ROUTER_V2_1_1: &str = "0x4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA";
+    const ROUTER_V2_2_0: &str = "0xCb640A86855f1A828c27241bA364348de28abe66";
+
+    /// Summary line of `execute(commands, [0xaa; n])` shown for the router on mainnet.
+    fn summary_for_router(router: &str, commands: &[u8]) -> String {
+        let inputs = commands.iter().map(|_| vec![0xaa]).collect();
+        let input = encode_execute_call(commands, inputs, 0);
+        let router: Address = router.parse().unwrap();
+        let field = UniversalRouterVisualizer {}
+            .visualize_tx_commands_for_router(&input, 1, Some(router), None)
+            .unwrap();
+        let SignablePayloadField::PreviewLayout { common, .. } = field else {
+            panic!("Expected PreviewLayout");
+        };
+        common.fallback_text
+    }
+
+    #[test]
+    fn test_command_type_mask_of_the_four_mainnet_routers() {
+        let mask = |router: &str| {
+            UniswapConfig::universal_router_version(1, router.parse().unwrap())
+                .map(RouterVersion::command_type_mask)
+        };
+        assert_eq!(mask(ROUTER_V1_2), Some(0x3f));
+        assert_eq!(mask(ROUTER_V2_0), Some(0x3f));
+        assert_eq!(mask(ROUTER_V2_1_1), Some(0x7f));
+        assert_eq!(mask(ROUTER_V2_2_0), Some(0x7f));
+        // Not a registered router, and a registered router on another chain.
+        assert_eq!(mask("0x1111111111111111111111111111111111111111"), None);
+        assert_eq!(
+            UniswapConfig::universal_router_version(10, ROUTER_V2_2_0.parse().unwrap()),
+            None
+        );
+    }
+
+    fn visualize_through_context(router: &str, commands: &[u8]) -> String {
+        struct NoTokens;
+        impl crate::context::RegistryBackend for NoTokens {
+            fn format_token_amount(&self, amount: u128, _decimals: u8) -> String {
+                amount.to_string()
+            }
+        }
+
+        let (_, visualizer_builder) = crate::registry::ContractRegistry::with_default_protocols();
+        let inputs = commands.iter().map(|_| vec![0xaa]).collect();
+        let context = VisualizerContext::new(VisualizerContextParams {
+            chain_id: 1,
+            sender: Address::ZERO,
+            current_contract: router.parse().unwrap(),
+            calldata: encode_execute_call(commands, inputs, 0),
+            registry: Arc::new(NoTokens),
+            visualizers: Arc::new(visualizer_builder.build()),
+            abi_registry: None,
+        });
+        let fields = UniversalRouterContractVisualizer::new()
+            .visualize(&context)
+            .unwrap()
+            .unwrap();
+        let SignablePayloadField::PreviewLayout { common, .. } = &fields[0].signable_payload_field
+        else {
+            panic!("Expected PreviewLayout");
+        };
+        common.fallback_text.clone()
+    }
+
+    #[test]
+    fn test_contract_visualizer_reads_the_mask_from_current_contract() {
+        let on_v2_1_1 = visualize_through_context(ROUTER_V2_1_1, &[0x40]);
+        assert!(on_v2_1_1.contains("[AcrossV4DepositV3]"), "{on_v2_1_1}");
+        assert!(!on_v2_1_1.contains("V3SwapExactIn"), "{on_v2_1_1}");
+
+        let on_v2_0 = visualize_through_context(ROUTER_V2_0, &[0x40]);
+        assert!(on_v2_0.contains("[V3SwapExactIn]"), "{on_v2_0}");
+    }
+
+    #[test]
+    fn test_v2_router_0x40_is_across_deposit_not_a_swap() {
+        for router in [ROUTER_V2_1_1, ROUTER_V2_2_0] {
+            let text = summary_for_router(router, &[0x40]);
+            assert!(text.contains("[AcrossV4DepositV3]"), "{text}");
+            assert!(!text.contains("V3SwapExactIn"), "{text}");
+        }
+    }
+
+    #[test]
+    fn test_v2_router_0xc0_shows_allow_revert_and_is_not_a_swap() {
+        let text = summary_for_router(ROUTER_V2_1_1, &[0xc0]);
+        assert!(
+            text.contains("[AcrossV4DepositV3 (allow revert)]"),
+            "{text}"
+        );
+        assert!(!text.contains("V3SwapExactIn"), "{text}");
+    }
+
+    #[test]
+    fn test_6_bit_routers_dispatch_0x40_as_command_0x00() {
+        // V1.2 and V2.0 routers mask with 0x3f, so on chain `0x40` runs as V3_SWAP_EXACT_IN.
+        for router in [ROUTER_V1_2, ROUTER_V2_0] {
+            let text = summary_for_router(router, &[0x40, 0xc0]);
+            assert!(
+                text.contains("[V3SwapExactIn, V3SwapExactIn (allow revert)]"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_v1_2_router_0x20_is_its_own_command_not_command_0x00() {
+        // The V1.2 routers run `Commands.sol` with mask 0x3f and `0x20` is
+        // SEAPORT_V1_4. It is shown as unknown, with its input, never as a swap.
+        let text = summary_for_router(ROUTER_V1_2, &[0x20]);
+        assert!(text.contains("[Unknown command 0x20]"), "{text}");
+        assert!(!text.contains("V3SwapExactIn"), "{text}");
+    }
+
+    /// Summary line for `commands` sent to `router` on `chain_id`, `None` meaning no router given.
+    fn summary_for_unknown_router(chain_id: u64, router: Option<Address>) -> String {
+        let commands = [0x40, 0xc0, 0x10, 0x21, 0x20];
+        let inputs = commands.iter().map(|_| vec![0xaa]).collect();
+        let input = encode_execute_call(&commands, inputs, 0);
+        let field = UniversalRouterVisualizer {}
+            .visualize_tx_commands_for_router(&input, chain_id, router, None)
+            .unwrap();
+        let SignablePayloadField::PreviewLayout { common, .. } = field else {
+            panic!("Expected PreviewLayout");
+        };
+        common.fallback_text
+    }
+
+    #[test]
+    fn test_unknown_router_keeps_bit_6_and_does_not_name_0x40() {
+        // The 7-bit mask keeps `0x40` and `0xc0` apart from type 0x00. A router that
+        // may run a 6-bit mask is not told it has ACROSS_V4_DEPOSIT_V3, so both are
+        // unknown. `0x20` is no command of the enum under either mask.
+        let expected = "Uniswap Universal Router Execute: 5 commands ([Unknown command 0x40, \
+                        Unknown command 0x40 (allow revert), V4Swap, ExecuteSubPlan, \
+                        Unknown command 0x20])";
+        let unregistered: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        // A registered V2.2.0 address, on a chain where it is not registered.
+        let wrong_chain: Address = ROUTER_V2_2_0.parse().unwrap();
+        assert_eq!(summary_for_unknown_router(1, None), expected);
+        assert_eq!(summary_for_unknown_router(1, Some(unregistered)), expected);
+        assert_eq!(summary_for_unknown_router(10, Some(wrong_chain)), expected);
     }
 
     #[test]
