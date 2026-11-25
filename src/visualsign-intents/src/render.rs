@@ -735,6 +735,20 @@ pub(crate) fn render_single(
         }
     }
     let mut fields = render_envelope(payload)?;
+    // The verifier refuses a payload naming another contract, so this can't
+    // execute; but it renders like a normal intent, and a NEP-413 envelope
+    // takes the verifying contract from its free-text `recipient`.
+    if payload.verifying_contract.as_str() != network.verifier() {
+        fields.push(diagnostic(
+            "verifying-contract",
+            &format!(
+                "the verifying contract is {}, not {}, the NEAR Intents verifier on this \
+                 network; the verifier would reject this signature",
+                payload.verifying_contract,
+                network.verifier()
+            ),
+        )?);
+    }
     if payload.deadline.has_expired() {
         fields.push(diagnostic(
             "deadline",
