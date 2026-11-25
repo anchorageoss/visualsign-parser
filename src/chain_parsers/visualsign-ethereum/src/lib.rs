@@ -777,7 +777,12 @@ fn convert_to_visual_sign_payload(
             if contract_type
                 == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id()
                 && let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
-                    .visualize_tx_commands(input, chain_id_val, Some(layered_registry.global()))
+                    .visualize_tx_commands_for_router(
+                        input,
+                        chain_id_val,
+                        Some(to_address),
+                        Some(layered_registry.global()),
+                    )
             {
                 input_fields.push(field);
             }

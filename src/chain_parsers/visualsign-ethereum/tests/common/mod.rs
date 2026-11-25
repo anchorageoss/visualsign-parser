@@ -1,5 +1,5 @@
-//! Shared helpers for the Permit2 rendering tests (`permit2_mainnet.rs` and
-//! `permit2_proptest.rs`).
+//! Shared helpers for the Permit2 and Universal Router rendering tests
+//! (`permit2_mainnet.rs`, `permit2_proptest.rs` and `universal_router_mask.rs`).
 //!
 //! The ABI definitions here are written from the Permit2 and Universal Router
 //! sources, independently of the parser's own `sol!` blocks, so the tests
@@ -142,7 +142,9 @@ pub fn builtin_token(token: Address) -> Option<(&'static str, u8)> {
 }
 
 /// Universal Router command bytes (Commands.sol). The dispatcher masks each
-/// byte with `COMMAND_TYPE_MASK` (0x3f); bit 7 is `FLAG_ALLOW_REVERT`.
+/// byte with `COMMAND_TYPE_MASK`; bit 7 is `FLAG_ALLOW_REVERT`. The commands
+/// below are below 0x10, so they decode the same under the 0x3f mask of the
+/// V1.2 and V2.0 routers and the 0x7f mask of V2.1.1 and V2.2.0.
 pub const CMD_PERMIT2_TRANSFER_FROM: u8 = 0x02;
 pub const CMD_PERMIT2_PERMIT_BATCH: u8 = 0x03;
 pub const CMD_PERMIT2_PERMIT: u8 = 0x0a;
